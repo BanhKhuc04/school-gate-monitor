@@ -14,10 +14,13 @@ CAMERA_INDEX = 0  # webcam mặc định
 # Model paths
 HELMET_MODEL_PATH = str(BASE_DIR / "models" / "helmet_best.pt")
 PLATE_MODEL_PATH = str(BASE_DIR / "models" / "plate_best.pt")
+# yolov8n.pt COCO - ultralytics tự tải khi khởi tạo, không cần đặt vào models/
+PERSON_MODEL_PATH = "yolov8n.pt"
 
 # Detection thresholds
 HELMET_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho helmet detection
-PLATE_CONF_THRESHOLD = 0.25   # Ngưỡng confidence cho plate detection
+PLATE_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho plate detection
+PERSON_CONF_THRESHOLD = 0.4  # Ngưỡng confidence cho person detection (COCO)
 
 # Frame processing
 FRAME_SKIP = 2  # Xử lý cách 1 frame để giảm tải CPU (1 = mọi frame, 2 = cách 1 frame)

@@ -20,6 +20,10 @@ data/snapshots/
 
 # Models
 models/*.pt
+yolov8n.pt
+
+# graphify analysis output
+graphify-out/
 
 # Environment
 .env

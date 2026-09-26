@@ -14,8 +14,8 @@ import numpy as np
 from typing import Optional
 
 from app.config import (
-    CAMERA_INDEX, HELMET_MODEL_PATH, PLATE_MODEL_PATH,
-    HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD,
+    CAMERA_INDEX, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
+    HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, 
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR
 )
@@ -27,8 +27,9 @@ from app.db import get_vehicle_by_plate, add_violation_event
 
 # Màu vẽ bounding box
 COLOR_HELMET = (0, 255, 0)      # Xanh lá - có mũ
-COLOR_NO_HELMET = (0, 0, 255)   # Đỏ - không mũ  
+COLOR_NO_HELMET = (0, 0, 255)   # Đỏ - không mũ
 COLOR_PLATE = (255, 255, 0)     # Cyan - biển số
+COLOR_PERSON = (255, 128, 0)    # Cam - người (COCO)
 THICKNESS = 2
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -68,6 +69,12 @@ class VideoPipeline:
             PLATE_MODEL_PATH, conf_threshold=PLATE_CONF_THRESHOLD
         )
         print("[Pipeline] Plate model loaded:", self._plate_detector.class_names)
+
+        print("[Pipeline] Loading person model (COCO)...")
+        self._person_detector = HelmetPlateDetector(
+            PERSON_MODEL_PATH, conf_threshold=PERSON_CONF_THRESHOLD
+        )
+        print("[Pipeline] Person model loaded:", self._person_detector.class_names)
         
         # Frame counter cho FRAME_SKIP
         self._frame_count = 0
@@ -143,20 +150,36 @@ class VideoPipeline:
                         self._latest_frame = frame
                     continue
                 
-                # Detect helmet
+                # Detect person (COCO → lọc class 'person')
+                raw_person_dets = self._person_detector.detect(frame)
+                person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
+
+                # Vẽ box person (cam) — debug
+                for det in person_dets:
+                    self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
+
+                # Không có person nào → bỏ qua toàn bộ frame
+                if not person_dets:
+                    with self._lock:
+                        self._latest_frame = frame
+                    continue
+
+                # Detect helmet & plate
                 helmet_dets = self._helmet_detector.detect(frame)
-                
-                # Detect plate
                 plate_dets = self._plate_detector.detect(frame)
-                
-                # Xử lý vi phạm: OCR + tra DB + ghi log + cảnh báo
-                self._process_violations(frame, helmet_dets, plate_dets)
-                
-                # Vẽ box helmet
+
+                # Gom helmet + plate vào từng nhóm theo person
+                groups = self._group_by_person(person_dets, helmet_dets, plate_dets)
+
+                # Xử lý vi phạm cho TỪNG nhóm riêng biệt
+                for group in groups:
+                    self._process_violations(frame, group['helmet_dets'], group['plate_dets'])
+
+                # Vẽ box helmet (theo nhóm)
                 for det in helmet_dets:
                     self._draw_detection(frame, det, COLOR_HELMET, COLOR_NO_HELMET)
-                
-                # Vẽ box plate
+
+                # Vẽ box plate (theo nhóm)
                 for det in plate_dets:
                     self._draw_detection(frame, det, COLOR_PLATE, COLOR_PLATE)
                 
@@ -205,10 +228,60 @@ class VideoPipeline:
         
         # Text
         cv2.putText(frame, text, (x1, y1 - 2), FONT, 0.5, (255, 255, 255), 1)
-    
+
+    def _group_by_person(self, person_dets: list, helmet_dets: list,
+                         plate_dets: list) -> list[dict]:
+        """
+        Gom helmet + plate detections vào từng nhóm theo person box.
+
+        Logic:
+        - helmet/no-helmet → gán vào person mà tâm điểm helmet nằm trong box person.
+        - plate → gán vào person có x-center gần nhất, trong phạm vi chiều rộng box person.
+
+        Trả về list nhóm, mỗi nhóm: {helmet_dets: [...], plate_dets: [...]}.
+        """
+        groups = []
+
+        for person in person_dets:
+            px1, py1, px2, py2 = person.bbox
+            pcx = (px1 + px2) / 2   # person center x
+            pcy = (py1 + py2) / 2   # person center y
+            p_width = px2 - px1
+
+            group_helmets = []
+            group_plates = []
+
+            # Gán helmet: tâm helmet nằm trong box person
+            for h in helmet_dets:
+                hx1, hy1, hx2, hy2 = h.bbox
+                hcx = (hx1 + hx2) / 2
+                hcy = (hy1 + hy2) / 2
+                if px1 <= hcx <= px2 and py1 <= hcy <= py2:
+                    group_helmets.append(h)
+
+            # Gán plate: x-center gần nhất, trong phạm vi chiều rộng person
+            best_dist = float('inf')
+            best_plate = None
+            for p in plate_dets:
+                bx1, by1, bx2, by2 = p.bbox
+                bpcx = (bx1 + bx2) / 2
+                dist = abs(bpcx - pcx)
+                if dist < best_dist and dist <= p_width:
+                    best_dist = dist
+                    best_plate = p
+            if best_plate is not None:
+                group_plates.append(best_plate)
+
+            groups.append({
+                'helmet_dets': group_helmets,
+                'plate_dets': group_plates,
+            })
+
+        return groups
+
     def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list):
         """
-        Xử lý toàn bộ logic vi phạm:
+        Xử lý toàn bộ logic vi phạm cho MỘT nhóm (1 person):
         1. OCR đọc biển số
         2. Tra whitelist trong DB
         3. Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
@@ -219,24 +292,23 @@ class VideoPipeline:
         # Phân loại helmet detections
         has_with_helmet = any('With Helmet' in d.class_name for d in helmet_dets)
         has_without_helmet = any('Without Helmet' in d.class_name for d in helmet_dets)
-        
-        # Đọc biển số từ plate detections
+
+        # Đọc biển số từ plate detections (chỉ 1 plate gán vào nhóm này)
         plate_read = ""
         if plate_dets:
-            # Chọn plate có confidence cao nhất
-            best_plate = max(plate_dets, key=lambda d: d.confidence)
+            best_plate = plate_dets[0]  # Đã được gán ở _group_by_person
             x1, y1, x2, y2 = best_plate.bbox
             crop = frame[y1:y2, x1:x2]
             if crop.size > 0 and crop.shape[0] > 20 and crop.shape[1] > 40:
                 plate_read = read_plate(crop)
-        
+
         # Tra whitelist
         plate_matched = None
         if plate_read:
             vehicle = get_vehicle_by_plate(plate_read)
             if vehicle:
                 plate_matched = vehicle['plate_number']
-        
+
         # Xác định helmet_status
         if has_with_helmet:
             helmet_status = "helmet"
@@ -244,11 +316,7 @@ class VideoPipeline:
             helmet_status = "no_helmet"
         else:
             helmet_status = "unknown"
-        
-        # Không có người trong khung hình → bỏ qua
-        if not helmet_dets:
-            return
-        
+
         # Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
         violation_types = []
         

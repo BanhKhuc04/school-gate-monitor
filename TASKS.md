@@ -24,8 +24,7 @@
 
 - [x] **Bước 6 — Đối chiếu đầy đủ + ghi log vi phạm** — code review phát hiện bug (ghi log vi phạm cả khi phòng trống không ai), đã fix (guard `helmet_dets` rỗng → bỏ qua). Logic OCR→whitelist→violation_type→cooldown→snapshot→DB→alert đã đúng theo PLAN.md.
 
-- [ ] **Bước 7 — Hoàn thiện (không bắt buộc cho MVP)**
-  - `README.md` hướng dẫn cài đặt/chạy, `.gitignore` (`venv/`, `data/app.db`, `data/snapshots/`, `models/*.pt`), `git init` + commit đầu tiên.
+- [x] **Bước 7 — Hoàn thiện** — README.md, .gitignore, git init + commit đầu tiên đã xong. **MVP hoàn chỉnh.**
 
 ## Lộ trình giai đoạn sau (chưa làm, chỉ để tham khảo — xem chi tiết trong PLAN.md)
 
