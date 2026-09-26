@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from app.cv.pipeline import get_pipeline
+from app.auth import require_role
 
 router = APIRouter(prefix="/api/dev", tags=["dev"])
 
@@ -14,6 +15,7 @@ router = APIRouter(prefix="/api/dev", tags=["dev"])
 def trigger_test_alert(
     violation_type: str = "NO_HELMET",
     plate_read: str = "TEST123",
+    _current_user: dict = require_role("admin"),
 ):
     """
     Push a fake violation alert into the WebSocket queue.

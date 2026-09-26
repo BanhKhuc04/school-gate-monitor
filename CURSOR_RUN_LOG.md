@@ -162,14 +162,21 @@
 2. ✅ Thêm Vite proxy config cho dev mode
 3. ✅ Fix GuardPage + AlertBanner WS/URL issues
 4. ✅ Fix SPA fallback order (410 routes → assets → catch-all)
+5. ✅ Bảo mật `POST /api/dev/trigger-test-alert` — thêm `require_role("admin")`
+6. ✅ Cập nhật README.md với hướng dẫn dev + production, danh sách route, seed users
 
 ## Việc thêm CHƯA làm (hết giờ/tài nguyên):
 - Chưa viết pytest backend test (httpx đã cài)
-- Chưa thêm loading state (spinner/skeleton) cho các trang
-- Chưa cập nhật README.md
-- Chưa bảo mật endpoint `POST /api/dev/trigger-test-alert`
+- Chưa cập nhật README với screenshot giao diện
 
 ---
+
+## Commit history (cuối cùng)
+| Hash | Mô tả |
+|------|--------|
+| `6e18f8d` | Extras: secure dev endpoint, update README |
+| `eb4b1a3` | Build complete: React SPA + role-based auth (Bước 8-13) |
+| `3852565` | Add test infrastructure: pytest+httpx, playwright, POST /api/dev/trigger-test-alert |
 
 ## Không làm (ngoài phạm vi):
 - 50cc classification
