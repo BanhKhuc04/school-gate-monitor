@@ -6,13 +6,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from app.config import SNAPSHOTS_DIR
-import os
 
 from app.api.guard import router as guard_router
-from app.api.admin import router as admin_router, vehicles_router, stats_router
+from app.api.admin import vehicles_router, stats_router, violations_router
 from app.api.auth import router as auth_router
+from app.api.dev import router as dev_router
 from app.cv.pipeline import start_pipeline, stop_pipeline
 from app.db import init_db
 
@@ -25,23 +24,23 @@ async def lifespan(app: FastAPI):
     init_db()
     print("[App] Starting pipeline thread...")
     start_pipeline()
-    
+
     yield
-    
+
     # Shutdown
     print("[App] Stopping pipeline thread...")
     stop_pipeline()
 
 
 def create_app() -> FastAPI:
-    """Tạo FastAPI app với Jinja2 templates."""
+    """Tạo FastAPI app."""
     app = FastAPI(
         title="School Gate Monitor",
-        description="Hệ thống giám sát cổng trường - MVP",
-        version="1.0.0",
+        description="Hệ thống giám sát cổng trường - SPA",
+        version="2.0.0",
         lifespan=lifespan
     )
-    
+
     # CORS for SPA frontend
     app.add_middleware(
         CORSMiddleware,
@@ -51,31 +50,45 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Templates
-    templates_dir = os.path.join(os.path.dirname(__file__), "templates")
-    app.state.jinja2_env = Jinja2Templates(directory=templates_dir)
-    
-    # Mount static files nếu có
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
-    if os.path.exists(static_dir):
+    # Mount static files if present
+    static_dir = __import__("os").path.join(__import__("os").path.dirname(__file__), "static")
+    if __import__("os").path.exists(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
-    
+
+    # Mount snapshots dir for violation images
+    if __import__("os").path.exists(SNAPSHOTS_DIR):
+        app.mount("/media", StaticFiles(directory=SNAPSHOTS_DIR), name="media")
+
     # Routers
     app.include_router(guard_router)
-    app.include_router(admin_router)
     app.include_router(auth_router)
     app.include_router(vehicles_router)
+    app.include_router(violations_router)
     app.include_router(stats_router)
 
-    # Mount snapshots directory
-    app.mount("/media", StaticFiles(directory=SNAPSHOTS_DIR), name="media")
-    
     return app
 
 
 # App instance
 app = create_app()
 
+# ─── Dev/test endpoints ───────────────────────────────────────────────────────
+app.include_router(dev_router)
+
+# ─── SPA fallback — must be last, after all routers/mounts ──────────────────
+frontend_dist = __import__("os").path.join(
+    __import__("os").path.dirname(__import__("os").path.dirname(__file__)),
+    "frontend", "dist"
+)
+if __import__("os").path.exists(frontend_dist):
+    from fastapi.responses import FileResponse
+    assets_dir = __import__("os").path.join(frontend_dist, "assets")
+    if __import__("os").path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        return FileResponse(__import__("os").path.join(frontend_dist, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn
