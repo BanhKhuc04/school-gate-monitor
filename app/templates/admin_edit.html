@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sửa xe - Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .form-container { background: #f9f9f9; padding: 20px; border-radius: 5px; max-width: 400px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input { width: 100%; padding: 8px; box-sizing: border-box; }
+        .btn { padding: 8px 15px; cursor: pointer; }
+        .btn-save { background: #4CAF50; color: white; border: none; }
+        .btn-cancel { background: #9e9e9e; color: white; border: none; text-decoration: none; padding: 8px 15px; }
+        .error { color: red; background: #ffebee; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Sửa thông tin xe</h1>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    <div class="form-container">
+        <form method="post" action="/admin/vehicles/{{ vehicle.id }}/edit">
+            <div class="form-group">
+                <label>Biển số:</label>
+                <input type="text" name="plate_number" value="{{ vehicle.plate_number }}" required>
+            </div>
+            <div class="form-group">
+                <label>Tên học sinh:</label>
+                <input type="text" name="student_name" value="{{ vehicle.student_name }}" required>
+            </div>
+            <div class="form-group">
+                <label>Lớp:</label>
+                <input type="text" name="student_class" value="{{ vehicle.student_class }}" required>
+            </div>
+            <div>
+                <button type="submit" class="btn btn-save">Lưu</button>
+                <a href="/admin" class="btn btn-cancel">Hủy</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
