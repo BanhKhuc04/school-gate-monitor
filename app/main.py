@@ -81,7 +81,17 @@ frontend_dist = __import__("os").path.join(
     "frontend", "dist"
 )
 if __import__("os").path.exists(frontend_dist):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse
+
+    # Old Jinja HTML routes — return 410 Gone so they don't accidentally
+    # get caught by the SPA fallback (which must come AFTER this block)
+    @app.get("/admin")
+    @app.get("/admin/vehicles/{_}")
+    @app.get("/admin/violations")
+    @app.get("/guard")
+    async def old_jinja_routes(_: str = ""):
+        return JSONResponse({"detail": "Gone — frontend moved to React SPA"}, status_code=410)
+
     assets_dir = __import__("os").path.join(frontend_dist, "assets")
     if __import__("os").path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")

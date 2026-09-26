@@ -1,25 +1,18 @@
 """
 Guard API routes.
-- GET /guard → guard.html
 - GET /guard/video_feed → MJPEG stream
 - WS /guard/ws → WebSocket cho cảnh báo vi phạm
 """
 import asyncio
 import json
 import jwt as _jwt
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException, Query
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.cv.pipeline import get_pipeline
 from app.auth import decode_access_token
 
 router = APIRouter(prefix="/guard", tags=["guard"])
-
-
-@router.get("/", response_class=HTMLResponse)
-async def guard_page(request: Request):
-    """Trả về trang guard.html."""
-    return request.app.state.jinja2_env.get_template("guard.html").render()
 
 
 @router.get("/video_feed")
