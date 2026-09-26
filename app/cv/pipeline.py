@@ -78,6 +78,11 @@ class VideoPipeline:
         
         # Frame counter cho FRAME_SKIP
         self._frame_count = 0
+
+        # Cache kết quả detect để vẽ box mượt giữa các lần detect thật
+        self._last_person_dets: list = []
+        self._last_helmet_dets: list = []
+        self._last_plate_dets: list = []
         
         # Cooldown cho cảnh báo WebSocket
         self._last_alert_time: float = 0.0
@@ -145,7 +150,13 @@ class VideoPipeline:
                 
                 # Xử lý cách frame
                 if self._frame_count % FRAME_SKIP != 0:
-                    # Vẫn lưu frame thô để stream không bị gián đoạn
+                    # Vẽ box từ cache (kết quả detect gần nhất) lên frame hiện tại
+                    for det in self._last_helmet_dets:
+                        self._draw_detection(frame, det, COLOR_HELMET, COLOR_NO_HELMET)
+                    for det in self._last_plate_dets:
+                        self._draw_detection(frame, det, COLOR_PLATE, COLOR_PLATE)
+                    for det in self._last_person_dets:
+                        self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
                     with self._lock:
                         self._latest_frame = frame
                     continue
@@ -153,10 +164,6 @@ class VideoPipeline:
                 # Detect person (COCO → lọc class 'person')
                 raw_person_dets = self._person_detector.detect(frame)
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
-
-                # Vẽ box person (cam) — debug
-                for det in person_dets:
-                    self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
 
                 # Không có person nào → bỏ qua toàn bộ frame
                 if not person_dets:
@@ -167,6 +174,11 @@ class VideoPipeline:
                 # Detect helmet & plate
                 helmet_dets = self._helmet_detector.detect(frame)
                 plate_dets = self._plate_detector.detect(frame)
+
+                # Cập nhật cache để nhánh skip vẽ box mượt
+                self._last_person_dets = person_dets
+                self._last_helmet_dets = helmet_dets
+                self._last_plate_dets = plate_dets
 
                 # Gom helmet + plate vào từng nhóm theo person
                 groups = self._group_by_person(person_dets, helmet_dets, plate_dets)
@@ -182,6 +194,10 @@ class VideoPipeline:
                 # Vẽ box plate (theo nhóm)
                 for det in plate_dets:
                     self._draw_detection(frame, det, COLOR_PLATE, COLOR_PLATE)
+
+                # Vẽ box person (cam) — SAU khi OCR đã xong
+                for det in person_dets:
+                    self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
                 
                 # Lưu frame đã vẽ
                 with self._lock:

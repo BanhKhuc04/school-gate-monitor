@@ -5,16 +5,23 @@ Admin API routes.
 - POST /admin/vehicles/{id}/edit → sửa xe (redirect)
 - POST /admin/vehicles/{id}/delete → xóa xe (redirect)
 - GET /admin/violations → bảng vi phạm
+
+- JSON API /api/vehicles (role admin)
 """
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, HTTPException, Depends, status
 from fastapi.responses import RedirectResponse, HTMLResponse
 
 from app.db import (
     add_vehicle, get_vehicle_by_plate, list_vehicles,
-    update_vehicle, delete_vehicle, list_violations
+    update_vehicle, delete_vehicle, list_violations, get_violation_stats
 )
+from app.schemas import VehicleIn
+from app.auth import require_role
+
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+vehicles_router = APIRouter(prefix="/api", tags=["vehicles"])
+stats_router = APIRouter(prefix="/api/stats", tags=["stats"])
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -99,3 +106,75 @@ async def violations_page(request: Request):
         request=request,
         violations=violations
     )
+
+
+# ─── JSON API ────────────────────────────────────────────────────────────────
+
+json_router = APIRouter(prefix="/api/vehicles", tags=["vehicles"])
+
+
+@json_router.get("")
+def list_vehicles_json(current_user: dict = Depends(require_role("admin"))):
+    """GET /api/vehicles — list all registered vehicles (admin only)."""
+    return list_vehicles()
+
+
+@json_router.post("", status_code=status.HTTP_201_CREATED)
+def add_vehicle_json(
+    body: VehicleIn,
+    current_user: dict = Depends(require_role("admin"))
+):
+    """POST /api/vehicles — add a new vehicle (admin only)."""
+    try:
+        vehicle_id = add_vehicle(body.plate_number, body.student_name, body.student_class)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
+    # Return the newly created vehicle
+    return get_vehicle_by_plate(body.plate_number)
+
+
+@json_router.put("/{vehicle_id}")
+def update_vehicle_json(
+    vehicle_id: int,
+    body: VehicleIn,
+    current_user: dict = Depends(require_role("admin"))
+):
+    """PUT /api/vehicles/{id} — update a vehicle (admin only)."""
+    success = update_vehicle(vehicle_id, body.plate_number, body.student_name, body.student_class)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+    return get_vehicle_by_plate(body.plate_number)
+
+
+@json_router.delete("/{vehicle_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_vehicle_json(vehicle_id: int, current_user: dict = Depends(require_role("admin"))):
+    """DELETE /api/vehicles/{id} — delete a vehicle (admin only)."""
+    success = delete_vehicle(vehicle_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+    return None
+
+
+@vehicles_router.get("/violations")
+def list_violations_json(limit: int = 50, current_user: dict = Depends(require_role("admin"))):
+    """GET /api/violations — list violation events with snapshot_url (admin only)."""
+    rows = list_violations(limit=limit)
+    result = []
+    for row in rows:
+        row_dict = dict(row)
+        if row_dict.get("snapshot_path"):
+            filename = row_dict["snapshot_path"].split("/")[-1]
+            row_dict["snapshot_url"] = f"/media/{filename}"
+        else:
+            row_dict["snapshot_url"] = None
+        result.append(row_dict)
+    return result
+
+
+@stats_router.get("/summary")
+def get_stats_summary(current_user: dict = Depends(require_role("management", "admin"))):
+    """GET /api/stats/summary — violation statistics (management or admin)."""
+    return get_violation_stats()

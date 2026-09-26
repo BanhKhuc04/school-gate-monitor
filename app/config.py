@@ -9,7 +9,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Camera
-CAMERA_INDEX = 0  # webcam mặc định
+CAMERA_INDEX = 1  # OBS Virtual Camera (index 0 la webcam vat ly, xac nhan qua probe)
 
 # Model paths
 HELMET_MODEL_PATH = str(BASE_DIR / "models" / "helmet_best.pt")
@@ -38,3 +38,9 @@ VIDEO_HEIGHT = 480
 # Violation cooldown (seconds)
 VIOLATION_COOLDOWN = 60  # Không cảnh báo lại cùng biển số trong 60 giây (cho DB)
 ALERT_COOLDOWN = 5       # Cooldown cảnh báo WebSocket (giây)
+
+# JWT Authentication
+# secrets.token_hex(32) → hardcoded (không sinh lại mỗi lần khởi động)
+JWT_SECRET_KEY = "a3f8c1b9e2d47f0a5c6e8b3d9f1e2a4c7b5d9f3e1a8c6b4d2f0e7a3c5b9d"
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 12

@@ -15,7 +15,10 @@ class WebcamStream:
             width: Chiều rộng frame
             height: Chiều cao frame
         """
-        self.cap = cv2.VideoCapture(source)
+        # CAP_DSHOW ép cố định để source (index) luôn trỏ đúng 1 thiết bị —
+        # mặc định (CAP_ANY) rơi vào MSMF trên Windows, đánh số thiết bị khác
+        # DSHOW nên cùng 1 số index có thể ra 2 camera khác nhau tùy backend.
+        self.cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
             raise RuntimeError(f"Không mở được webcam (source={source})")
         

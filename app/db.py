@@ -5,7 +5,8 @@ Schema: registered_vehicles, violation_events (xem PLAN.md)
 import sqlite3
 import threading
 import os
-from typing import Optional, List
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List, Dict, Any
 
 from app.config import DB_PATH, SNAPSHOTS_DIR
 from app.cv.ocr import normalize_plate
@@ -63,6 +64,17 @@ def init_db():
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_violation_events_timestamp 
             ON violation_events(timestamp)
+        ''')
+        
+        # Bảng người dùng
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                username      TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role          TEXT NOT NULL CHECK (role IN ('admin', 'security', 'management')),
+                created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            )
         ''')
         
         conn.commit()
@@ -266,5 +278,111 @@ def list_violations(limit: int = 50) -> List[dict]:
             (limit,)
         )
         return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def create_user(username: str, password_hash: str, role: str) -> int:
+    """
+    Tạo user mới.
+    
+    Args:
+        username: Tên đăng nhập (UNIQUE)
+        password_hash: bcrypt hash
+        role: 'admin' | 'security' | 'management'
+        
+    Returns:
+        ID của user mới
+        
+    Raises:
+        ValueError: Nếu username đã tồn tại
+    """
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+                (username, password_hash, role)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Username '{username}' already exists")
+        finally:
+            conn.close()
+
+
+def get_user_by_username(username: str) -> Optional[dict]:
+    """
+    Tìm user theo username.
+
+    Returns:
+        dict hoặc None nếu không tìm thấy
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+    finally:
+        conn.close()
+
+
+def get_violation_stats() -> Dict[str, Any]:
+    """
+    Thống kê vi phạm.
+
+    Returns:
+        {
+            "total_today": int,          -- đếm vi phạm hôm nay (theo date của timestamp)
+            "total_week": int,           -- đếm vi phạm 7 ngày gần nhất
+            "by_type": {                -- đếm theo loại vi phạm
+                "NO_HELMET": int,
+                "PLATE_NOT_REGISTERED": int,
+                "PLATE_UNREADABLE": int,
+                "MULTIPLE": int,
+            }
+        }
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Today: date(timestamp) = date('now', 'localtime')
+        cursor.execute("SELECT COUNT(*) FROM violation_events WHERE date(timestamp) = date('now', 'localtime')")
+        total_today = cursor.fetchone()[0]
+
+        # Last 7 days
+        cursor.execute(
+            "SELECT COUNT(*) FROM violation_events WHERE timestamp >= datetime('now', 'localtime', '-7 days')"
+        )
+        total_week = cursor.fetchone()[0]
+
+        # By violation_type (all time — change to 7 days if preferred)
+        by_type: Dict[str, int] = {
+            "NO_HELMET": 0,
+            "PLATE_NOT_REGISTERED": 0,
+            "PLATE_UNREADABLE": 0,
+            "MULTIPLE": 0,
+        }
+        cursor.execute(
+            '''SELECT violation_type, COUNT(*) as cnt
+               FROM violation_events
+               GROUP BY violation_type'''
+        )
+        for row in cursor.fetchall():
+            vt = row["violation_type"]
+            if vt in by_type:
+                by_type[vt] = row["cnt"]
+
+        return {
+            "total_today": total_today,
+            "total_week": total_week,
+            "by_type": by_type,
+        }
     finally:
         conn.close()
