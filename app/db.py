@@ -83,6 +83,9 @@ def init_db():
     finally:
         conn.close()
 
+    # Also create face recognition tables
+    _init_face_tables()
+
 
 def add_vehicle(plate_number: str, student_name: str, student_class: str) -> int:
     """
@@ -579,3 +582,139 @@ def clear_violation_snapshot_paths(older_than_days: int = 90) -> int:
             return cursor.rowcount
         finally:
             conn.close()
+
+
+# ─── Face recognition tables ─────────────────────────────────────────────────────
+
+def _init_face_tables():
+    """Create face tables if they don't exist (idempotent)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS face_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label_name TEXT NOT NULL,
+                vehicle_id INTEGER,
+                embedding BLOB NOT NULL,
+                photo_path TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (vehicle_id) REFERENCES registered_vehicles(id) ON DELETE SET NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS face_match_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                matched_label TEXT,
+                similarity REAL,
+                vehicle_id INTEGER,
+                snapshot_path TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (vehicle_id) REFERENCES registered_vehicles(id) ON DELETE SET NULL
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Initialize face tables on module import
+_init_face_tables()
+
+
+def add_face_embedding(
+    label_name: str,
+    embedding: bytes,
+    photo_path: str = None,
+    vehicle_id: int = None,
+) -> int:
+    """Lưu một face embedding mới."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO face_embeddings (label_name, vehicle_id, embedding, photo_path) VALUES (?, ?, ?, ?)",
+            (label_name, vehicle_id, embedding, photo_path),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_face_embeddings() -> List[dict]:
+    """Lấy tất cả face embeddings metadata (không trả bytes)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, label_name, vehicle_id, photo_path, created_at FROM face_embeddings ORDER BY created_at ASC"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_face_embedding_by_id(embedding_id: int) -> Optional[dict]:
+    """Lấy một embedding theo ID (bao gồm bytes)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, label_name, vehicle_id, embedding, photo_path, created_at FROM face_embeddings WHERE id = ?",
+            (embedding_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def delete_face_embedding(embedding_id: int) -> bool:
+    """Xóa một face embedding theo ID."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM face_embeddings WHERE id = ?", (embedding_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+
+def add_face_match_event(
+    matched_label: str = None,
+    similarity: float = None,
+    vehicle_id: int = None,
+    snapshot_path: str = None,
+) -> int:
+    """Ghi một sự kiện face match."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO face_match_events (timestamp, matched_label, similarity, vehicle_id, snapshot_path) VALUES (?, ?, ?, ?, ?)",
+                (datetime.now().isoformat(), matched_label, similarity, vehicle_id, snapshot_path),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+
+def get_face_match_events(limit: int = 50, offset: int = 0) -> List[dict]:
+    """Lấy danh sách face match events gần nhất."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, matched_label, similarity, vehicle_id, snapshot_path, created_at "
+            "FROM face_match_events ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
