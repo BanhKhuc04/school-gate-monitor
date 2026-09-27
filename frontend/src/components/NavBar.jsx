@@ -9,6 +9,7 @@ export default function NavBar() {
 
   const links = [];
   if (user.role === 'admin') {
+    links.push({ to: '/admin/users', label: 'Tài khoản' });
     links.push({ to: '/admin/vehicles', label: 'Xe đăng ký' });
     links.push({ to: '/admin/violations', label: 'Vi phạm' });
   }

@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage';
 import GuardPage from './pages/GuardPage';
 import AdminVehiclesPage from './pages/AdminVehiclesPage';
 import AdminViolationsPage from './pages/AdminViolationsPage';
+import AdminUsersPage from './pages/AdminUsersPage';
 import DashboardPage from './pages/DashboardPage';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
@@ -54,6 +55,18 @@ function AppRoutes() {
         }
       >
         <Route path="/admin/violations" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <AdminUsersPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/users" element={null} />
       </Route>
 
       <Route

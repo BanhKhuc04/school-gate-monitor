@@ -380,6 +380,95 @@ def get_user_by_username(username: str) -> Optional[dict]:
         conn.close()
 
 
+def list_users() -> List[dict]:
+    """Liệt kê tất cả user (không trả password_hash)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at ASC')
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    """Tìm user theo ID."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username, role, created_at FROM users WHERE id = ?', (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def count_admins() -> int:
+    """Đếm số user có role='admin'."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        return cursor.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def update_user(user_id: int, role: str = None, password_hash: str = None) -> bool:
+    """
+    Cập nhật user.
+
+    Args:
+        user_id: ID user cần sửa
+        role: role mới (hoặc None để không đổi)
+        password_hash: bcrypt hash mới (hoặc None để không đổi)
+
+    Returns:
+        True nếu thành công, False nếu không tìm thấy
+    """
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            updates = []
+            params = []
+            if role is not None:
+                updates.append('role = ?')
+                params.append(role)
+            if password_hash is not None:
+                updates.append('password_hash = ?')
+                params.append(password_hash)
+            if not updates:
+                return False
+            params.append(user_id)
+            cursor.execute(
+                f'UPDATE users SET {", ".join(updates)} WHERE id = ?',
+                params
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+
+def delete_user(user_id: int) -> bool:
+    """
+    Xóa user.
+
+    Returns:
+        True nếu thành công, False nếu không tìm thấy
+    """
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+
 def get_violation_stats() -> Dict[str, Any]:
     """
     Thống kê vi phạm.
