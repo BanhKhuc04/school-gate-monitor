@@ -185,6 +185,7 @@
 11. ✅ Fix hardcoded localhost:8000 → export API_BASE_URL constant (commit `32b1968`)
 12. ✅ Add violations pagination/filter + CSV import + AdminViolationsPage improvements (commit `eaae12d`)
 13. ✅ Thêm pytest violations pagination/filter tests (36 passed)
+14. ✅ User management CRUD: list_users/get_user_by_id/count_admins/update_user/delete_user + app/api/users.py router + AdminUsersPage.jsx (commit `7f53134`)
 
 ## Việc thêm CHƯA làm (hết giờ/tài nguyên):
 - Chưa cập nhật README với screenshot giao diện
