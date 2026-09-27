@@ -128,6 +128,56 @@ export default function AdminVehiclesPage() {
           </form>
         </div>
 
+        {/* CSV Import */}
+        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+          <h2 className="text-base font-semibold text-gray-700 mb-3">Nhập danh sách từ CSV</h2>
+          <div className="flex flex-wrap gap-3 items-center">
+            <input
+              type="file"
+              id="csv-file"
+              accept=".csv"
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              onChange={async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const formData = new FormData();
+                formData.append('file', file);
+                setError('');
+                try {
+                  const res = await client.post('/api/vehicles/import', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                  });
+                  const d = res.data;
+                  alert(`Đã nhập: ${d.created} mới, ${d.skipped} trùng, ${d.errors?.length || 0} lỗi`);
+                  if (d.errors?.length) {
+                    alert('Lỗi: ' + d.errors.slice(0, 5).join('\n'));
+                  }
+                  loadVehicles();
+                } catch (err) {
+                  setError(err.response?.data?.detail || 'Lỗi khi nhập CSV');
+                }
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const csv = 'plate_number,student_name,student_class\n"","",""';
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'mau_xe.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+            >
+              Tải file mẫu CSV
+            </button>
+          </div>
+        </div>
+
         {/* Table */}
         {loading ? (
           <div className="text-center text-gray-500 py-8">Đang tải...</div>

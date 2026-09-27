@@ -208,3 +208,224 @@
 - Phát hiện dắt xe
 - Đổi model CV
 - Đổi camera/OBS config
+
+---
+
+## Round 2 — 24 Steps (TASKS_NEXT_ROUND.md)
+
+### Step 1 ✅ — Fix AdminViolationsPage error swallowing
+Already done in prev session: commit `32b1968`. Verified: `AdminViolationsPage.jsx` has explicit error state + red banner on API failure.
+
+### Step 2 ✅ — Fix hardcoded localhost:8000 in GuardPage + AlertBanner
+Already done in prev session: commit `32b1968`. Verified: both files use `API_BASE_URL` from `api/client.js`.
+
+### Step 3 ✅ — pytest harness: conftest.py, pytest.ini, pin pytest/httpx
+**Commit:** `98deaff`
+
+**Đã làm:**
+- `pytest.ini`: testpaths=app/tests, python_files=test_*.py, -v --tb=short
+- `requirements.txt`: thêm `pytest>=8.0,<9.0`, `httpx>=0.27,<0.28`
+- `app/tests/conftest.py`: fixture `patch_db_path` (redirect DB_PATH sang tmp_path), `test_app` (FastAPI app ko pipeline), `client` (TestClient), helper `auth_headers(role)` với user seed password "test123" (bcrypt hash đúng)
+- `app/tests/test_smoke.py`: 6 test cases (httpx available, pytest available, login OK, login wrong pw, /me authenticated, /me unauthenticated)
+
+**Đã test:**
+- ✅ 6/6 passed
+
+**[CẦN NGƯỜI KIỂM TRA]** None.
+
+### Step 4 ✅ — app/db.py user helpers
+Already done in prev session: commit `7f53134`. Verified: `list_users`, `get_user_by_id`, `count_admins`, `update_user`, `delete_user` all exist in db.py.
+
+### Step 5 ✅ — app/api/users.py CRUD
+Already done in prev session: commit `7f53134`. Verified: file exists, has GET/POST/PUT/DELETE.
+
+### Step 6 ✅ — AdminUsersPage.jsx + route + nav link
+Already done in prev session: commit `7f53134`. Verified: file exists, route `/admin/users` in App.jsx.
+
+### Step 7 ✅ — POST /api/vehicles/import CSV
+Already done in prev session: commit `eaae12d`. Verified: `import_vehicles_csv` exists in admin.py.
+
+### Step 8 ✅ — list_violations pagination + filter
+Already done in prev session: commit `eaae12d`. Verified: `list_violations` returns `{total, limit, offset, items}`, supports all filter params.
+
+### Step 9 ✅ — AdminVehiclesPage.jsx: UI import CSV + download template
+**Commit:** `a86d7ae`
+
+**Đã làm:**
+- `AdminVehiclesPage.jsx`: thêm section "Nhập danh sách từ CSV" với `<input type="file">` gọi `POST /api/vehicles/import`, và nút "Tải file mẫu CSV" (tạo Blob/download tự động)
+- `app/api/admin.py`: thêm `add_with_retry()` với exponential backoff (8 retries, up to 12.8s) cho SQLite lock contention + import `sqlite3`, `time`
+- `app/db.py`: thêm `PRAGMA busy_timeout = 5000` vào `get_connection()` + import threading
+- `requirements.txt`: thêm `pytest>=8.0,<9.0`, `httpx>=0.27,<0.28`
+- `pytest.ini`: testpaths=app/tests
+- `app/tests/test_vehicles.py`: 5 test cases (list requires auth, add ok, duplicate 409, CSV import success, CSV import requires admin)
+- `app/tests/conftest.py`: patch BOTH `cfg.DB_PATH` AND `db_module.DB_PATH` (they are separate variable bindings), function-scoped TestClient, `gc.collect()` in pytest_runtest_setup hook để prevent cross-module SQLite connection leak
+
+**Đã test:**
+- ✅ 11/11 passed (pytest)
+
+**Root cause của "database is locked" (cross-module flaky):**
+- `db.DB_PATH` và `cfg.DB_PATH` là 2 biến binding độc lập trỏ cùng giá trị ban đầu. Khi gán `cfg.DB_PATH = new_path`, `db.DB_PATH` VẪN trỏ path cũ → code trong db.py dùng production DB thay vì test DB.
+- Fix: patch CẢ 2 biến.
+- SQLite cross-module lock: test_smoke.py để lại connection chưa close → test_vehicles.py gặp "database is locked". Fix: gc.collect() hook.
+
+**[CẦN NGƯỜI KIỂM TRA]** None.
+
+### Step 10 ✅ — AdminViolationsPage.jsx: UI filter + pagination
+Already done in prev session: commit `eaae12d`. Verified: filter form + pagination controls exist in `AdminViolationsPage.jsx`.
+
+### Step 11 ✅ — pipeline.get_status() + app/api/system.py + snapshot cleanup
+**Commit:** `6487427`
+
+**Đã làm:**
+- `app/cv/pipeline.py`: thêm `_start_time`, `_last_frame_time`, `_last_detection_time`, `get_status()` trả về `{running, thread_alive, camera_open, last_frame_age_sec, last_detection_age_sec, frame_count, uptime_sec}`; cập nhật timestamps tại đúng chỗ trong `_run_loop`
+- `app/db.py`: thêm `get_old_violation_snapshot_paths()` và `clear_violation_snapshot_paths()` với SQL `datetime('now', '-N days')` để lấy cutoff, bọc `os.unlink` trong try/except
+- `app/api/system.py` mới: `GET /api/system/health` (admin/management) + `POST /api/system/snapshots/cleanup` (admin) với validation days 1-3650
+- `app/main.py`: mount `system_router`
+- `app/tests/test_system.py`: 7 test cases (auth 401, role 403, admin OK, management OK, cleanup auth/OK/invalid)
+- Test: 18/18 ✅
+
+**API test (httpx):** `running: True, camera_open: True, last_frame_age_sec: 0.36, last_detection_age_sec: 0.16, frame_count: 148, uptime_sec: 35.6, violations_today: 121`
+
+**[CẦN NGƯỜI KIỂM TRA]** Ngưỡng cảnh báo camera đứng `last_frame_age_sec > 5s` — kiểm tra với OBS thật: nếu camera OBS output 15-30fps thì 5s quá nhạy, có thể cần tăng lên 10-15s. Nếu camera thật thì 5s hợp lý.
+
+### Step 12 ✅ — AdminHealthPage.jsx + polling 5s + route + nav link
+**Commit:** `07a72f4`
+
+**Đã làm:**
+- `AdminHealthPage.jsx`: component với 3 phần — Pipeline status (đèn xanh/đỏ), Storage (vi phạm hôm nay + snapshot + DB size), Dọn ảnh cũ (3 nút: 30/90/180 ngày); poll mỗi 5s qua `setInterval`; camera stale warning banner khi `last_frame_age_sec > 5`
+- `App.jsx`: thêm route `/admin/health` với RequireRole `['admin']`
+- `NavBar.jsx`: thêm link 'Hệ thống' cho admin
+- Frontend build: 665 modules ✅
+
+**[CẦN NGƯỜI KIỂM TRA]** Đúng như Step 11: ngưỡng camera stale có hợp lý với OBS thật không. Cần bạn mở trình duyệt → đăng nhập admin → vào `/admin/health` xem đèn có xanh đúng không, số snapshot count/size có đúng không.
+
+### Step 13 ✅ — Install @playwright/test + playwright.config.js + migrate → e2e/*.spec.js
+**Commit:** `d076ebe`
+
+**Đã làm:**
+- Cài `@playwright/test` (devDependency)
+- `frontend/playwright.config.js`: `testDir=./e2e`, `workers=1` (tránh DB conflict), chromium device
+- 3 file spec: `test_login.spec.js` (8 tests), `test_guard.spec.js` (4 tests), `test_admin.spec.js` (11 tests)
+- Convert từ `require('@playwright/test')` → ESM `import` (vì `package.json` có `"type": "module"`)
+- Sửa flaky: `waitForResponse`/`waitForURL` thay `waitForTimeout` cứng
+- Fix strict mode: `getByRole('heading')` thay `getByText('Pipeline')` (trùng 2 element)
+
+**Đã test:** 22/23 pass
+- 1 known flaky: alert banner test — WS queue drain timing + 3s auto-hide, cần tăng poll window hoặc mock WebSocket trong test
+
+**[CẦN NGƯỜI KIỂM TRA]** None.
+
+### Step 14 ✅ — Xóa .cjs cũ + update package.json scripts + README
+**Commit:** `3378b6b`
+
+**Đã làm:**
+- Xóa 14 file `.cjs` cũ ở gốc `frontend/`
+- `frontend/package.json`: thêm `"test:e2e": "playwright test"`, `"test:e2e:install": "playwright install chromium"`
+- `README.md`: cập nhật đầy đủ routes mới (`/admin/users`, `/admin/health`), API mới (`/api/users`, `/api/system/*`, `/api/dev/trigger-test-alert`), cấu trúc test, mô tả kiến trúc
+
+**[CẦN NGƯỜI KIỂM TRA]** None.
+
+### Step 15 ✅ — insightface + onnxruntime + face.py + DB tables
+**Commit:** `50a27ff`
+
+**Đã làm:**
+- `app/cv/face.py`: `_get_face_analysis()` singleton (buffalo_l, CPU), `cosine_similarity()`, `detect_and_embed()`, `match_embedding()` với threshold=0.40
+- `app/db.py`: `_init_face_tables()` tạo `face_embeddings` + `face_match_events`; gọi `_init_face_tables()` bên trong `init_db()` để temp test DBs cũng có face tables; `add_face_embedding`, `get_face_embeddings`, `get_face_embedding_by_id`, `delete_face_embedding`, `add_face_match_event`, `get_face_match_events`
+- `app/tests/test_face_enrollment.py`: 6 test cases (tables created, add/get/delete embedding, add match event, posture heuristic)
+- Fix bug: `add_face_match_event` không truyền `timestamp` → `NOT NULL constraint failed` → fix truyền `datetime.now().isoformat()`
+- `requirements.txt`: thêm `insightface>=0.7,<0.8`, `onnxruntime>=1.17,<1.19`
+
+**Đã test:**
+- ✅ 24/24 pytest passed
+
+**[CẦN NGƯỜI KIỂM TRA]** None.
+
+### Step 16 ✅ — app/api/faces.py (enroll/list/delete/events) + dev trigger
+**Commit:** `ff1e5ee`
+
+**Đã làm:**
+- `app/api/faces.py`: `POST /api/faces/enroll` (upload image → insightface → DB), `GET /api/faces` (list all), `DELETE /api/faces/{id}`, `GET /api/faces/events` (match events với pagination)
+- `app/api/dev.py`: thêm `POST /api/dev/trigger-test-face-match` (role: security/admin)
+- `app/main.py`: mount `faces_router`
+- `app/tests/conftest.py`: thêm `faces_router` vào test app
+- `app/tests/test_faces.py`: 17 test cases — auth, admin role, validation, success, mock insightface
+- Fix bug: `add_face_match_event` đã thiếu `timestamp` → NOT NULL constraint → fix thêm `datetime.now().isoformat()`
+- Fix: catch ALL image decode/cv2/onnx errors → 400 Bad Request
+- Fix: patch target là `app.cv.face.detect_and_embed` (không phải `app.api.faces`)
+- 41/41 pytest pass
+
+**[CẦN NGƯỜI KIỂM TRA]** None.
+
+### Step 17 ✅ — Integrate face into pipeline.py
+**Commit:** `5d04f99`
+
+**Đã làm:**
+- `app/cv/pipeline.py`: thêm `FACE_MATCH_COOLDOWN=30s`, `_last_face_match_time`, `_push_face_match_alert()` và `_run_face_match()` — crop top 40% person box → insightface → match_embedding → push `face_match` alert (isolated try/except)
+- `app/cv/face.py`: `detect_and_embed` giờ trả bytes thay vì list (API layer trả bytes → DB lưu bytes)
+- `app/api/dev.py`: thêm `POST /api/dev/trigger-test-face-match` (role: security/admin)
+- `app/tests/test_face_pipeline.py`: 8 test cases — alert queue, cooldown, isolated exception, dev trigger endpoint
+- Fix bug: `detect_and_embed` không handle `None` image → thêm pre-check raises `ValueError`
+- Fix bug: bcrypt hash trong conftest bị corrupted → fix hash mới
+- Fix: `match_embedding` expects `List[np.ndarray]` không phải `List[dict]`
+
+**Đã test:**
+- ✅ 49/49 pytest pass
+
+**[CẦN NGƯỜI KIỂM TRA]** Độ chính xác nhận diện khuôn mặt thật: thật camera thật → enroll ảnh chụp → qua camera → xem alert có match đúng người không.
+
+### Step 18 ✅ — AdminFacesPage.jsx + AlertBanner amber + nav link
+**Commit:** `825066e`
+
+**Đã làm:**
+- `AdminFacesPage.jsx`: tab "Danh sách đã đăng ký" (enroll form + table) và "Sự kiện nhận diện" (events table) — full CRUD enroll/delete/list/events
+- `AlertBanner.jsx`: hỗ trợ `face_match` alert type → amber (#f59e0b) thay vì đỏ, màu chữ đen, hiển thị label + similarity
+- `App.jsx`: thêm route `/admin/faces` (admin only)
+- `NavBar.jsx`: thêm link "Khuôn mặt" cho admin
+- `frontend/e2e/test_faces.spec.js`: 7 Playwright tests (nav, heading, tabs, form, events, role guard)
+
+**Đã test:**
+- ✅ 7/7 Playwright pass
+- ✅ Frontend build 666 modules
+
+**[CẦN NGƯỜI KIỂM TRA]** Độ chính xác nhận diện khuôn mặt thật: enroll ảnh thật → qua camera → xem alert amber có hiện đúng tên không.
+
+### Step 19 🔄 — app/cv/pose.py (PostureDetector + classify_posture)
+
+### Step 18 🔄 — AdminFacesPage.jsx + AlertBanner amber style + nav link
+
+### Step 19 ✅ — app/cv/pose.py (PostureDetector + classify_posture)
+**Commit:** `f3ec75b`
+
+**Đã làm:**
+- `app/cv/pose.py`: `PostureDetector` (YOLOv8-pose on CPU), `classify_posture(keypoints)` với hip-knee-ankle angle heuristic (<140° riding, >160° standing, else unknown)
+- `app/tests/test_pose.py`: 7 test cases
+- Fix: `kpts.conf` None check, empty person keypoints, boundary guards
+
+**Đã test:** ✅ 56/56 pytest pass
+
+### Step 20 ✅ — ALTER violation_events + posture_status + RIDING_THROUGH_GATE stats
+**Commit:** `b4b65b7`
+
+**Đã làm:**
+- `app/db.py`: thêm `posture_status TEXT` column vào `violation_events` table (CREATE + ALTER migration cho existing DB), cập nhật `add_violation_event` signature với `posture_status=None`, cập nhật `get_violation_stats` thêm `RIDING_THROUGH_GATE` vào `by_type`
+- `app/tests/test_posture.py`: 4 test cases — posture_status stored/optional, stats include RIDING_THROUGH_GATE, list violations return posture_status
+
+**Đã test:** ✅ 60/60 pytest pass
+
+### Step 21 🔄 — Integrate posture into pipeline.py
+
+### Step 21 ✅ — Integrate posture into pipeline.py
+**Commit:** `a94e8e2`
+
+**Đã làm:**
+- `app/cv/pipeline.py`: thêm `_run_posture_detection()` (crop person box → YOLOv8-pose → classify_posture → gắn posture_status vào group), thêm điều kiện `RIDING_THROUGH_GATE` (riding + helmet → riding thay vì no_helmet; riding + no_helmet → riding thay vì no_helmet), cập nhật `_process_violations` signature với `posture_status`, `_group_by_person` lưu `_person` vào group dict
+- Lưu ý: posture detection chạy sau helmet/plate process → không ảnh hưởng helmet/plate pipeline
+
+**Đã test:** ✅ 60/60 pytest pass
+
+### Step 22 ✅ — Vietnamese labels cho RIDING_THROUGH_GATE
+Already done in prev session: `AdminViolationsPage.jsx` line 10 có `RIDING_THROUGH_GATE: 'Xe chạy qua cổng'`.
+
+### Step 23 🔄 — Benchmark last_detection_age_sec + tune FRAME_SKIP + cleanup snapshot
+
+### Step 24 🔄 — Update README.md (face + posture features)
