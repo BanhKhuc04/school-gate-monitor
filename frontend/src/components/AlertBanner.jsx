@@ -42,12 +42,14 @@ function buildSpeechText(data) {
   }
 }
 
-export default function AlertBanner({ token }) {
+export default function AlertBanner({ token, onAlert }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [snapshotUrl, setSnapshotUrl] = useState(null);
   const timeoutRef = useRef(null);
   const wsRef = useRef(null);
+  const onAlertRef = useRef(onAlert);
+  onAlertRef.current = onAlert;
 
   useEffect(() => {
     if (!token) return;
@@ -102,6 +104,8 @@ export default function AlertBanner({ token }) {
       // Beep trước để bảo vệ chú ý ngay, TTS đọc nội dung ngay sau đó.
       const beepDurationMs = playAlertSound(data.violation_type || 'default');
       setTimeout(() => speak(buildSpeechText(data)), beepDurationMs + 50);
+
+      onAlertRef.current?.(data);
     }
 
     function connect() {

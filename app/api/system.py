@@ -84,11 +84,13 @@ class HealthResponse(BaseModel):
 
 @router.get("/health", response_model=HealthResponse)
 def get_health(
-    current_user: dict = Depends(require_role("admin", "management")),
+    current_user: dict = Depends(require_role("admin", "management", "security")),
 ):
     """
     System health check — pipeline status + storage stats.
-    Requires: admin or management role.
+    Requires: admin, management, or security role (guards see pipeline/camera
+    status on the live view; the storage/violation-count fields are read-only
+    and not sensitive, so no separate slim endpoint is worth building for them).
     """
     pipeline_status = _pipeline_status()
     stats = get_violation_stats()

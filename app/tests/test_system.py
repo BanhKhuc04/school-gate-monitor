@@ -10,11 +10,11 @@ def test_health_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_health_requires_admin_or_management(client):
-    """GET /api/system/health with security role returns 403."""
+def test_health_security_ok(client):
+    """GET /api/system/health with security role returns 200 (guards see pipeline status on the live view)."""
     from app.tests.conftest import auth_headers
     resp = client.get("/api/system/health", headers=auth_headers(client, "security"))
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 def test_health_admin_ok(client):
