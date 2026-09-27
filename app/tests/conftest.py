@@ -51,7 +51,7 @@ def test_app(request, tmp_path_factory):
     init_db()
 
     # Seed users
-    test_hash = "$2b$12$R2hoQMs7Xn4h1QhSIZg/Hu0ag7RZydcXRSR/EagSpIcEbKeM9o5aa"
+    test_hash = "$2b$12$2IuvqWKAkJTVchQraU3G9eY.My/ANMrJ2shrbMGuvCHQTnOSFwReW"
     with _write_lock:
         conn = db_module.get_connection()
         try:

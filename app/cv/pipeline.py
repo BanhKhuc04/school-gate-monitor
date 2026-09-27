@@ -24,6 +24,11 @@ from app.cv.detector import HelmetPlateDetector, Detection
 from app.cv.ocr import read_plate
 from app.db import get_vehicle_by_plate, add_violation_event
 
+# Face match cooldown (seconds) — separate from violation cooldown
+FACE_MATCH_COOLDOWN = 30.0
+# How much of the top of the person box to crop for face detection (0.0–1.0)
+_FACE_CROP_TOP_RATIO = 0.40
+
 
 # Màu vẽ bounding box
 COLOR_HELMET = (0, 255, 0)      # Xanh lá - có mũ
@@ -97,6 +102,9 @@ class VideoPipeline:
         self._start_time: float = time.time()
         self._last_frame_time: float = self._start_time
         self._last_detection_time: float = self._start_time
+
+        # Cooldown for face match alerts
+        self._last_face_match_time: float = 0.0
     
     def start(self):
         """Bắt đầu thread nền."""
@@ -221,6 +229,9 @@ class VideoPipeline:
                 # Xử lý vi phạm cho TỪNG nhóm riêng biệt
                 for group in groups:
                     self._process_violations(frame, group['helmet_dets'], group['plate_dets'])
+
+                # Face recognition — isolated try/except, does not affect helmet/plate pipeline
+                self._run_face_match(frame)
 
                 # Vẽ box helmet (theo nhóm)
                 for det in helmet_dets:
@@ -436,9 +447,9 @@ class VideoPipeline:
         
         # Đẩy cảnh báo WebSocket
         self._push_alert(violation_type, plate_read, plate_matched)
-    
+
     def _push_alert(self, violation_type: str, plate_read: str, plate_matched: str):
-        """Đẩy cảnh báo vào WebSocket queue (nếu chưa trong alert cooldown)."""
+        """Đẩy cảnh báo vi phạm vào WebSocket queue (có alert cooldown)."""
         current_time = time.time()
         if current_time - self._last_alert_time >= ALERT_COOLDOWN:
             alert = {
@@ -446,11 +457,83 @@ class VideoPipeline:
                 "violation_type": violation_type,
                 "plate_read": plate_read or None,
                 "plate_matched": plate_matched or None,
-                "timestamp": datetime.datetime.now().isoformat()
+                "timestamp": datetime.datetime.now().isoformat(),
             }
             self._alert_queue.put(alert)
             self._last_alert_time = current_time
             print(f"[Pipeline] Alert pushed: {alert}")
+
+    def _push_face_match_alert(self, matched_label: str, similarity: float, snapshot_path: str | None):
+        """Đẩy face match alert vào WebSocket queue (có cooldown riêng)."""
+        current_time = time.time()
+        if current_time - self._last_face_match_time < FACE_MATCH_COOLDOWN:
+            return  # still in cooldown
+
+        alert = {
+            "type": "face_match",
+            "matched_label": matched_label,
+            "similarity": round(similarity, 4),
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+        self._alert_queue.put(alert)
+        self._last_face_match_time = current_time
+        print(f"[Pipeline] Face match: {matched_label} ({similarity:.3f})")
+
+    def _run_face_match(self, frame: np.ndarray):
+        """
+        Thu nhien dien khuon mat tu frame hien tai.
+        - Crop top 40% cua moi person box
+        - Goi detect_and_embed -> match_embedding
+        - Neu match -> _push_face_match_alert
+        ISOLATED try/except: khong anh huong main helmet/plate pipeline.
+        """
+        try:
+            from app.cv.face import detect_and_embed, match_embedding
+            from app.db import get_face_embeddings
+            person_dets = self._last_person_dets
+            if not person_dets:
+                return
+            registered = get_face_embeddings()
+            if not registered:
+                return
+            import struct
+            known_labels = []
+            known_vecs = []
+            for rec in registered:
+                emb_bytes = rec.get("embedding")
+                if not emb_bytes:
+                    continue
+                vec = np.array(struct.unpack(f"{len(emb_bytes)//4}f", emb_bytes), dtype=np.float32)
+                known_vecs.append(vec)
+                known_labels.append(rec["label_name"])
+            if not known_vecs:
+                return
+            frame_h, frame_w = frame.shape[:2]
+            for person in person_dets:
+                x1, y1, x2, y2 = person.bbox
+                x1, x2 = max(0, x1), min(frame_w, x2)
+                y1, y2 = max(0, y1), min(frame_h, y2)
+                top_y2 = int(y1 + (y2 - y1) * _FACE_CROP_TOP_RATIO)
+                if top_y2 <= y1:
+                    continue
+                face_crop = frame[y1:top_y2, x1:x2]
+                if face_crop.size == 0 or face_crop.shape[0] < 20 or face_crop.shape[1] < 20:
+                    continue
+                face_resized = cv2.resize(face_crop, (112, 112))
+                emb_bytes = detect_and_embed(face_resized)
+                if emb_bytes is None:
+                    continue
+                vec = np.array(struct.unpack(f"{len(emb_bytes)//4}f", emb_bytes), dtype=np.float32)
+                matched, best_sim, best_idx = match_embedding(vec, known_vecs)
+                if matched:
+                    self._push_face_match_alert(
+                        matched_label=known_labels[best_idx],
+                        similarity=best_sim,
+                        snapshot_path=None,
+                    )
+                    break
+        except Exception:
+            pass
 
 
 # Singleton instance
