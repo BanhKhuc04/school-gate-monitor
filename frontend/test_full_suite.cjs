@@ -102,14 +102,18 @@ async function freshLogin(page, username, password) {
     // Trigger test alert — use the SAME page as the guard navigation above
     // (NOT a fresh context/page) so there is only ONE WS consumer for the queue.
     // Trigger test alert — use the SAME security page (the one already on /guard)
-    // so there is only ONE WS consumer. Call the API from within the page so the
-    // browser's localStorage token is automatically included via the client interceptor.
-    // The endpoint requires security or admin role (security token is sufficient).
+    // so there is only ONE WS consumer. Read the token from localStorage within
+    // the page so fetch() can include it directly (bypasses axios, so we must
+    // manually set the Authorization header ourselves).
     const triggerResult = await page.evaluate(async () => {
       try {
+        const token = localStorage.getItem('token');
         const resp = await fetch('http://localhost:8000/api/dev/trigger-test-alert', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify({ violation_type: 'PLATE_NOT_REGISTERED', plate_read: 'TESTALERT999' })
         });
         return { ok: resp.ok, status: resp.status };
