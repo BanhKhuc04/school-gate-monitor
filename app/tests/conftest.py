@@ -76,6 +76,7 @@ def test_app(request, tmp_path_factory):
     from app.api.auth import router as auth_router
     from app.api.users import router as users_router
     from app.api.dev import router as dev_router
+    from app.api.system import router as system_router
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,
@@ -95,6 +96,7 @@ def test_app(request, tmp_path_factory):
     app.include_router(stats_router)
     app.include_router(users_router)
     app.include_router(dev_router)
+    app.include_router(system_router)
 
     yield app
 

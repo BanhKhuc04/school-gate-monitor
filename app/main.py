@@ -13,6 +13,7 @@ from app.api.admin import vehicles_router, stats_router, violations_router
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.dev import router as dev_router
+from app.api.system import router as system_router
 from app.cv.pipeline import start_pipeline, stop_pipeline
 from app.db import init_db
 
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(violations_router)
     app.include_router(stats_router)
     app.include_router(users_router)
+    app.include_router(system_router)
 
     return app
 

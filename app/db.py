@@ -524,3 +524,58 @@ def get_violation_stats() -> Dict[str, Any]:
         }
     finally:
         conn.close()
+
+
+def get_old_violation_snapshot_paths(older_than_days: int = 90) -> List[str]:
+    """
+    Trả về danh sách snapshot_path cần xóa (cũ hơn older_than_days ngày).
+    Chỉ trả về path, không xóa gì cả.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        # date('now', '-N days') = date N days ago
+        cutoff = f"-{older_than_days} days"
+        cursor.execute(
+            "SELECT snapshot_path FROM violation_events "
+            "WHERE snapshot_path IS NOT NULL "
+            "AND timestamp < datetime('now', ?)",
+            (cutoff,)
+        )
+        return [row["snapshot_path"] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def clear_violation_snapshot_paths(older_than_days: int = 90) -> int:
+    """
+    Xóa file snapshot cũ và set snapshot_path = NULL trong DB.
+    Giữ nguyên record vi phạm, chỉ null đường dẫn ảnh.
+    Trả về số record đã null.
+    """
+    paths = get_old_violation_snapshot_paths(older_than_days)
+    count = 0
+    for path in paths:
+        full_path = path if os.path.isabs(path) else os.path.join(SNAPSHOTS_DIR, os.path.basename(path))
+        try:
+            if os.path.exists(full_path):
+                os.unlink(full_path)
+        except OSError:
+            pass  # file already gone, that's fine
+        count += 1
+
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cutoff = f"-{older_than_days} days"
+            cursor.execute(
+                "UPDATE violation_events SET snapshot_path = NULL "
+                "WHERE snapshot_path IS NOT NULL "
+                "AND timestamp < datetime('now', ?)",
+                (cutoff,)
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()

@@ -89,9 +89,14 @@ class VideoPipeline:
         
         # Cooldown cho cảnh báo WebSocket
         self._last_alert_time: float = 0.0
-        
+
         # Cooldown cho ghi log vi phạm vào DB: {(plate_type, violation_type): last_time}
         self._last_log_time: dict = {}
+
+        # Timestamps for health monitoring
+        self._start_time: float = time.time()
+        self._last_frame_time: float = self._start_time
+        self._last_detection_time: float = self._start_time
     
     def start(self):
         """Bắt đầu thread nền."""
@@ -130,6 +135,29 @@ class VideoPipeline:
             return self._alert_queue.get_nowait()
         except queue.Empty:
             return None
+
+    def get_status(self) -> dict:
+        """Trả về trạng thái sức khỏe của pipeline (dùng cho /api/system/health)."""
+        now = time.time()
+        camera_open = self._webcam is not None
+        try:
+            if camera_open and hasattr(self._webcam, 'is_open'):
+                camera_open = self._webcam.is_open()
+            elif camera_open:
+                # WebcamStream doesn't expose is_open — check via the frame timestamp
+                camera_open = (now - self._last_frame_time) < 5.0
+        except Exception:
+            camera_open = False
+
+        return {
+            "running": self._running,
+            "thread_alive": self._thread is not None and self._thread.is_alive(),
+            "camera_open": camera_open,
+            "last_frame_age_sec": round(now - self._last_frame_time, 2),
+            "last_detection_age_sec": round(now - self._last_detection_time, 2),
+            "frame_count": self._frame_count,
+            "uptime_sec": round(now - self._start_time, 1),
+        }
     
     def _run_loop(self):
         """Vòng lặp chính của thread nền."""
@@ -150,6 +178,7 @@ class VideoPipeline:
                 # Đọc frame
                 frame = self._webcam.read_frame()
                 self._frame_count += 1
+                self._last_frame_time = time.time()
                 
                 # Xử lý cách frame
                 if self._frame_count % FRAME_SKIP != 0:
@@ -173,6 +202,9 @@ class VideoPipeline:
                     with self._lock:
                         self._latest_frame = frame
                     continue
+
+                # Update detection timestamp (health monitoring)
+                self._last_detection_time = time.time()
 
                 # Detect helmet & plate
                 helmet_dets = self._helmet_detector.detect(frame)
