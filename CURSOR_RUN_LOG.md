@@ -178,19 +178,25 @@
 5. ✅ Bảo mật `POST /api/dev/trigger-test-alert` — thêm `Depends(require_role("security","admin"))`, bypass cooldown khi test để đảm bảo reliable, ghi ponytail comment về queue single-consumer limitation
 6. ✅ Cập nhật README.md với hướng dẫn dev + production, danh sách route, seed users
 
+7. ✅ Fix 4 test failure root causes (35→41/41 Playwright) — commit `6a0f021`
+8. ✅ Viết `tests/test_api_errors.py` — 34 pytest cases cover all API endpoints (401/403/409/422/404), SPA fallback, guard video_feed — commit `e816df5`
+9. ✅ Fix `client.js` 401 interceptor không redirect khi đang ở trang login
+10. ✅ Fix `AuthContext.login()` không throw trên HTTP 401
+
 ## Việc thêm CHƯA làm (hết giờ/tài nguyên):
-- Chưa viết pytest backend test (httpx đã cài)
 - Chưa cập nhật README với screenshot giao diện
 
 ---
 
 ## Commit history (cuối cùng)
-| Hash | Mô tả |
-|------|--------|
-| `6a0f021` | Fix 4 test failures + add auth coverage for dev endpoint |
-| `6e18f8d` | Extras: secure dev endpoint, update README |
-| `eb4b1a3` | Build complete: React SPA + role-based auth (Bước 8-13) |
-| `3852565` | Add test infrastructure: pytest+httpx, playwright, POST /api/dev/trigger-test-alert |
+│ Hash     │ Mô tả │
+│----------|--------|
+│ `e816df5` │ Add pytest API error tests (34 cases) + fix alert trigger auth in test suite │
+│ `2cb6d27` │ Update CURSOR_RUN_LOG.md: document 4 root-cause fixes + 41/41 test results │
+│ `6a0f021` │ Fix 4 test failures + add auth coverage for dev endpoint │
+│ `6e18f8d` │ Extras: secure dev endpoint, update README │
+│ `eb4b1a3` │ Build complete: React SPA + role-based auth (Bước 8-13) │
+│ `3852565` │ Add test infrastructure: pytest+httpx, playwright, POST /api/dev/trigger-test-alert │
 
 ## Không làm (ngoài phạm vi):
 - 50cc classification
