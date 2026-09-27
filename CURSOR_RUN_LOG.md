@@ -149,6 +149,19 @@
 2. **Alert banner appeared after trigger** — WS queue của pipeline drain theo timing. Alert được đẩy vào queue nhưng AlertBanner.get_alert() polling interval + headless rendering timing khiến banner không hiện kịp trong test window. Manual debug xác nhận: alert đến queue thành công, WS server nhận.
 3. **Hard refresh /guard renders** — React SPA mount timing ở cuối test session dài (~2 phút). Manual debug xác nhận: `/guard` render đúng sau ~2s. Chỉ là ở cuối full suite dài, headless browser resource contention.
 
+### Fixed in commit `6a0f021` (2026-09-27, 2nd session):
+**Root causes found via targeted debug scripts (not guessed):**
+
+1. **`/guard` 410 → 200 SPA fix** (`app/main.py`): Removed `@app.get("/guard")` from the 410 Gone list. `/guard` is now a React SPA route, not a Jinja route. The old `guard_router` had no `GET /guard` route — it only had `/video_feed` and `/ws`. The 410 handler was blocking the SPA fallback from ever catching `/guard`. Fix: let it fall through to the catch-all `/{full_path}` → `index.html`.
+
+2. **Endpoint missing `Depends()`** (`app/api/dev.py`): The `require_role("admin")` call was missing `Depends()`, so FastAPI never applied it — endpoint had NO auth at all. Fixed: added `Depends()`, changed role to `"security","admin"` (so security users who have WS access can also trigger test alerts), and added ponytail comment about single-consumer queue limitation.
+
+3. **Wrong password never shows error div** (`client.js` + `AuthContext.jsx`): TWO bugs: (a) `client.interceptors.response` was redirecting to `/login` on ALL 401s, including the login form's own 401 — the redirect fired before React could render the error div. Fixed: skip redirect when already on `/login` or when the request IS the login request. (b) `AuthContext.login()` never threw on 401 — axios resolves with response data rather than throwing on 4xx. Fixed: check `res.status !== 200` and throw explicitly.
+
+4. **Alert banner never detected in full suite** (`test_full_suite.cjs`): The banner auto-hides after 3s via `setTimeout`. The test was doing a single `page.textContent('body')` call at one point in time — in the full suite context, this often missed the brief 3s window. Fixed: poll every 500ms for 6s. Also: the alert trigger used a separate admin login which navigated away from `/guard`, creating a second WS connection that raced for the queue. Fixed: use the security user's own browser context (page.evaluate) so only ONE WS connection exists.
+
+**Result: 41/41 tests pass** (was 35/38).
+
 ### Các fix đã làm trong quá trình chạy:
 - Vite proxy: `/api`, `/media`, `/guard/video_feed`, `/guard/ws` (không proxy `/guard` root)
 - `client.js` baseURL vẫn là `http://localhost:8000` (production cũng cùng domain)
@@ -162,7 +175,7 @@
 2. ✅ Thêm Vite proxy config cho dev mode
 3. ✅ Fix GuardPage + AlertBanner WS/URL issues
 4. ✅ Fix SPA fallback order (410 routes → assets → catch-all)
-5. ✅ Bảo mật `POST /api/dev/trigger-test-alert` — thêm `require_role("admin")`
+5. ✅ Bảo mật `POST /api/dev/trigger-test-alert` — thêm `Depends(require_role("security","admin"))`, bypass cooldown khi test để đảm bảo reliable, ghi ponytail comment về queue single-consumer limitation
 6. ✅ Cập nhật README.md với hướng dẫn dev + production, danh sách route, seed users
 
 ## Việc thêm CHƯA làm (hết giờ/tài nguyên):
@@ -174,6 +187,7 @@
 ## Commit history (cuối cùng)
 | Hash | Mô tả |
 |------|--------|
+| `6a0f021` | Fix 4 test failures + add auth coverage for dev endpoint |
 | `6e18f8d` | Extras: secure dev endpoint, update README |
 | `eb4b1a3` | Build complete: React SPA + role-based auth (Bước 8-13) |
 | `3852565` | Add test infrastructure: pytest+httpx, playwright, POST /api/dev/trigger-test-alert |
