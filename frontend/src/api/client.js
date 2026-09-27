@@ -20,11 +20,15 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
-// ── Response interceptor: auto-logout on 401 ──────────────────────────────────
+// ── Response interceptor: auto-logout on 401 (except login page itself) ───────
 client.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const isLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
+    const isLoginRequest = error.config?.url?.includes('/api/auth/login');
+    // Only redirect to login if we're not ALREADY on the login page AND this
+    // isn't a login failure. Login page must show error, not redirect away.
+    if (error.response?.status === 401 && !isLoginPage && !isLoginRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';

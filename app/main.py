@@ -88,7 +88,6 @@ if __import__("os").path.exists(frontend_dist):
     @app.get("/admin")
     @app.get("/admin/vehicles/{_}")
     @app.get("/admin/violations")
-    @app.get("/guard")
     async def old_jinja_routes(_: str = ""):
         return JSONResponse({"detail": "Gone — frontend moved to React SPA"}, status_code=410)
 

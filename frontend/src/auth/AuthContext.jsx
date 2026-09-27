@@ -34,10 +34,14 @@ export function AuthProvider({ children }) {
   /**
    * Login with username + password.
    * @returns {object} user {username, role}
-   * @throws {Error} if credentials are invalid
+   * @throws {Error} if credentials are invalid (HTTP status != 2xx)
    */
   const login = async (username, password) => {
     const res = await client.post('/api/auth/login', { username, password });
+    // axios doesn't throw on 4xx by default — explicitly check status
+    if (res.status !== 200) {
+      throw new Error(res.data?.detail || 'Login failed');
+    }
     const { access_token, username: u, role } = res.data;
     setToken(access_token);
     const userData = { username: u, role };

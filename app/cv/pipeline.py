@@ -48,6 +48,9 @@ class VideoPipeline:
         self._latest_frame: Optional[np.ndarray] = None
         
         # Queue cho cảnh báo vi phạm
+        # ponytail: queue là single-consumer — giả định chỉ 1 bảo vệ xem cùng lúc.
+        # Nếu cần nhiều người xem đồng thời sau này, đổi sang broadcast
+        # (ví dụ: gửi alert tới mọi WS connection thay vì 1 queue).
         self._alert_queue: queue.Queue = queue.Queue()
         
         # Trạng thái

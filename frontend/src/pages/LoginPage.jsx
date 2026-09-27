@@ -29,7 +29,9 @@ export default function LoginPage() {
         navigate('/');
       }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Đăng nhập thất bại');
+      // axios doesn't throw on 4xx by default — check status explicitly
+      const msg = err.response?.data?.detail || 'Đăng nhập thất bại';
+      setError(msg);
     } finally {
       setLoading(false);
     }
