@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import client from '../api/client';
+import { formatDate } from '../utils/format';
 
 const ROLES = ['admin', 'security', 'management'];
 const ROLE_LABELS = { admin: 'Admin', security: 'Bảo vệ', management: 'Quản lý' };
@@ -200,7 +201,7 @@ export default function AdminUsersPage() {
                           <span className="ml-1 text-xs text-gray-400">(bạn)</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{u.created_at}</td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(u.created_at)}</td>
                       <td className="px-4 py-3 text-right space-x-2">
                         <button
                           onClick={() => startEdit(u)}

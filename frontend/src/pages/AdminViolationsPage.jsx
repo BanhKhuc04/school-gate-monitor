@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import client, { API_BASE_URL } from '../api/client';
+import { formatDate } from '../utils/format';
 
 // Violation type labels for display
 const VIOLATION_LABELS = {
@@ -149,7 +150,7 @@ export default function AdminViolationsPage() {
                   <tbody className="divide-y divide-gray-100">
                     {violations.map((v) => (
                       <tr key={v.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{v.timestamp}</td>
+                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(v.timestamp)}</td>
                         <td className="px-4 py-3">
                           <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">
                             {VIOLATION_LABELS[v.violation_type] || v.violation_type}

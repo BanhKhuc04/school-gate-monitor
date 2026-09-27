@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import client, { API_BASE_URL } from '../api/client';
+import { formatDate } from '../utils/format';
 
 export default function AdminFacesPage() {
   const [faces, setFaces] = useState([]);
@@ -83,15 +84,6 @@ export default function AdminFacesPage() {
       loadFaces();
     } catch (err) {
       setError(err.response?.data?.detail || 'Xóa thất bại');
-    }
-  }
-
-  function formatDate(isoStr) {
-    if (!isoStr) return '';
-    try {
-      return new Date(isoStr).toLocaleString('vi-VN');
-    } catch {
-      return isoStr;
     }
   }
 
