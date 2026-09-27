@@ -210,9 +210,11 @@ class VideoPipeline:
                         self._latest_frame = frame
                     continue
                 
-                # Detect person (COCO → lọc class 'person')
+                # Detect person + phương tiện (COCO đã có sẵn class 'motorcycle'/'bicycle',
+                # dùng luôn kết quả detect này, không tốn thêm 1 lần inference).
                 raw_person_dets = self._person_detector.detect(frame)
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
+                vehicle_dets = [d for d in raw_person_dets if d.class_name.lower() in ('motorcycle', 'bicycle')]
 
                 # Không có person nào → bỏ qua toàn bộ frame
                 if not person_dets:
@@ -232,8 +234,8 @@ class VideoPipeline:
                 self._last_helmet_dets = helmet_dets
                 self._last_plate_dets = plate_dets
 
-                # Gom helmet + plate vào từng nhóm theo person
-                groups = self._group_by_person(person_dets, helmet_dets, plate_dets)
+                # Gom helmet + plate + loại phương tiện vào từng nhóm theo person
+                groups = self._group_by_person(person_dets, helmet_dets, plate_dets, vehicle_dets)
 
                 # Phát hiện tư thế cho mỗi person box — ISOLATED try/except
                 groups = self._run_posture_detection(frame, groups)
@@ -245,6 +247,7 @@ class VideoPipeline:
                         group['helmet_dets'],
                         group['plate_dets'],
                         posture_status=group.get('posture_status', 'unknown'),
+                        vehicle_type=group.get('vehicle_type'),
                     )
 
                 # Face recognition — isolated try/except, does not affect helmet/plate pipeline
@@ -324,15 +327,19 @@ class VideoPipeline:
         cv2.putText(frame, text, (x1, y1 - 2), FONT, 0.5, (255, 255, 255), 1)
 
     def _group_by_person(self, person_dets: list, helmet_dets: list,
-                         plate_dets: list) -> list[dict]:
+                         plate_dets: list, vehicle_dets: list = ()) -> list[dict]:
         """
-        Gom helmet + plate detections vào từng nhóm theo person box.
+        Gom helmet + plate + loại phương tiện vào từng nhóm theo person box.
 
         Logic:
         - helmet/no-helmet → gán vào person mà tâm điểm helmet nằm trong box person.
         - plate → gán vào person có x-center gần nhất, trong phạm vi chiều rộng box person.
+        - vehicle (motorcycle/bicycle, COCO) → cùng cách gán như plate; dùng để loại trừ
+          người đi bộ và người đi xe đạp thường khỏi việc bắt buộc đội mũ (chỉ xe máy và
+          xe đạp điện mới bắt buộc theo luật — COCO không phân biệt được xe đạp điện với
+          xe đạp thường, nên hiện tại coi mọi 'bicycle' là được miễn, đây là giới hạn đã biết).
 
-        Trả về list nhóm, mỗi nhóm: {helmet_dets: [...], plate_dets: [...]}.
+        Trả về list nhóm, mỗi nhóm: {helmet_dets: [...], plate_dets: [...], vehicle_type: str|None}.
         """
         groups = []
 
@@ -366,18 +373,31 @@ class VideoPipeline:
             if best_plate is not None:
                 group_plates.append(best_plate)
 
+            # Gán phương tiện: x-center gần nhất, trong phạm vi chiều rộng person
+            best_v_dist = float('inf')
+            vehicle_type = None
+            for v in vehicle_dets:
+                vx1, vy1, vx2, vy2 = v.bbox
+                vcx = (vx1 + vx2) / 2
+                dist = abs(vcx - pcx)
+                if dist < best_v_dist and dist <= p_width:
+                    best_v_dist = dist
+                    vehicle_type = v.class_name.lower()
+
             groups.append({
                 '_person': person,
                 'helmet_dets': group_helmets,
                 'plate_dets': group_plates,
+                'vehicle_type': vehicle_type,
             })
 
         return groups
 
     def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list,
-                         posture_status: str = 'unknown'):
+                         posture_status: str = 'unknown', vehicle_type: str | None = None):
         """
         Xử lý toàn bộ logic vi phạm cho MỘT nhóm (1 person):
+        0. Chặn theo loại phương tiện — không có xe hoặc đi xe đạp thì không bắt mũ/biển số
         1. OCR đọc biển số
         2. Tra whitelist trong DB
         3. Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
@@ -385,6 +405,19 @@ class VideoPipeline:
         5. Lưu snapshot + ghi log vào DB
         6. Đẩy cảnh báo WebSocket
         """
+        # Không phát hiện xe máy/xe đạp nào gần người này → người đi bộ, không bắt lỗi
+        # mũ bảo hiểm/biển số. Trước đây thiếu bước này nên người đi bộ qua cổng bị báo
+        # PLATE_UNREADABLE sai (mọi group đều bị coi như phải có biển số đọc được).
+        if vehicle_type is None:
+            return
+
+        # Xe đạp thường không bắt buộc đội mũ bảo hiểm theo luật, chỉ xe máy và xe đạp
+        # điện mới bắt buộc. COCO không phân biệt được xe đạp điện với xe đạp thường,
+        # nên hiện tại coi mọi 'bicycle' là được miễn — đây là giới hạn đã biết, sẽ cần
+        # dataset/model riêng để phân biệt xe đạp điện khi có.
+        if vehicle_type == 'bicycle':
+            return
+
         # Phân loại helmet detections
         has_with_helmet = any('With Helmet' in d.class_name for d in helmet_dets)
         has_without_helmet = any('Without Helmet' in d.class_name for d in helmet_dets)
