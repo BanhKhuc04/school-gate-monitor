@@ -8,6 +8,8 @@ Admin JSON API routes.
 """
 import csv
 import io
+import time as _time_module
+import sqlite3
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 
 from app.db import (
@@ -102,6 +104,25 @@ def import_vehicles_csv(
                 return row[col_map[key_lower]].strip()
         return ''
 
+    def add_with_retry(plate: str, name: str, cls: str) -> bool:
+        """Call add_vehicle with retry on SQLITE_LOCKED and similar errors."""
+        import traceback as _tb
+        for attempt in range(8):
+            try:
+                add_vehicle(plate, name, cls)
+                return True
+            except sqlite3.OperationalError as e:
+                msg = str(e)
+                if attempt < 7:
+                    wait = 0.1 * (2 ** attempt)
+                    print(f"[CSV import] row plate={plate} attempt {attempt+1} failed: {msg}, retrying in {wait:.2f}s")
+                    _time_module.sleep(wait)
+                    continue
+                # Last attempt failed — print full traceback for debugging
+                print(f"[CSV import] FINAL FAILURE plate={plate}: {msg}\n{_tb.format_exc()}")
+                raise
+        return False
+
     created = 0
     skipped = 0
     errors: list[dict] = []
@@ -125,7 +146,7 @@ def import_vehicles_csv(
             continue
 
         try:
-            add_vehicle(plate, student_name, student_class)
+            add_with_retry(plate, student_name, student_class)
             created += 1
         except ValueError as e:
             errors.append({'row': row_num, 'message': str(e)})

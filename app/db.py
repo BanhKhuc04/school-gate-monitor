@@ -26,6 +26,7 @@ def get_connection() -> sqlite3.Connection:
     
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")  # wait up to 5s for locks
     return conn
 
 

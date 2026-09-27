@@ -3,8 +3,7 @@ pytest fixtures for app-level integration tests.
 """
 from __future__ import annotations
 
-import sys
-import os
+import sys, os, time, glob
 from pathlib import Path
 
 import pytest
@@ -14,76 +13,69 @@ from fastapi import FastAPI
 # Ensure the project root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-# ─── Patch config DB_PATH BEFORE any app imports ──────────────────────────────
-_original_db_path = None
 
-
-@pytest.fixture(scope="session", autouse=True)
-def patch_db_path(tmp_path_factory):
-    """Redirect DB to a temporary directory for all tests."""
-    global _original_db_path
-    from app import config
-    _original_db_path = config.DB_PATH
-
-    tmp_dir = tmp_path_factory.mktemp("test_db")
-    test_db = tmp_dir / "test.db"
-    config.DB_PATH = str(test_db)
-
-    yield test_db  # return the path so tests can reference it if needed
-
-    # Restore original path after session
-    config.DB_PATH = _original_db_path
-
-
-# ─── Test app factory (no pipeline) ─────────────────────────────────────────
+# ─── Per-module app factory ─────────────────────────────────────────────────────
 @pytest.fixture(scope="module")
-def test_app(patch_db_path):
-    """Create a FastAPI test app WITHOUT starting the CV pipeline."""
-    from app.db import init_db, create_user, _write_lock
+def test_app(request, tmp_path_factory):
+    """
+    Create a FastAPI test app WITHOUT starting the CV pipeline.
+    Each module gets its own temp DB, initialized with tables + seed users.
+    """
+    from app import config as cfg
+    import app.db as db_module
+    import sqlite3
 
-    # Fully initialise the test database
+    # Save originals — BOTH config and db_module have separate DB_PATH bindings
+    orig_db_path = cfg.DB_PATH
+    orig_db_module_path = db_module.DB_PATH
+    orig_get_conn = db_module.get_connection
+
+    # Module-unique temp DB
+    tmp_dir = tmp_path_factory.mktemp(f"test_db_{request.module.__name__}")
+    test_db = tmp_dir / "test.db"
+    test_db_str = str(test_db)
+    # Patch BOTH config.DB_PATH AND db_module.DB_PATH (they are separate bindings)
+    cfg.DB_PATH = test_db_str
+    db_module.DB_PATH = test_db_str
+
+    def _test_get_connection():
+        conn = sqlite3.connect(test_db_str, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+
+    db_module.get_connection = _test_get_connection
+
+    # Init tables
+    from app.db import init_db, _write_lock
     init_db()
 
-    # Seed 3 role users (password: "test123")
-    # bcrypt hash of "test123" — pre-computed for speed
-    test_password_hash = "$2b$12$R2hoQMs7Xn4h1QhSIZg/Hu0ag7RZydcXRSR/EagSpIcEbKeM9o5aa"
-
-    # Only seed if not already seeded (init_db doesn't seed in test env)
+    # Seed users
+    test_hash = "$2b$12$R2hoQMs7Xn4h1QhSIZg/Hu0ag7RZydcXRSR/EagSpIcEbKeM9o5aa"
     with _write_lock:
-        conn = __import__("app.db", fromlist=["get_connection"]).get_connection()
+        conn = db_module.get_connection()
         try:
             cur = conn.cursor()
             cur.execute("SELECT COUNT(*) FROM users")
-            count = cur.fetchone()[0]
-            if count == 0:
-                conn.close()
-                conn = __import__("app.db", fromlist=["get_connection"]).get_connection()
-                cur = conn.cursor()
-                import time
+            if cur.fetchone()[0] == 0:
                 now = int(time.time())
                 cur.executemany(
                     "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-                    [
-                        ("admin", test_password_hash, "admin", now),
-                        ("security", test_password_hash, "security", now),
-                        ("management", test_password_hash, "management", now),
-                    ],
+                    [("admin", test_hash, "admin", now),
+                     ("security", test_hash, "security", now),
+                     ("management", test_hash, "management", now)],
                 )
                 conn.commit()
         finally:
             conn.close()
 
-    # Build app WITHOUT lifespan (skip pipeline start/stop)
+    # Build app
     app = FastAPI(title="School Gate Monitor — Test")
-
-    # Import routers
     from app.api.guard import router as guard_router
     from app.api.admin import vehicles_router, stats_router, violations_router
     from app.api.auth import router as auth_router
     from app.api.users import router as users_router
     from app.api.dev import router as dev_router
-
-    # CORS
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,
@@ -92,14 +84,10 @@ def test_app(patch_db_path):
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    # Mount snapshots dir
     from app.config import SNAPSHOTS_DIR
     if os.path.exists(SNAPSHOTS_DIR):
         from fastapi.staticfiles import StaticFiles
         app.mount("/media", StaticFiles(directory=SNAPSHOTS_DIR), name="media")
-
-    # Routers
     app.include_router(guard_router)
     app.include_router(auth_router)
     app.include_router(vehicles_router)
@@ -108,29 +96,47 @@ def test_app(patch_db_path):
     app.include_router(users_router)
     app.include_router(dev_router)
 
-    return app
+    yield app
+
+    # Restore — patch BOTH bindings
+    cfg.DB_PATH = orig_db_path
+    db_module.DB_PATH = orig_db_module_path
+    db_module.get_connection = orig_get_conn
+    for pat in [test_db_str + "-wal", test_db_str + "-shm"]:
+        for p in glob.glob(pat):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
-# ─── TestClient fixture ───────────────────────────────────────────────────────
-@pytest.fixture(scope="module")
+# ─── Hook to close all DB connections between test modules ─────────────────────
+# This prevents test_smoke.py from leaving a lock on the test_vehicles.py DB
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Before each test, ensure no lingering connections exist."""
+    # Force garbage collection to close any abandoned connections
+    import gc
+    gc.collect()
+
+
+# ─── TestClient fixture (function-scoped) ───────────────────────────────────────
+@pytest.fixture(scope="function")
 def client(test_app) -> TestClient:
-    """Shared TestClient for all tests in a module."""
+    """Function-scoped so each test gets a fresh HTTP connection."""
     with TestClient(test_app) as c:
         yield c
 
 
 # ─── Auth helpers ─────────────────────────────────────────────────────────────
-ROLE_PASSWORD = "test123"  # matches seeded hash in conftest
+ROLE_PASSWORD = "test123"
 
 
 def get_token(client: TestClient, username: str) -> str:
-    """Login and return a JWT access token."""
     resp = client.post("/api/auth/login", json={"username": username, "password": ROLE_PASSWORD})
     assert resp.status_code == 200, f"Login failed for {username}: {resp.json()}"
     return resp.json()["access_token"]
 
 
 def auth_headers(client: TestClient, role: str = "admin") -> dict:
-    """Return headers dict with Bearer token for the given role."""
-    token = get_token(client, role)
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {get_token(client, role)}"}
