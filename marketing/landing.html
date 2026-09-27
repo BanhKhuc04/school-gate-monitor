@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>School Gate Monitor — Camera AI giám sát an toàn cổng trường</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --bg-alt: #e9edf0;
+    --panel: #ffffff;
+    --ink: #12181f;
+    --ink-soft: #4a5568;
+    --ink-faint: #7c8a99;
+    --accent: #f2b134;
+    --accent-ink: #1a1406;
+    --teal: #1f9f92;
+    --danger: #d6394a;
+    --success: #1f8a4c;
+    --line: rgba(18,24,31,0.12);
+    --line-strong: rgba(18,24,31,0.22);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1216;
+      --bg-alt: #141b21;
+      --panel: #1a222a;
+      --ink: #eef2f5;
+      --ink-soft: #aab4bf;
+      --ink-faint: #7c8a99;
+      --accent: #f2b134;
+      --accent-ink: #1a1406;
+      --teal: #3fcabb;
+      --danger: #ff7a86;
+      --success: #4fd889;
+      --line: rgba(255,255,255,0.12);
+      --line-strong: rgba(255,255,255,0.22);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1216;
+    --bg-alt: #141b21;
+    --panel: #1a222a;
+    --ink: #eef2f5;
+    --ink-soft: #aab4bf;
+    --ink-faint: #7c8a99;
+    --accent: #f2b134;
+    --accent-ink: #1a1406;
+    --teal: #3fcabb;
+    --danger: #ff7a86;
+    --success: #4fd889;
+    --line: rgba(255,255,255,0.12);
+    --line-strong: rgba(255,255,255,0.22);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding-inline: 20px;
+  }
+  h1, h2, h3, .display {
+    font-family: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .mono {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  a { color: inherit; }
+  img { max-width: 100%; }
+  .wrap {
+    max-width: 1120px;
+    margin-inline: auto;
+  }
+  .band {
+    padding-block: 72px;
+  }
+  .band-alt { background: var(--bg-alt); }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    max-width: 1120px;
+    margin-inline: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-block: 20px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Be Vietnam Pro', sans-serif;
+    font-weight: 800;
+    font-size: 17px;
+  }
+  .brand-mark {
+    width: 30px; height: 30px;
+    border-radius: 7px;
+    background: var(--ink);
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .brand-mark svg { width: 17px; height: 17px; }
+  .topbar nav {
+    display: flex;
+    gap: 26px;
+    font-family: 'Be Vietnam Pro', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-soft);
+  }
+  .topbar nav a { text-decoration: none; }
+  .topbar nav a:hover { color: var(--ink); }
+  @media (max-width: 640px) {
+    .topbar nav { display: none; }
+  }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    padding-block: 48px 80px;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 48px;
+    align-items: center;
+  }
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; }
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--teal);
+    background: color-mix(in srgb, var(--teal) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 22px;
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--teal);
+  }
+  h1.headline {
+    font-size: clamp(34px, 5vw, 54px);
+    font-weight: 800;
+    line-height: 1.08;
+    margin: 0 0 20px;
+  }
+  h1.headline em {
+    font-style: normal;
+    color: var(--teal);
+  }
+  .sub {
+    font-size: 18px;
+    color: var(--ink-soft);
+    max-width: 46ch;
+    margin: 0 0 32px;
+  }
+  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Be Vietnam Pro', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 13px 22px;
+    border-radius: 9px;
+    text-decoration: none;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
+  .btn-ghost:hover { border-color: var(--ink-faint); }
+  .hero-note {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--ink-faint);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* ---------- HUD graphic ---------- */
+  .hud {
+    position: relative;
+    aspect-ratio: 4 / 3.1;
+    border-radius: 16px;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--ink) 92%, transparent), color-mix(in srgb, var(--ink) 96%, transparent)),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px);
+    border: 1px solid var(--line-strong);
+    overflow: hidden;
+  }
+  .hud::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.06), transparent 60%);
+  }
+  .hud-topline {
+    position: absolute; top: 12px; left: 14px; right: 14px;
+    display: flex; justify-content: space-between;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.55);
+    letter-spacing: 0.04em;
+  }
+  .hud-topline .rec { color: #ff5f6b; display:flex; align-items:center; gap:5px; }
+  .hud-topline .rec::before { content:""; width:6px; height:6px; border-radius:50%; background:#ff5f6b; animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .hud-topline .rec::before { animation: none; } }
+
+  .box {
+    position: absolute;
+    border: 2px solid;
+    border-radius: 3px;
+  }
+  .box .tag {
+    position: absolute;
+    top: -20px; left: -2px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    color: #0d1216;
+  }
+  .box-person { border-color: #6fb1ff; left: 8%; top: 20%; width: 30%; height: 62%; }
+  .box-person .tag { background: #6fb1ff; }
+  .box-helmet-ok { border-color: var(--success); left: 14%; top: 16%; width: 12%; height: 12%; }
+  .box-helmet-ok .tag { background: var(--success); color: #06210f; }
+  .box-plate { border-color: var(--accent); left: 46%; top: 58%; width: 15%; height: 8%; }
+  .box-plate .tag { background: var(--accent); }
+  .box-nohelmet { border-color: var(--danger); left: 62%; top: 30%; width: 11%; height: 11%; }
+  .box-nohelmet .tag { background: var(--danger); color: #fff; }
+  .box-person2 { border-color: #6fb1ff; left: 58%; top: 34%; width: 26%; height: 55%; }
+
+  .hud-bottom {
+    position: absolute; left: 14px; right: 14px; bottom: 12px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+  }
+  .hud-alert {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: #fff;
+    background: color-mix(in srgb, var(--danger) 88%, black 0%);
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 7px 11px;
+    border-radius: 7px;
+  }
+  .hud-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.45);
+  }
+
+  /* ---------- Section headers ---------- */
+  .kicker {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  .section-title {
+    font-size: clamp(24px, 3.4vw, 32px);
+    font-weight: 800;
+    margin: 0 0 16px;
+    max-width: 22ch;
+  }
+  .section-lede {
+    color: var(--ink-soft);
+    font-size: 17px;
+    max-width: 62ch;
+    margin: 0 0 44px;
+  }
+
+  /* ---------- Problem stats ---------- */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 760px) { .stat-row { grid-template-columns: 1fr; } }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 26px 24px;
+  }
+  .stat-card .num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 34px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--teal);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .stat-card p { margin: 0; color: var(--ink-soft); font-size: 14.5px; }
+
+  /* ---------- Steps ---------- */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    counter-reset: step;
+  }
+  @media (max-width: 860px) {
+    .steps { grid-template-columns: 1fr 1fr; gap: 28px 20px; }
+  }
+  @media (max-width: 480px) {
+    .steps { grid-template-columns: 1fr; }
+  }
+  .step {
+    position: relative;
+    padding: 0 22px 0 0;
+    counter-increment: step;
+  }
+  .steps .step:not(:last-child) {
+    border-right: 1px dashed var(--line-strong);
+  }
+  @media (max-width: 860px) {
+    .steps .step:not(:last-child) { border-right: none; }
+  }
+  .step .step-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .step .step-num::before {
+    content: "0" counter(step);
+  }
+  .step h3 {
+    font-size: 17px;
+    margin: 0 0 8px;
+  }
+  .step p {
+    color: var(--ink-soft);
+    font-size: 14.5px;
+    margin: 0;
+    padding-right: 6px;
+  }
+
+  /* ---------- Feature grid ---------- */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+  }
+  @media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 520px) { .feature-grid { grid-template-columns: 1fr; } }
+  .feature {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .feature .icon-wrap {
+    width: 38px; height: 38px;
+    border-radius: 9px;
+    display: grid; place-items: center;
+    margin-bottom: 16px;
+  }
+  .feature .icon-wrap svg { width: 20px; height: 20px; }
+  .feature h3 { font-size: 16px; margin: 0 0 8px; }
+  .feature p { font-size: 14px; color: var(--ink-soft); margin: 0; }
+  .feature .code {
+    display: inline-block;
+    margin-top: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 7px;
+  }
+
+  /* ---------- Legal plaque ---------- */
+  .plaque {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 22px;
+    align-items: flex-start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 26px 28px;
+  }
+  @media (max-width: 640px) { .plaque { grid-template-columns: 1fr; } }
+  .plaque .plaque-icon {
+    width: 42px; height: 42px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    display: grid; place-items: center;
+    flex: none;
+  }
+  .plaque h3 { margin: 0 0 8px; font-size: 17px; }
+  .plaque p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+  .plaque .ref {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-top: 10px;
+    display: block;
+  }
+
+  /* ---------- Evidence / dashboard preview ---------- */
+  .evidence {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: center;
+  }
+  @media (max-width: 860px) { .evidence { grid-template-columns: 1fr; } }
+  .evidence ul { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 14px; }
+  .evidence li {
+    display: flex; gap: 12px; align-items: flex-start;
+    font-size: 15px; color: var(--ink-soft);
+  }
+  .evidence li svg { flex: none; margin-top: 3px; width: 17px; height: 17px; color: var(--success); }
+  .evidence li b { color: var(--ink); }
+
+  .dash-mock {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+  }
+  .dash-mock .dash-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px;
+    font-family: 'Be Vietnam Pro', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+  .dash-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .dash-kpi { background: var(--bg-alt); border-radius: 9px; padding: 12px 14px; }
+  .dash-kpi .n { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; color: var(--teal); }
+  .dash-kpi .l { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
+  .dash-bars { display: flex; align-items: flex-end; gap: 8px; height: 84px; padding: 0 2px; }
+  .dash-bars i {
+    display: block; flex: 1;
+    background: linear-gradient(180deg, var(--teal), color-mix(in srgb, var(--teal) 60%, transparent));
+    border-radius: 4px 4px 0 0;
+  }
+
+  /* ---------- CTA band ---------- */
+  .cta-band {
+    background: var(--ink);
+    color: #f5f7f8;
+    border-radius: 20px;
+    padding: 52px 40px;
+    text-align: center;
+  }
+  .cta-band h2 { font-size: clamp(24px, 3.6vw, 32px); margin: 0 0 12px; }
+  .cta-band p { color: rgba(245,247,248,0.7); font-size: 16px; margin: 0 0 30px; }
+  .contact-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 999px;
+    padding: 10px 18px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13.5px;
+    margin-top: 18px;
+  }
+  .contact-pill button {
+    background: transparent;
+    border: none;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+  }
+  .copy-msg {
+    font-size: 12px;
+    color: var(--accent);
+    margin-top: 8px;
+    height: 14px;
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding-block: 40px 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--line);
+  }
+  footer .brand { font-size: 14px; }
+</style>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="7" width="14" height="11" rx="2" stroke="#f2b134" stroke-width="1.6"/>
+        <path d="M17 10.5L21 8V16L17 13.5" stroke="#f2b134" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    School Gate Monitor
+  </div>
+  <nav>
+    <a href="#how">Cách hoạt động</a>
+    <a href="#features">Tính năng</a>
+    <a href="#evidence">Bằng chứng</a>
+    <a href="#cta">Liên hệ</a>
+  </nav>
+</div>
+
+<div class="wrap">
+  <section class="hero">
+    <div>
+      <span class="eyebrow"><span class="dot"></span>Đang giám sát thời gian thực</span>
+      <h1 class="headline">Không lượt xe nào<br>qua cổng <em>mà không rõ ai lái.</em></h1>
+      <p class="sub">Camera AI đặt tại cổng trường tự động phát hiện học sinh không đội mũ bảo hiểm, xe chưa đăng ký và ghi lại ảnh bằng chứng — ngay khoảnh khắc xe vừa qua cổng, không cần bảo vệ đứng canh từng em.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#cta">Đặt lịch demo cho trường bạn</a>
+        <a class="btn btn-ghost" href="#how">Xem cách hoạt động ↓</a>
+      </div>
+      <p class="hero-note">Đã kiểm chứng trên helmet · biển số · khuôn mặt · tư thế lên xe</p>
+    </div>
+
+    <div class="hud" aria-hidden="true">
+      <div class="hud-topline">
+        <span class="rec">REC · CAM_01</span>
+        <span>CỔNG CHÍNH — 07:12:44</span>
+      </div>
+
+      <div class="box box-person"><span class="tag">PERSON 0.93</span></div>
+      <div class="box box-helmet-ok"><span class="tag">HELMET 0.88</span></div>
+      <div class="box box-plate"><span class="tag">59H1·5417</span></div>
+      <div class="box box-person2"><span class="tag">PERSON 0.90</span></div>
+      <div class="box box-nohelmet"><span class="tag">NO HELMET 0.91</span></div>
+
+      <div class="hud-bottom">
+        <span class="hud-alert">⚠ CẢNH BÁO: KHÔNG ĐỘI MŨ BẢO HIỂM</span>
+        <span class="hud-time">frame #18294</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="band band-alt">
+  <div class="wrap">
+    <p class="kicker">Vấn đề thật ở mọi cổng trường</p>
+    <h2 class="section-title">Bảo vệ không thể nhìn kịp mọi lượt xe, mỗi sáng.</h2>
+    <p class="section-lede">Giờ cao điểm, hàng trăm xe máy và xe đạp điện dồn qua cổng trong vài phút. Một người đứng canh không thể vừa kiểm tra mũ bảo hiểm, vừa đọc biển số, vừa nhớ mặt từng xe lạ — và khi có sự cố, thường không có gì để tra lại ngoài trí nhớ.</p>
+
+    <div class="stat-row">
+      <div class="stat-card">
+        <span class="num">4</span>
+        <p>loại vi phạm được phân biệt tự động: không mũ, biển số lạ, không đọc được biển số, ngồi lái thay vì dắt bộ qua cổng.</p>
+      </div>
+      <div class="stat-card">
+        <span class="num">&lt;1s</span>
+        <p>từ lúc xe vào khung hình đến lúc bảo vệ nghe cảnh báo và thấy ảnh chụp trên màn hình.</p>
+      </div>
+      <div class="stat-card">
+        <span class="num">100%</span>
+        <p>lượt vi phạm được lưu lại ảnh + thời gian, xem lại được bất cứ lúc nào trên trang quản trị.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band" id="how">
+  <div class="wrap">
+    <p class="kicker">Quy trình</p>
+    <h2 class="section-title">Từ khung hình đến cảnh báo, trong bốn bước.</h2>
+    <p class="section-lede">Toàn bộ xử lý diễn ra ngay tại chỗ, không cần internet để nhận diện — chỉ cần một camera hướng vào cổng.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num"></div>
+        <h3>Camera nhận diện</h3>
+        <p>Phát hiện người, xe máy, xe đạp, mũ bảo hiểm và biển số trong từng khung hình theo thời gian thực.</p>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <h3>Phân loại vi phạm</h3>
+        <p>Đối chiếu biển số với danh sách xe đã đăng ký, đối chiếu khuôn mặt, xác định đang dắt bộ hay ngồi lái.</p>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <h3>Cảnh báo tức thời</h3>
+        <p>Bảo vệ nghe một âm báo riêng cho từng loại vi phạm, kèm giọng đọc tự động nội dung và biển số.</p>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <h3>Lưu bằng chứng</h3>
+        <p>Ảnh chụp và thời điểm vi phạm được lưu lại, tra cứu lại theo ngày, theo lớp trên trang quản trị.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band band-alt" id="features">
+  <div class="wrap">
+    <p class="kicker">Bốn điều camera thường bỏ lỡ</p>
+    <h2 class="section-title">Những gì hệ thống nhận diện được ở mỗi lượt xe.</h2>
+
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="icon-wrap" style="background:color-mix(in srgb, var(--danger) 16%, transparent)">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a7 7 0 0 0-7 7v4a2 2 0 0 0 2 2h1v-6a4 4 0 0 1 8 0v6h1a2 2 0 0 0 2-2v-4a7 7 0 0 0-7-7Z" stroke="var(--danger)" stroke-width="1.6"/><path d="M9 17v1a3 3 0 0 0 6 0v-1" stroke="var(--danger)" stroke-width="1.6"/></svg>
+        </div>
+        <h3>Mũ bảo hiểm</h3>
+        <p>Phân biệt có/không đội mũ cho từng người trên xe, kể cả khi chở hai.</p>
+        <span class="code">NO_HELMET</span>
+      </div>
+      <div class="feature">
+        <div class="icon-wrap" style="background:color-mix(in srgb, var(--accent) 22%, transparent)">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="8" width="18" height="9" rx="1.5" stroke="var(--accent-ink)" stroke-width="1.6"/><path d="M7 12.5h3M13 12.5h4" stroke="var(--accent-ink)" stroke-width="1.6"/></svg>
+        </div>
+        <h3>Biển số xe</h3>
+        <p>Đọc biển số và đối chiếu ngay với danh sách xe học sinh đã đăng ký.</p>
+        <span class="code">PLATE_NOT_REGISTERED</span>
+      </div>
+      <div class="feature">
+        <div class="icon-wrap" style="background:color-mix(in srgb, var(--teal) 18%, transparent)">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="9" r="3.2" stroke="var(--teal)" stroke-width="1.6"/><path d="M5.5 19c1.4-3.3 4-5 6.5-5s5.1 1.7 6.5 5" stroke="var(--teal)" stroke-width="1.6"/></svg>
+        </div>
+        <h3>Khuôn mặt</h3>
+        <p>Đối chiếu khuôn mặt với danh sách đã đăng ký, kèm ảnh làm bằng chứng.</p>
+        <span class="code">face_match</span>
+      </div>
+      <div class="feature">
+        <div class="icon-wrap" style="background:color-mix(in srgb, var(--success) 18%, transparent)">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="6" cy="18" r="2.4" stroke="var(--success)" stroke-width="1.6"/><circle cx="17" cy="18" r="2.4" stroke="var(--success)" stroke-width="1.6"/><path d="M6 18l4-9h4l3 9M10 9h4" stroke="var(--success)" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </div>
+        <h3>Tư thế lên xe</h3>
+        <p>Phân biệt đang dắt bộ qua cổng hay đã ngồi lái — đúng quy định an toàn của trường.</p>
+        <span class="code">RIDING_THROUGH_GATE</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band">
+  <div class="wrap">
+    <div class="plaque">
+      <div class="plaque-icon">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 4v5c0 5-3.4 8.4-8 9-4.6-.6-8-4-8-9V7l8-4Z" stroke="var(--accent-ink)" stroke-width="1.6"/></svg>
+      </div>
+      <div>
+        <h3>Không báo sai cho học sinh đi xe đạp thường</h3>
+        <p>Theo Nghị định 100/2019/NĐ-CP, chỉ xe máy và xe đạp điện mới bắt buộc đội mũ bảo hiểm — xe đạp thường thì không. Hệ thống tự nhận diện loại phương tiện trước khi đối chiếu quy định, để không gắn lỗi cho những em chỉ đang đạp xe đến trường.</p>
+        <span class="ref">Nghị định 100/2019/NĐ-CP · điều khoản đội mũ bảo hiểm xe máy, xe đạp điện</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band band-alt" id="evidence">
+  <div class="wrap">
+    <div class="evidence">
+      <div>
+        <p class="kicker">Không chỉ cảnh báo</p>
+        <h2 class="section-title">Có bằng chứng, có số liệu — không chỉ có tiếng còi.</h2>
+        <p class="section-lede" style="margin-bottom:0">Mỗi vi phạm đều để lại dấu vết tra cứu được, và ban giám hiệu xem được bức tranh toàn cảnh thay vì nghe báo cáo miệng.</p>
+        <ul>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Ảnh chụp tự động</b> kèm mỗi vi phạm và mỗi lượt khớp khuôn mặt, lưu lại để xem hoặc in khi cần đối chiếu.</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Lọc theo ngày, biển số, loại vi phạm</b> trên trang quản trị — không cần tua lại video.</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Dashboard xu hướng</b> theo ngày và theo lớp, để ban giám hiệu thấy lớp nào cần nhắc nhở thêm.</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="dash-mock" aria-hidden="true">
+        <div class="dash-head"><span>DASHBOARD</span><span>14 NGÀY GẦN NHẤT</span></div>
+        <div class="dash-kpis">
+          <div class="dash-kpi"><div class="n">12</div><div class="l">Vi phạm hôm nay</div></div>
+          <div class="dash-kpi"><div class="n">64</div><div class="l">Vi phạm tuần này</div></div>
+        </div>
+        <div class="dash-bars">
+          <i style="height:18%"></i><i style="height:24%"></i><i style="height:15%"></i>
+          <i style="height:32%"></i><i style="height:28%"></i><i style="height:40%"></i>
+          <i style="height:35%"></i><i style="height:50%"></i><i style="height:44%"></i>
+          <i style="height:60%"></i><i style="height:55%"></i><i style="height:70%"></i>
+          <i style="height:66%"></i><i style="height:82%"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band" id="cta">
+  <div class="wrap">
+    <div class="cta-band">
+      <h2>Muốn xem hệ thống chạy trên chính cổng trường bạn?</h2>
+      <p>Đặt lịch demo trực tiếp — mang một đoạn video cổng trường của bạn, chúng tôi chạy thử ngay tại chỗ.</p>
+      <a class="btn btn-primary" href="#" id="ctaBtn">Đặt lịch demo</a>
+      <div>
+        <div class="contact-pill">
+          <span id="contactText">lienhe@[ten-mien-cua-ban].vn</span>
+          <button type="button" id="copyBtn">Sao chép</button>
+        </div>
+      </div>
+      <div class="copy-msg" id="copyMsg"></div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="brand">School Gate Monitor</div>
+    <div>Hệ thống giám sát an toàn cổng trường bằng AI.</div>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var copyBtn = document.getElementById('copyBtn');
+    var msg = document.getElementById('copyMsg');
+    var text = document.getElementById('contactText');
+    copyBtn.addEventListener('click', function () {
+      var value = text.textContent;
+      function done(ok) {
+        msg.textContent = ok ? 'Đã sao chép.' : 'Không sao chép được — vui lòng chọn thủ công.';
+      }
+      try {
+        navigator.clipboard.writeText(value).then(function () { done(true); }, function () { done(false); });
+      } catch (e) {
+        done(false);
+      }
+    });
+
+    var ctaBtn = document.getElementById('ctaBtn');
+    ctaBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      var pill = document.querySelector('.contact-pill');
+      pill.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      pill.style.borderColor = 'var(--accent)';
+    });
+  })();
+</script>
+</body>
+</html>
