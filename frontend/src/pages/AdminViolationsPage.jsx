@@ -4,15 +4,18 @@ import client from '../api/client';
 export default function AdminViolationsPage() {
   const [violations, setViolations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   async function load() {
     setLoading(true);
+    setError('');
     try {
       const res = await client.get('/api/violations');
       setViolations(res.data);
-    } catch {
-      // non-admin may get 403, show empty
-      setViolations([]);
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Không tải được danh sách vi phạm';
+      setError(msg);
+      // Don't silently swallow — show error instead of empty table
     } finally {
       setLoading(false);
     }
@@ -27,6 +30,10 @@ export default function AdminViolationsPage() {
 
         {loading ? (
           <div className="text-center text-gray-500 py-8">Đang tải...</div>
+        ) : error ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded text-sm">
+            {error}
+          </div>
         ) : violations.length === 0 ? (
           <div className="text-center text-gray-400 py-8">Không có vi phạm nào.</div>
         ) : (

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { API_BASE_URL } from '../api/client';
 
 /**
  * AlertBanner — connects to /guard/ws WebSocket and shows a red banner
@@ -13,9 +14,9 @@ export default function AlertBanner({ token }) {
   useEffect(() => {
     if (!token) return;
 
-    // GuardPage always serves video from :8000; use same for WS
+    // ponytail: use API_BASE_URL constant so this URL is defined in one place
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = 'localhost:8000'; // always :8000 regardless of dev/prod
+    const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
     const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}`;
 
     function playBeep() {

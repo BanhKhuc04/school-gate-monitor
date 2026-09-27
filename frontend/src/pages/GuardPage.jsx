@@ -1,5 +1,6 @@
 import { useAuth } from '../auth/AuthContext';
 import AlertBanner from '../components/AlertBanner';
+import { API_BASE_URL } from '../api/client';
 
 export default function GuardPage() {
   const { token } = useAuth();
@@ -17,10 +18,10 @@ export default function GuardPage() {
         </span>
       </div>
 
-      {/* Video feed — always point to backend :8000 */}
+      {/* Video feed */}
       <div className="flex-1 flex items-center justify-center p-4">
         <img
-          src={`http://localhost:8000/guard/video_feed?token=${token}`}
+          src={`${API_BASE_URL}/guard/video_feed?token=${token}`}
           alt="Live camera feed"
           style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 120px)', borderRadius: '8px' }}
         />
