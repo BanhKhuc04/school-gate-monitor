@@ -97,7 +97,7 @@ export default function AdminUsersPage() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl font-bold text-gray-800 mb-6">Quản lý tài khoản</h1>
 
         {/* Form */}
@@ -222,6 +222,9 @@ export default function AdminUsersPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="px-4 py-3 bg-gray-50 text-xs text-gray-500 border-t">
+              Tổng: {users.length} tài khoản
             </div>
           </div>
         )}

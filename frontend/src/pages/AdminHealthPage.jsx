@@ -75,7 +75,7 @@ export default function AdminHealthPage() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl font-bold text-gray-800 mb-6">Sức khỏe hệ thống</h1>
 
         {error && (

@@ -70,7 +70,7 @@ export default function AdminVehiclesPage() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl font-bold text-gray-800 mb-6">Quản lý xe đăng ký</h1>
 
         {/* Form */}
@@ -219,6 +219,9 @@ export default function AdminVehiclesPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="px-4 py-3 bg-gray-50 text-xs text-gray-500 border-t">
+              Tổng: {vehicles.length} xe
             </div>
           </div>
         )}
