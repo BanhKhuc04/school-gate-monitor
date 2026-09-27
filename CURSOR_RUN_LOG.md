@@ -182,6 +182,9 @@
 8. ✅ Viết `tests/test_api_errors.py` — 34 pytest cases cover all API endpoints (401/403/409/422/404), SPA fallback, guard video_feed — commit `e816df5`
 9. ✅ Fix `client.js` 401 interceptor không redirect khi đang ở trang login
 10. ✅ Fix `AuthContext.login()` không throw trên HTTP 401
+11. ✅ Fix hardcoded localhost:8000 → export API_BASE_URL constant (commit `32b1968`)
+12. ✅ Add violations pagination/filter + CSV import + AdminViolationsPage improvements (commit `eaae12d`)
+13. ✅ Thêm pytest violations pagination/filter tests (36 passed)
 
 ## Việc thêm CHƯA làm (hết giờ/tài nguyên):
 - Chưa cập nhật README với screenshot giao diện
