@@ -5,6 +5,7 @@ import GuardPage from './pages/GuardPage';
 import AdminVehiclesPage from './pages/AdminVehiclesPage';
 import AdminViolationsPage from './pages/AdminViolationsPage';
 import AdminUsersPage from './pages/AdminUsersPage';
+import AdminHealthPage from './pages/AdminHealthPage';
 import DashboardPage from './pages/DashboardPage';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
@@ -79,6 +80,18 @@ function AppRoutes() {
         }
       >
         <Route path="/dashboard" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <AdminHealthPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/health" element={null} />
       </Route>
 
       {/* Default redirect */}

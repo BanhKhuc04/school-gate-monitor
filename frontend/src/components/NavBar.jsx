@@ -12,6 +12,7 @@ export default function NavBar() {
     links.push({ to: '/admin/users', label: 'Tài khoản' });
     links.push({ to: '/admin/vehicles', label: 'Xe đăng ký' });
     links.push({ to: '/admin/violations', label: 'Vi phạm' });
+    links.push({ to: '/admin/health', label: 'Hệ thống' });
   }
   if (user.role === 'security' || user.role === 'admin') {
     links.push({ to: '/guard', label: 'Camera' });
