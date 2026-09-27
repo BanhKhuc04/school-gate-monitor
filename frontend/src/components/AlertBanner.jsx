@@ -2,13 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
 
 /**
- * AlertBanner — connects to /guard/ws WebSocket and shows a banner
- * with a distinct beep pattern + Vietnamese TTS when a violation or
- * face_match alert arrives, plus a snapshot thumbnail if one is available.
- *
- * Style:
- *   - violation: red (#dc3545)
- *   - face_match: amber (#f59e0b)
+ * AlertBanner — connects to /guard/ws WebSocket and shows a red banner
+ * with a distinct beep pattern + Vietnamese TTS per violation type, plus
+ * a snapshot thumbnail if one is available.
  *
  * ponytail: còi/loa vật lý qua GPIO chưa được xây dựng — chưa có phần cứng
  * (không có speaker/relay/GPIO nào để lái). Khi có phần cứng thật, thêm một
@@ -16,7 +12,7 @@ import { API_BASE_URL } from '../api/client';
  * kích còi vật lý; audio hiện tại chỉ chạy trong trình duyệt của bảo vệ.
  */
 
-// Mỗi loại cảnh báo có tần số + số nhịp beep riêng để phân biệt bằng tai
+// Mỗi loại vi phạm có tần số + số nhịp beep riêng để phân biệt bằng tai
 // trước khi nghe rõ nội dung TTS.
 const ALERT_SOUNDS = {
   NO_HELMET: { freq: 600, beeps: 1, beepDuration: 0.3, gap: 0.1 },
@@ -24,14 +20,10 @@ const ALERT_SOUNDS = {
   PLATE_UNREADABLE: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
   RIDING_THROUGH_GATE: { freq: 500, beeps: 3, beepDuration: 0.15, gap: 0.1 },
   MULTIPLE: { freq: 700, beeps: 2, beepDuration: 0.2, gap: 0.1 },
-  face_match: { freq: 1200, beeps: 2, beepDuration: 0.1, gap: 0.08 },
   default: { freq: 800, beeps: 1, beepDuration: 0.2, gap: 0.1 },
 };
 
 function buildSpeechText(data) {
-  if (data.type === 'face_match') {
-    return `Cảnh báo: nhận diện khuôn mặt ${data.matched_label || 'không rõ'}`;
-  }
   const plate = data.plate_matched || data.plate_read;
   const plateText = plate ? `xe biển số ${plate}` : 'xe không đọc được biển số';
   switch (data.violation_type) {
@@ -53,7 +45,6 @@ function buildSpeechText(data) {
 export default function AlertBanner({ token }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
-  const [alertType, setAlertType] = useState('violation'); // 'violation' | 'face_match'
   const [snapshotUrl, setSnapshotUrl] = useState(null);
   const timeoutRef = useRef(null);
   const wsRef = useRef(null);
@@ -65,7 +56,7 @@ export default function AlertBanner({ token }) {
     const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
     const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}`;
 
-    // Phát chuỗi beep phân biệt theo loại cảnh báo, trả về tổng thời lượng
+    // Phát chuỗi beep phân biệt theo loại vi phạm, trả về tổng thời lượng
     // (ms) để lên lịch TTS phát ngay sau khi beep kết thúc.
     function playAlertSound(key) {
       const sound = ALERT_SOUNDS[key] || ALERT_SOUNDS.default;
@@ -102,25 +93,14 @@ export default function AlertBanner({ token }) {
     }
 
     function handleAlert(data) {
-      const soundKey = data.type === 'face_match' ? 'face_match' : (data.violation_type || 'default');
-
-      if (data.type === 'face_match') {
-        setAlertType('face_match');
-        setMessage(
-          '\u{1F3ED} NHẬN DIỆN KHUÔN MẶT: ' +
-          `${data.matched_label} (${(data.similarity * 100).toFixed(0)}%)`
-        );
-      } else {
-        setAlertType('violation');
-        setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
-      }
+      setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
       setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => setVisible(false), 3000);
 
       // Beep trước để bảo vệ chú ý ngay, TTS đọc nội dung ngay sau đó.
-      const beepDurationMs = playAlertSound(soundKey);
+      const beepDurationMs = playAlertSound(data.violation_type || 'default');
       setTimeout(() => speak(buildSpeechText(data)), beepDurationMs + 50);
     }
 
@@ -163,15 +143,13 @@ export default function AlertBanner({ token }) {
     };
   }, [token]);
 
-  const bgColor = alertType === 'face_match' ? '#f59e0b' : '#dc3545';
-
   return (
     <div
       style={{
         position: 'fixed',
         top: 0, left: 0, right: 0,
-        backgroundColor: bgColor,
-        color: alertType === 'face_match' ? '#1c1917' : 'white',
+        backgroundColor: '#dc3545',
+        color: 'white',
         padding: '15px 20px',
         textAlign: 'center',
         fontSize: '18px',

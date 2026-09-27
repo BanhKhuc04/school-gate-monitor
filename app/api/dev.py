@@ -42,31 +42,3 @@ def trigger_test_alert(
         return {"ok": True, "alert": alert}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
-
-@router.post("/trigger-test-face-match")
-def trigger_test_face_match(
-    matched_label: str = "Nguyễn Văn A",
-    similarity: float = 0.75,
-    snapshot_url: str | None = None,
-    _current_user: dict = Depends(require_role("security", "admin")),
-):
-    """
-    Push a fake face-match alert into the WebSocket queue.
-    Only for automated testing — does NOT log to DB.
-    Requires security or admin role.
-    """
-    try:
-        pipeline = get_pipeline()
-        alert = {
-            "type": "face_match",
-            "matched_label": matched_label,
-            "similarity": similarity,
-            "snapshot_url": snapshot_url,
-            "timestamp": datetime.now().isoformat(),
-        }
-        # ponytail: bypass cooldown — put directly in queue so tests are reliable.
-        pipeline._alert_queue.put(alert)
-        return {"ok": True, "alert": alert}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
