@@ -226,9 +226,17 @@ class VideoPipeline:
                 # Gom helmet + plate vào từng nhóm theo person
                 groups = self._group_by_person(person_dets, helmet_dets, plate_dets)
 
+                # Phát hiện tư thế cho mỗi person box — ISOLATED try/except
+                groups = self._run_posture_detection(frame, groups)
+
                 # Xử lý vi phạm cho TỪNG nhóm riêng biệt
                 for group in groups:
-                    self._process_violations(frame, group['helmet_dets'], group['plate_dets'])
+                    self._process_violations(
+                        frame,
+                        group['helmet_dets'],
+                        group['plate_dets'],
+                        posture_status=group.get('posture_status', 'unknown'),
+                    )
 
                 # Face recognition — isolated try/except, does not affect helmet/plate pipeline
                 self._run_face_match(frame)
@@ -335,13 +343,15 @@ class VideoPipeline:
                 group_plates.append(best_plate)
 
             groups.append({
+                '_person': person,
                 'helmet_dets': group_helmets,
                 'plate_dets': group_plates,
             })
 
         return groups
 
-    def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list):
+    def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list,
+                         posture_status: str = 'unknown'):
         """
         Xử lý toàn bộ logic vi phạm cho MỘT nhóm (1 person):
         1. OCR đọc biển số
@@ -393,6 +403,17 @@ class VideoPipeline:
         # 3. Không có mũ bảo hiểm (có Without Helmet mà không có With Helmet)
         if has_without_helmet and not has_with_helmet:
             violation_types.append("NO_HELMET")
+
+        # 4. Tư thế đang ngồi xe (riding) + có helmet → vi phạm đặc biệt
+        if posture_status == 'riding' and has_with_helmet and not has_without_helmet:
+            violation_types.append("RIDING_THROUGH_GATE")
+
+        # 5. Tư thế đang ngồi xe (riding) + không helmet → cũng là riding
+        if posture_status == 'riding' and not has_with_helmet:
+            if "NO_HELMET" in violation_types:
+                violation_types.remove("NO_HELMET")
+            if "RIDING_THROUGH_GATE" not in violation_types:
+                violation_types.append("RIDING_THROUGH_GATE")
         
         # Nếu không có vi phạm nào → không làm gì
         if not violation_types:
@@ -436,7 +457,8 @@ class VideoPipeline:
                 plate_matched=plate_matched,
                 helmet_status=helmet_status,
                 violation_type=violation_type,
-                snapshot_path=f"data/snapshots/{snapshot_filename}" if snapshot_path else None
+                snapshot_path=f"data/snapshots/{snapshot_filename}" if snapshot_path else None,
+                posture_status=posture_status,
             )
             print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}")
         except Exception as e:
@@ -534,6 +556,49 @@ class VideoPipeline:
                     break
         except Exception:
             pass
+
+    def _run_posture_detection(self, frame: np.ndarray, groups: list) -> list:
+        """
+        Chạy pose detection cho mỗi person box trong groups.
+        Bổ sung 'posture_status' vào mỗi group dict.
+        Hoàn toàn isolated trong try/except để không ảnh hưởng pipeline chính.
+        """
+        try:
+            from app.cv.pose import PostureDetector, classify_posture
+
+            detector = PostureDetector()
+            frame_h, frame_w = frame.shape[:2]
+
+            for group in groups:
+                # Get person bbox from group (stored in the group from _group_by_person)
+                person = getattr(group, '_person', None)
+                if person is None:
+                    group['posture_status'] = 'unknown'
+                    continue
+
+                x1, y1, x2, y2 = person.bbox
+                x1, x2 = max(0, x1), min(frame_w, x2)
+                y1, y2 = max(0, y1), min(frame_h, y2)
+                if x2 <= x1 or y2 <= y1:
+                    group['posture_status'] = 'unknown'
+                    continue
+
+                person_crop = frame[y1:y2, x1:x2]
+                if person_crop.size == 0 or person_crop.shape[0] < 30 or person_crop.shape[1] < 30:
+                    group['posture_status'] = 'unknown'
+                    continue
+
+                keypoints = detector.detect_pose(person_crop)
+                posture = classify_posture(keypoints) if keypoints else 'unknown'
+                group['posture_status'] = posture
+
+        except Exception:
+            # ISOLATED: posture errors must not break the main pipeline
+            for group in groups:
+                if 'posture_status' not in group:
+                    group['posture_status'] = 'unknown'
+
+        return groups
 
 
 # Singleton instance
