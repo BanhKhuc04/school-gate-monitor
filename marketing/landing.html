@@ -1,787 +1,683 @@
-<!doctype html>
-<html lang="vi">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>School Gate Monitor — Camera AI giám sát an toàn cổng trường</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<style>
-  :root {
-    --bg: #f4f6f8;
-    --bg-alt: #e9edf0;
-    --panel: #ffffff;
-    --ink: #12181f;
-    --ink-soft: #4a5568;
-    --ink-faint: #7c8a99;
-    --accent: #f2b134;
-    --accent-ink: #1a1406;
-    --teal: #1f9f92;
-    --danger: #d6394a;
-    --success: #1f8a4c;
-    --line: rgba(18,24,31,0.12);
-    --line-strong: rgba(18,24,31,0.22);
-    color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #0d1216;
-      --bg-alt: #141b21;
-      --panel: #1a222a;
-      --ink: #eef2f5;
-      --ink-soft: #aab4bf;
-      --ink-faint: #7c8a99;
-      --accent: #f2b134;
-      --accent-ink: #1a1406;
-      --teal: #3fcabb;
-      --danger: #ff7a86;
-      --success: #4fd889;
-      --line: rgba(255,255,255,0.12);
-      --line-strong: rgba(255,255,255,0.22);
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #0d1216;
-    --bg-alt: #141b21;
-    --panel: #1a222a;
-    --ink: #eef2f5;
-    --ink-soft: #aab4bf;
-    --ink-faint: #7c8a99;
-    --accent: #f2b134;
-    --accent-ink: #1a1406;
-    --teal: #3fcabb;
-    --danger: #ff7a86;
-    --success: #4fd889;
-    --line: rgba(255,255,255,0.12);
-    --line-strong: rgba(255,255,255,0.22);
-    color-scheme: dark;
-  }
+<!DOCTYPE html>
 
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
-    font-size: 16px;
-    line-height: 1.6;
-    padding-inline: 20px;
-  }
-  h1, h2, h3, .display {
-    font-family: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif;
-    text-wrap: balance;
-    letter-spacing: -0.01em;
-  }
-  .mono {
-    font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  }
-  a { color: inherit; }
-  img { max-width: 100%; }
-  .wrap {
-    max-width: 1120px;
-    margin-inline: auto;
-  }
-  .band {
-    padding-block: 72px;
-  }
-  .band-alt { background: var(--bg-alt); }
-
-  /* ---------- Top bar ---------- */
-  .topbar {
-    max-width: 1120px;
-    margin-inline: auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-block: 20px;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'Be Vietnam Pro', sans-serif;
-    font-weight: 800;
-    font-size: 17px;
-  }
-  .brand-mark {
-    width: 30px; height: 30px;
-    border-radius: 7px;
-    background: var(--ink);
-    display: grid;
-    place-items: center;
-    flex: none;
-  }
-  .brand-mark svg { width: 17px; height: 17px; }
-  .topbar nav {
-    display: flex;
-    gap: 26px;
-    font-family: 'Be Vietnam Pro', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--ink-soft);
-  }
-  .topbar nav a { text-decoration: none; }
-  .topbar nav a:hover { color: var(--ink); }
-  @media (max-width: 640px) {
-    .topbar nav { display: none; }
-  }
-
-  /* ---------- Hero ---------- */
-  .hero {
-    padding-block: 48px 80px;
-    display: grid;
-    grid-template-columns: 1.05fr 0.95fr;
-    gap: 48px;
-    align-items: center;
-  }
-  @media (max-width: 860px) {
-    .hero { grid-template-columns: 1fr; }
-  }
-  .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--teal);
-    background: color-mix(in srgb, var(--teal) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
-    padding: 6px 12px;
-    border-radius: 999px;
-    margin-bottom: 22px;
-  }
-  .eyebrow .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--teal);
-  }
-  h1.headline {
-    font-size: clamp(34px, 5vw, 54px);
-    font-weight: 800;
-    line-height: 1.08;
-    margin: 0 0 20px;
-  }
-  h1.headline em {
-    font-style: normal;
-    color: var(--teal);
-  }
-  .sub {
-    font-size: 18px;
-    color: var(--ink-soft);
-    max-width: 46ch;
-    margin: 0 0 32px;
-  }
-  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'Be Vietnam Pro', sans-serif;
-    font-weight: 700;
-    font-size: 15px;
-    padding: 13px 22px;
-    border-radius: 9px;
-    text-decoration: none;
-    border: 1px solid transparent;
-    cursor: pointer;
-  }
-  .btn-primary {
-    background: var(--accent);
-    color: var(--accent-ink);
-  }
-  .btn-primary:hover { filter: brightness(1.05); }
-  .btn-ghost {
-    background: transparent;
-    border-color: var(--line-strong);
-    color: var(--ink);
-  }
-  .btn-ghost:hover { border-color: var(--ink-faint); }
-  .hero-note {
-    margin-top: 14px;
-    font-size: 13px;
-    color: var(--ink-faint);
-    font-family: 'IBM Plex Mono', monospace;
-  }
-
-  /* ---------- HUD graphic ---------- */
-  .hud {
-    position: relative;
-    aspect-ratio: 4 / 3.1;
-    border-radius: 16px;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--ink) 92%, transparent), color-mix(in srgb, var(--ink) 96%, transparent)),
-      repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px);
-    border: 1px solid var(--line-strong);
-    overflow: hidden;
-  }
-  .hud::before {
-    content: "";
-    position: absolute; inset: 0;
-    background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.06), transparent 60%);
-  }
-  .hud-topline {
-    position: absolute; top: 12px; left: 14px; right: 14px;
-    display: flex; justify-content: space-between;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10.5px;
-    color: rgba(255,255,255,0.55);
-    letter-spacing: 0.04em;
-  }
-  .hud-topline .rec { color: #ff5f6b; display:flex; align-items:center; gap:5px; }
-  .hud-topline .rec::before { content:""; width:6px; height:6px; border-radius:50%; background:#ff5f6b; animation: blink 1.4s infinite; }
-  @keyframes blink { 50% { opacity: 0.25; } }
-  @media (prefers-reduced-motion: reduce) { .hud-topline .rec::before { animation: none; } }
-
-  .box {
-    position: absolute;
-    border: 2px solid;
-    border-radius: 3px;
-  }
-  .box .tag {
-    position: absolute;
-    top: -20px; left: -2px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 3px;
-    white-space: nowrap;
-    color: #0d1216;
-  }
-  .box-person { border-color: #6fb1ff; left: 8%; top: 20%; width: 30%; height: 62%; }
-  .box-person .tag { background: #6fb1ff; }
-  .box-helmet-ok { border-color: var(--success); left: 14%; top: 16%; width: 12%; height: 12%; }
-  .box-helmet-ok .tag { background: var(--success); color: #06210f; }
-  .box-plate { border-color: var(--accent); left: 46%; top: 58%; width: 15%; height: 8%; }
-  .box-plate .tag { background: var(--accent); }
-  .box-nohelmet { border-color: var(--danger); left: 62%; top: 30%; width: 11%; height: 11%; }
-  .box-nohelmet .tag { background: var(--danger); color: #fff; }
-  .box-person2 { border-color: #6fb1ff; left: 58%; top: 34%; width: 26%; height: 55%; }
-
-  .hud-bottom {
-    position: absolute; left: 14px; right: 14px; bottom: 12px;
-    display: flex; justify-content: space-between; align-items: flex-end;
-  }
-  .hud-alert {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11.5px;
-    color: #fff;
-    background: color-mix(in srgb, var(--danger) 88%, black 0%);
-    border: 1px solid rgba(255,255,255,0.25);
-    padding: 7px 11px;
-    border-radius: 7px;
-  }
-  .hud-time {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10.5px;
-    color: rgba(255,255,255,0.45);
-  }
-
-  /* ---------- Section headers ---------- */
-  .kicker {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    margin: 0 0 10px;
-  }
-  .section-title {
-    font-size: clamp(24px, 3.4vw, 32px);
-    font-weight: 800;
-    margin: 0 0 16px;
-    max-width: 22ch;
-  }
-  .section-lede {
-    color: var(--ink-soft);
-    font-size: 17px;
-    max-width: 62ch;
-    margin: 0 0 44px;
-  }
-
-  /* ---------- Problem stats ---------- */
-  .stat-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-  }
-  @media (max-width: 760px) { .stat-row { grid-template-columns: 1fr; } }
-  .stat-card {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 26px 24px;
-  }
-  .stat-card .num {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 34px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--teal);
-    display: block;
-    margin-bottom: 8px;
-  }
-  .stat-card p { margin: 0; color: var(--ink-soft); font-size: 14.5px; }
-
-  /* ---------- Steps ---------- */
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0;
-    counter-reset: step;
-  }
-  @media (max-width: 860px) {
-    .steps { grid-template-columns: 1fr 1fr; gap: 28px 20px; }
-  }
-  @media (max-width: 480px) {
-    .steps { grid-template-columns: 1fr; }
-  }
-  .step {
-    position: relative;
-    padding: 0 22px 0 0;
-    counter-increment: step;
-  }
-  .steps .step:not(:last-child) {
-    border-right: 1px dashed var(--line-strong);
-  }
-  @media (max-width: 860px) {
-    .steps .step:not(:last-child) { border-right: none; }
-  }
-  .step .step-num {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    color: var(--accent);
-    font-weight: 700;
-    margin-bottom: 14px;
-  }
-  .step .step-num::before {
-    content: "0" counter(step);
-  }
-  .step h3 {
-    font-size: 17px;
-    margin: 0 0 8px;
-  }
-  .step p {
-    color: var(--ink-soft);
-    font-size: 14.5px;
-    margin: 0;
-    padding-right: 6px;
-  }
-
-  /* ---------- Feature grid ---------- */
-  .feature-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 18px;
-  }
-  @media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 520px) { .feature-grid { grid-template-columns: 1fr; } }
-  .feature {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 24px;
-  }
-  .feature .icon-wrap {
-    width: 38px; height: 38px;
-    border-radius: 9px;
-    display: grid; place-items: center;
-    margin-bottom: 16px;
-  }
-  .feature .icon-wrap svg { width: 20px; height: 20px; }
-  .feature h3 { font-size: 16px; margin: 0 0 8px; }
-  .feature p { font-size: 14px; color: var(--ink-soft); margin: 0; }
-  .feature .code {
-    display: inline-block;
-    margin-top: 12px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    color: var(--ink-faint);
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    padding: 2px 7px;
-  }
-
-  /* ---------- Legal plaque ---------- */
-  .plaque {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 22px;
-    align-items: flex-start;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-left: 4px solid var(--accent);
-    border-radius: 12px;
-    padding: 26px 28px;
-  }
-  @media (max-width: 640px) { .plaque { grid-template-columns: 1fr; } }
-  .plaque .plaque-icon {
-    width: 42px; height: 42px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--accent) 20%, transparent);
-    display: grid; place-items: center;
-    flex: none;
-  }
-  .plaque h3 { margin: 0 0 8px; font-size: 17px; }
-  .plaque p { margin: 0; color: var(--ink-soft); font-size: 15px; }
-  .plaque .ref {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    color: var(--ink-faint);
-    margin-top: 10px;
-    display: block;
-  }
-
-  /* ---------- Evidence / dashboard preview ---------- */
-  .evidence {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    align-items: center;
-  }
-  @media (max-width: 860px) { .evidence { grid-template-columns: 1fr; } }
-  .evidence ul { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 14px; }
-  .evidence li {
-    display: flex; gap: 12px; align-items: flex-start;
-    font-size: 15px; color: var(--ink-soft);
-  }
-  .evidence li svg { flex: none; margin-top: 3px; width: 17px; height: 17px; color: var(--success); }
-  .evidence li b { color: var(--ink); }
-
-  .dash-mock {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 20px;
-  }
-  .dash-mock .dash-head {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 16px;
-    font-family: 'Be Vietnam Pro', sans-serif;
-    font-weight: 700;
-    font-size: 13px;
-    color: var(--ink-faint);
-  }
-  .dash-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-  .dash-kpi { background: var(--bg-alt); border-radius: 9px; padding: 12px 14px; }
-  .dash-kpi .n { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; color: var(--teal); }
-  .dash-kpi .l { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
-  .dash-bars { display: flex; align-items: flex-end; gap: 8px; height: 84px; padding: 0 2px; }
-  .dash-bars i {
-    display: block; flex: 1;
-    background: linear-gradient(180deg, var(--teal), color-mix(in srgb, var(--teal) 60%, transparent));
-    border-radius: 4px 4px 0 0;
-  }
-
-  /* ---------- CTA band ---------- */
-  .cta-band {
-    background: var(--ink);
-    color: #f5f7f8;
-    border-radius: 20px;
-    padding: 52px 40px;
-    text-align: center;
-  }
-  .cta-band h2 { font-size: clamp(24px, 3.6vw, 32px); margin: 0 0 12px; }
-  .cta-band p { color: rgba(245,247,248,0.7); font-size: 16px; margin: 0 0 30px; }
-  .contact-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 999px;
-    padding: 10px 18px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13.5px;
-    margin-top: 18px;
-  }
-  .contact-pill button {
-    background: transparent;
-    border: none;
-    color: var(--accent);
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0;
-  }
-  .copy-msg {
-    font-size: 12px;
-    color: var(--accent);
-    margin-top: 8px;
-    height: 14px;
-  }
-
-  /* ---------- Footer ---------- */
-  footer {
-    padding-block: 40px 60px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-    font-size: 13px;
-    color: var(--ink-faint);
-    border-top: 1px solid var(--line);
-  }
-  footer .brand { font-size: 14px; }
-</style>
-
-<div class="topbar">
-  <div class="brand">
-    <span class="brand-mark">
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="3" y="7" width="14" height="11" rx="2" stroke="#f2b134" stroke-width="1.6"/>
-        <path d="M17 10.5L21 8V16L17 13.5" stroke="#f2b134" stroke-width="1.6" stroke-linejoin="round"/>
-      </svg>
-    </span>
-    School Gate Monitor
-  </div>
-  <nav>
-    <a href="#how">Cách hoạt động</a>
-    <a href="#features">Tính năng</a>
-    <a href="#evidence">Bằng chứng</a>
-    <a href="#cta">Liên hệ</a>
-  </nav>
-</div>
-
-<div class="wrap">
-  <section class="hero">
-    <div>
-      <span class="eyebrow"><span class="dot"></span>Đang giám sát thời gian thực</span>
-      <h1 class="headline">Không lượt xe nào<br>qua cổng <em>mà không rõ ai lái.</em></h1>
-      <p class="sub">Camera AI đặt tại cổng trường tự động phát hiện học sinh không đội mũ bảo hiểm, xe chưa đăng ký và ghi lại ảnh bằng chứng — ngay khoảnh khắc xe vừa qua cổng, không cần bảo vệ đứng canh từng em.</p>
-      <div class="cta-row">
-        <a class="btn btn-primary" href="#cta">Đặt lịch demo cho trường bạn</a>
-        <a class="btn btn-ghost" href="#how">Xem cách hoạt động ↓</a>
-      </div>
-      <p class="hero-note">Đã kiểm chứng trên helmet · biển số · khuôn mặt · tư thế lên xe</p>
-    </div>
-
-    <div class="hud" aria-hidden="true">
-      <div class="hud-topline">
-        <span class="rec">REC · CAM_01</span>
-        <span>CỔNG CHÍNH — 07:12:44</span>
-      </div>
-
-      <div class="box box-person"><span class="tag">PERSON 0.93</span></div>
-      <div class="box box-helmet-ok"><span class="tag">HELMET 0.88</span></div>
-      <div class="box box-plate"><span class="tag">59H1·5417</span></div>
-      <div class="box box-person2"><span class="tag">PERSON 0.90</span></div>
-      <div class="box box-nohelmet"><span class="tag">NO HELMET 0.91</span></div>
-
-      <div class="hud-bottom">
-        <span class="hud-alert">⚠ CẢNH BÁO: KHÔNG ĐỘI MŨ BẢO HIỂM</span>
-        <span class="hud-time">frame #18294</span>
-      </div>
-    </div>
-  </section>
-</div>
-
-<div class="band band-alt">
-  <div class="wrap">
-    <p class="kicker">Vấn đề thật ở mọi cổng trường</p>
-    <h2 class="section-title">Bảo vệ không thể nhìn kịp mọi lượt xe, mỗi sáng.</h2>
-    <p class="section-lede">Giờ cao điểm, hàng trăm xe máy và xe đạp điện dồn qua cổng trong vài phút. Một người đứng canh không thể vừa kiểm tra mũ bảo hiểm, vừa đọc biển số, vừa nhớ mặt từng xe lạ — và khi có sự cố, thường không có gì để tra lại ngoài trí nhớ.</p>
-
-    <div class="stat-row">
-      <div class="stat-card">
-        <span class="num">4</span>
-        <p>loại vi phạm được phân biệt tự động: không mũ, biển số lạ, không đọc được biển số, ngồi lái thay vì dắt bộ qua cổng.</p>
-      </div>
-      <div class="stat-card">
-        <span class="num">&lt;1s</span>
-        <p>từ lúc xe vào khung hình đến lúc bảo vệ nghe cảnh báo và thấy ảnh chụp trên màn hình.</p>
-      </div>
-      <div class="stat-card">
-        <span class="num">100%</span>
-        <p>lượt vi phạm được lưu lại ảnh + thời gian, xem lại được bất cứ lúc nào trên trang quản trị.</p>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="band" id="how">
-  <div class="wrap">
-    <p class="kicker">Quy trình</p>
-    <h2 class="section-title">Từ khung hình đến cảnh báo, trong bốn bước.</h2>
-    <p class="section-lede">Toàn bộ xử lý diễn ra ngay tại chỗ, không cần internet để nhận diện — chỉ cần một camera hướng vào cổng.</p>
-
-    <div class="steps">
-      <div class="step">
-        <div class="step-num"></div>
-        <h3>Camera nhận diện</h3>
-        <p>Phát hiện người, xe máy, xe đạp, mũ bảo hiểm và biển số trong từng khung hình theo thời gian thực.</p>
-      </div>
-      <div class="step">
-        <div class="step-num"></div>
-        <h3>Phân loại vi phạm</h3>
-        <p>Đối chiếu biển số với danh sách xe đã đăng ký, đối chiếu khuôn mặt, xác định đang dắt bộ hay ngồi lái.</p>
-      </div>
-      <div class="step">
-        <div class="step-num"></div>
-        <h3>Cảnh báo tức thời</h3>
-        <p>Bảo vệ nghe một âm báo riêng cho từng loại vi phạm, kèm giọng đọc tự động nội dung và biển số.</p>
-      </div>
-      <div class="step">
-        <div class="step-num"></div>
-        <h3>Lưu bằng chứng</h3>
-        <p>Ảnh chụp và thời điểm vi phạm được lưu lại, tra cứu lại theo ngày, theo lớp trên trang quản trị.</p>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="band band-alt" id="features">
-  <div class="wrap">
-    <p class="kicker">Bốn điều camera thường bỏ lỡ</p>
-    <h2 class="section-title">Những gì hệ thống nhận diện được ở mỗi lượt xe.</h2>
-
-    <div class="feature-grid">
-      <div class="feature">
-        <div class="icon-wrap" style="background:color-mix(in srgb, var(--danger) 16%, transparent)">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a7 7 0 0 0-7 7v4a2 2 0 0 0 2 2h1v-6a4 4 0 0 1 8 0v6h1a2 2 0 0 0 2-2v-4a7 7 0 0 0-7-7Z" stroke="var(--danger)" stroke-width="1.6"/><path d="M9 17v1a3 3 0 0 0 6 0v-1" stroke="var(--danger)" stroke-width="1.6"/></svg>
+<html lang="vi"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><title>School Gate Monitor - Cổng Trường An Toàn</title><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"inverse-on-surface":"#eaf1ff","error-container":"#ffdad6","primary-fixed":"#d8e3fb","surface-container-low":"#eff4ff","surface":"#f8f9ff","secondary":"#0051d5","on-surface":"#0b1c30","surface-container-high":"#dce9ff","surface-tint":"#545f73","surface-bright":"#f8f9ff","surface-container-highest":"#d3e4fe","on-error-container":"#93000a","secondary-fixed-dim":"#b4c5ff","surface-container-lowest":"#ffffff","on-primary-fixed-variant":"#3c475a","on-tertiary":"#ffffff","on-secondary-fixed":"#00174b","surface-container":"#e5eeff","primary-container":"#1e293b","on-secondary":"#ffffff","on-tertiary-fixed-variant":"#005236","tertiary-container":"#00301e","surface-dim":"#cbdbf5","surface-variant":"#d3e4fe","secondary-container":"#316bf3","inverse-surface":"#213145","on-surface-variant":"#45474c","on-secondary-fixed-variant":"#003ea8","on-primary":"#ffffff","on-background":"#0b1c30","on-tertiary-container":"#00a472","secondary-fixed":"#dbe1ff","background":"#f8f9ff","outline-variant":"#c5c6cd","on-secondary-container":"#fefcff","on-primary-container":"#8590a6","primary-fixed-dim":"#bcc7de","inverse-primary":"#bcc7de","on-primary-fixed":"#111c2d","outline":"#75777d","error":"#ba1a1a","tertiary-fixed-dim":"#4edea3","tertiary-fixed":"#6ffbbe","primary":"#091426","on-error":"#ffffff","tertiary":"#00190e","on-tertiary-fixed":"#002113"},borderRadius:{DEFAULT:"0.125rem",lg:"0.25rem",xl:"0.5rem",full:"0.75rem"},spacing:{gutter:"1.25rem",margin:"2rem","space-xs":"0.25rem","gutter-sm":"0.75rem","margin-sm":"1rem","space-md":"1rem","space-lg":"1.5rem","space-xl":"2.5rem","space-sm":"0.5rem"},fontFamily:{"body-lg":["Plus Jakarta Sans"],"headline-lg-mobile":["Plus Jakarta Sans"],"label-lg":["JetBrains Mono"],"headline-sm":["Plus Jakarta Sans"],"headline-xl-mobile":["Plus Jakarta Sans"],"headline-lg":["Plus Jakarta Sans"],"headline-md":["Plus Jakarta Sans"],"body-md":["Plus Jakarta Sans"],"body-sm":["Plus Jakarta Sans"],"label-sm":["JetBrains Mono"],"headline-xl":["Plus Jakarta Sans"],"label-md":["JetBrains Mono"]},fontSize:{"body-lg":["16px",{lineHeight:"24px",fontWeight:"400"}],"headline-lg-mobile":["24px",{lineHeight:"32px",fontWeight:"600"}],"label-lg":["13px",{lineHeight:"18px",fontWeight:"500"}],"headline-sm":["18px",{lineHeight:"26px",fontWeight:"600"}],"headline-xl-mobile":["28px",{lineHeight:"36px",fontWeight:"700"}],"headline-lg":["28px",{lineHeight:"36px",fontWeight:"700"}],"headline-md":["22px",{lineHeight:"30px",fontWeight:"600"}],"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"body-sm":["12px",{lineHeight:"18px",fontWeight:"400"}],"label-sm":["10px",{lineHeight:"14px",fontWeight:"600"}],"headline-xl":["36px",{lineHeight:"44px",fontWeight:"700"}],"label-md":["11px",{lineHeight:"16px",fontWeight:"500"}]}}}}</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased"><header class="fixed top-0 left-0 right-0 z-50 bg-surface-container-lowest/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-20 w-full px-margin flex items-center justify-between gap-gutter"><div class="flex items-center gap-space-md"><div class="w-11 h-11 rounded-lg bg-primary flex items-center justify-center text-on-primary shadow-sm"><span class="material-symbols-outlined text-[24px]">videocam</span></div><div class="flex flex-col"><span class="font-headline-sm text-headline-sm text-primary tracking-tight">School Gate Monitor</span><span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Hệ thống AI Giám sát Cổng trường</span></div></div><nav class="hidden xl:flex items-center gap-space-lg" data-active-classes="text-secondary font-bold"><a aria-current="page" class="transition-colors text-secondary font-bold" data-path="landing-page" href="#thuc-trang">Vấn đề thực tế</a><a aria-current="page" class="transition-colors text-secondary font-bold" data-path="landing-page" href="#quy-trinh">Quy trình hoạt động</a><a aria-current="page" class="transition-colors text-secondary font-bold" data-path="landing-page" href="#tinh-nang">Tính năng AI</a><a aria-current="page" class="transition-colors text-secondary font-bold" data-path="landing-page" href="#bao-cao">Báo cáo &amp; Dữ liệu</a><a aria-current="page" class="transition-colors text-secondary font-bold" data-path="landing-page" href="#phap-ly">Hỏi đáp pháp lý</a></nav><div class="flex items-center gap-space-md"><div class="hidden md:flex items-center gap-space-xs px-space-md py-space-xs rounded bg-surface-container-low"><span class="material-symbols-outlined text-[16px] text-secondary">support_agent</span><div class="flex flex-col"><span class="font-label-sm text-label-sm text-on-surface-variant uppercase">Tư vấn kỹ thuật</span><span class="font-label-md text-label-md text-on-surface font-semibold">1900 xxxx</span></div></div><a class="inline-flex items-center gap-space-xs px-space-md py-space-sm bg-secondary text-on-secondary rounded font-body-md text-body-md font-semibold hover:bg-secondary-container hover:text-on-secondary-container transition-all shadow-[0_1px_3px_0_rgba(15,23,42,0.05)]" href="#demo"><span class="material-symbols-outlined text-[18px]">calendar_today</span><span>Đăng ký Demo trực tiếp</span></a><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="w-full pt-20 bg-surface"><div class="flex flex-col w-full">
+<!-- SECTION 1: HERO SECTION -->
+<section class="relative w-full px-margin py-space-xl bg-surface-container-lowest overflow-hidden">
+<div class="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-secondary/5 blur-3xl pointer-events-none"></div>
+<div class="max-w-7xl mx-auto flex flex-col gap-space-xl">
+<!-- Top Text Pitch -->
+<div class="flex flex-col items-start gap-space-sm max-w-4xl">
+<div class="inline-flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-surface-container font-label-md text-label-md text-secondary font-semibold uppercase tracking-wider">
+<span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+          CÔNG NGHỆ THỊ GIÁC MÁY TÍNH AI CHO TRƯỜNG THCS &amp; THPT
         </div>
-        <h3>Mũ bảo hiểm</h3>
-        <p>Phân biệt có/không đội mũ cho từng người trên xe, kể cả khi chở hai.</p>
-        <span class="code">NO_HELMET</span>
-      </div>
-      <div class="feature">
-        <div class="icon-wrap" style="background:color-mix(in srgb, var(--accent) 22%, transparent)">
-          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="8" width="18" height="9" rx="1.5" stroke="var(--accent-ink)" stroke-width="1.6"/><path d="M7 12.5h3M13 12.5h4" stroke="var(--accent-ink)" stroke-width="1.6"/></svg>
-        </div>
-        <h3>Biển số xe</h3>
-        <p>Đọc biển số và đối chiếu ngay với danh sách xe học sinh đã đăng ký.</p>
-        <span class="code">PLATE_NOT_REGISTERED</span>
-      </div>
-      <div class="feature">
-        <div class="icon-wrap" style="background:color-mix(in srgb, var(--teal) 18%, transparent)">
-          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="9" r="3.2" stroke="var(--teal)" stroke-width="1.6"/><path d="M5.5 19c1.4-3.3 4-5 6.5-5s5.1 1.7 6.5 5" stroke="var(--teal)" stroke-width="1.6"/></svg>
-        </div>
-        <h3>Khuôn mặt</h3>
-        <p>Đối chiếu khuôn mặt với danh sách đã đăng ký, kèm ảnh làm bằng chứng.</p>
-        <span class="code">face_match</span>
-      </div>
-      <div class="feature">
-        <div class="icon-wrap" style="background:color-mix(in srgb, var(--success) 18%, transparent)">
-          <svg viewBox="0 0 24 24" fill="none"><circle cx="6" cy="18" r="2.4" stroke="var(--success)" stroke-width="1.6"/><circle cx="17" cy="18" r="2.4" stroke="var(--success)" stroke-width="1.6"/><path d="M6 18l4-9h4l3 9M10 9h4" stroke="var(--success)" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        </div>
-        <h3>Tư thế lên xe</h3>
-        <p>Phân biệt đang dắt bộ qua cổng hay đã ngồi lái — đúng quy định an toàn của trường.</p>
-        <span class="code">RIDING_THROUGH_GATE</span>
-      </div>
-    </div>
-  </div>
+<h1 class="font-headline-xl text-headline-xl text-primary tracking-tight font-bold">
+          Không một phương tiện nào qua cổng trường mà không được định danh chính xác.
+        </h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-3xl">
+          Giải pháp camera AI tự động nhận diện vi phạm mũ bảo hiểm, kiểm tra biển số đã đăng ký và phân biệt chính xác xe đạp thường với xe máy điện ngay trong 0.2 giây.
+        </p>
+<div class="flex flex-wrap items-center gap-space-md pt-space-xs">
+<a class="inline-flex items-center gap-space-xs px-space-lg py-space-sm bg-secondary text-on-secondary rounded font-body-md text-body-md font-semibold hover:bg-secondary-container transition-all shadow-sm" href="#demo">
+<span class="material-symbols-outlined text-[20px]">calendar_month</span>
+<span>Đăng ký Demo trực tiếp</span>
+</a>
+<a class="inline-flex items-center gap-space-xs px-space-lg py-space-sm bg-surface-container text-on-surface rounded font-body-md text-body-md font-semibold hover:bg-surface-container-high transition-all" href="#quy-trinh">
+<span class="material-symbols-outlined text-[20px]">play_circle</span>
+<span>Xem cách thức hoạt động</span>
+</a>
 </div>
-
-<div class="band">
-  <div class="wrap">
-    <div class="plaque">
-      <div class="plaque-icon">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 4v5c0 5-3.4 8.4-8 9-4.6-.6-8-4-8-9V7l8-4Z" stroke="var(--accent-ink)" stroke-width="1.6"/></svg>
-      </div>
-      <div>
-        <h3>Không báo sai cho học sinh đi xe đạp thường</h3>
-        <p>Theo Nghị định 100/2019/NĐ-CP, chỉ xe máy và xe đạp điện mới bắt buộc đội mũ bảo hiểm — xe đạp thường thì không. Hệ thống tự nhận diện loại phương tiện trước khi đối chiếu quy định, để không gắn lỗi cho những em chỉ đang đạp xe đến trường.</p>
-        <span class="ref">Nghị định 100/2019/NĐ-CP · điều khoản đội mũ bảo hiểm xe máy, xe đạp điện</span>
-      </div>
-    </div>
-  </div>
+<div class="flex items-center gap-space-xs font-label-md text-label-md text-on-surface-variant">
+<span class="material-symbols-outlined text-tertiary-fixed-dim text-[18px]">verified</span>
+<span>Đã sẵn sàng triển khai trên hạ tầng camera IP có sẵn của nhà trường. Không cần thay mới thiết bị.</span>
 </div>
-
-<div class="band band-alt" id="evidence">
-  <div class="wrap">
-    <div class="evidence">
-      <div>
-        <p class="kicker">Không chỉ cảnh báo</p>
-        <h2 class="section-title">Có bằng chứng, có số liệu — không chỉ có tiếng còi.</h2>
-        <p class="section-lede" style="margin-bottom:0">Mỗi vi phạm đều để lại dấu vết tra cứu được, và ban giám hiệu xem được bức tranh toàn cảnh thay vì nghe báo cáo miệng.</p>
-        <ul>
-          <li>
-            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span><b>Ảnh chụp tự động</b> kèm mỗi vi phạm và mỗi lượt khớp khuôn mặt, lưu lại để xem hoặc in khi cần đối chiếu.</span>
-          </li>
-          <li>
-            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span><b>Lọc theo ngày, biển số, loại vi phạm</b> trên trang quản trị — không cần tua lại video.</span>
-          </li>
-          <li>
-            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span><b>Dashboard xu hướng</b> theo ngày và theo lớp, để ban giám hiệu thấy lớp nào cần nhắc nhở thêm.</span>
-          </li>
-        </ul>
-      </div>
-
-      <div class="dash-mock" aria-hidden="true">
-        <div class="dash-head"><span>DASHBOARD</span><span>14 NGÀY GẦN NHẤT</span></div>
-        <div class="dash-kpis">
-          <div class="dash-kpi"><div class="n">12</div><div class="l">Vi phạm hôm nay</div></div>
-          <div class="dash-kpi"><div class="n">64</div><div class="l">Vi phạm tuần này</div></div>
-        </div>
-        <div class="dash-bars">
-          <i style="height:18%"></i><i style="height:24%"></i><i style="height:15%"></i>
-          <i style="height:32%"></i><i style="height:28%"></i><i style="height:40%"></i>
-          <i style="height:35%"></i><i style="height:50%"></i><i style="height:44%"></i>
-          <i style="height:60%"></i><i style="height:55%"></i><i style="height:70%"></i>
-          <i style="height:66%"></i><i style="height:82%"></i>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
-
-<div class="band" id="cta">
-  <div class="wrap">
-    <div class="cta-band">
-      <h2>Muốn xem hệ thống chạy trên chính cổng trường bạn?</h2>
-      <p>Đặt lịch demo trực tiếp — mang một đoạn video cổng trường của bạn, chúng tôi chạy thử ngay tại chỗ.</p>
-      <a class="btn btn-primary" href="#" id="ctaBtn">Đặt lịch demo</a>
-      <div>
-        <div class="contact-pill">
-          <span id="contactText">lienhe@[ten-mien-cua-ban].vn</span>
-          <button type="button" id="copyBtn">Sao chép</button>
-        </div>
-      </div>
-      <div class="copy-msg" id="copyMsg"></div>
-    </div>
-  </div>
-
-  <footer>
-    <div class="brand">School Gate Monitor</div>
-    <div>Hệ thống giám sát an toàn cổng trường bằng AI.</div>
-  </footer>
+<!-- HERO VISUAL: LIVE CAMERA AI HUD SIMULATOR -->
+<div class="relative w-full rounded-xl overflow-hidden bg-primary text-on-primary shadow-xl">
+<!-- Live Camera Feed Simulation Container -->
+<div class="relative w-full aspect-[16/9] min-h-[480px] bg-primary-container">
+<!-- Background Real Gate Image Placeholder -->
+<div class="absolute inset-0 bg-cover bg-center opacity-40" data-alt="High-resolution security camera view looking down at a Vietnamese secondary school entrance in the early morning. Crowds of students in white uniforms arriving on bicycles, electric scooters, and walking through the metal campus gates under cool morning sunlight." style="background-image: url('assets/hero-gate.jpg')"></div>
+<!-- Bottom Scrim Overlay -->
+<div class="absolute inset-0 bg-gradient-to-t from-primary/95 via-transparent to-primary/60"></div>
+<!-- Top HUD Header Bar -->
+<div class="absolute top-0 left-0 right-0 p-space-md flex flex-wrap items-center justify-between gap-space-sm z-20">
+<div class="flex items-center gap-space-sm">
+<span class="inline-flex items-center gap-1.5 px-space-sm py-0.5 rounded bg-error text-on-error font-label-sm text-label-sm font-bold tracking-widest animate-pulse">
+<span class="w-2 h-2 rounded-full bg-white"></span>
+                LIVE REC 1080P
+              </span>
+<span class="font-label-md text-label-md text-inverse-on-surface">Cổng Chính - THPT Chu Văn An</span>
+<span class="text-on-surface-variant font-label-md">|</span>
+<span class="font-label-md text-label-md text-tertiary-fixed font-semibold" id="hero-clock">06:47:12 AM - 24/10/2024</span>
 </div>
-
-<script>
-  (function () {
-    var copyBtn = document.getElementById('copyBtn');
-    var msg = document.getElementById('copyMsg');
-    var text = document.getElementById('contactText');
-    copyBtn.addEventListener('click', function () {
-      var value = text.textContent;
-      function done(ok) {
-        msg.textContent = ok ? 'Đã sao chép.' : 'Không sao chép được — vui lòng chọn thủ công.';
-      }
-      try {
-        navigator.clipboard.writeText(value).then(function () { done(true); }, function () { done(false); });
-      } catch (e) {
-        done(false);
-      }
-    });
-
-    var ctaBtn = document.getElementById('ctaBtn');
-    ctaBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      var pill = document.querySelector('.contact-pill');
-      pill.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      pill.style.borderColor = 'var(--accent)';
-    });
-  })();
-</script>
-</body>
-</html>
+<div class="flex items-center gap-space-xs font-label-sm text-label-sm text-on-primary-container">
+<span class="px-space-xs py-0.5 rounded bg-surface/10 backdrop-blur-sm">FPS: 30.2</span>
+<span class="px-space-xs py-0.5 rounded bg-surface/10 backdrop-blur-sm">MODEL: YOLO-EDU-v8</span>
+<span class="px-space-xs py-0.5 rounded bg-surface/10 backdrop-blur-sm text-tertiary-fixed">LATENCY: 142ms</span>
+</div>
+</div>
+<!-- DETECTIONS OVERLAYS -->
+<!-- Detection 1: Red Alert (Non-helmet on e-bike) -->
+<div class="absolute top-[28%] left-[8%] w-[32%] h-[56%] z-10">
+<!-- Corner Brackets -->
+<div class="absolute inset-0 bg-error/10">
+<div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-error"></div>
+<div class="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-error"></div>
+<div class="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-error"></div>
+<div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-error"></div>
+</div>
+<!-- Top HUD Tag -->
+<div class="absolute -top-14 left-0 bg-primary p-space-xs rounded shadow-lg flex flex-col gap-0.5 min-w-[240px]">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm px-1 py-0.5 rounded bg-error text-on-error font-bold">VI PHẠM: KHÔNG MŨ BH</span>
+<span class="font-label-sm text-label-sm text-error font-mono">98.8% AI</span>
+</div>
+<div class="font-label-sm text-label-sm text-inverse-on-surface">Phương tiện: Xe máy điện VinFast Evo</div>
+<div class="font-label-sm text-label-sm text-outline-variant truncate">Biển số: 29MD-842.11 (Chưa đăng ký)</div>
+</div>
+</div>
+<!-- Detection 2: Green Verified (Regular bicycle, no helmet required) -->
+<div class="absolute top-[32%] left-[45%] w-[26%] h-[50%] z-10">
+<!-- Corner Brackets -->
+<div class="absolute inset-0 bg-tertiary-fixed/10">
+<div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-tertiary-fixed"></div>
+<div class="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-tertiary-fixed"></div>
+<div class="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-tertiary-fixed"></div>
+<div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-tertiary-fixed"></div>
+</div>
+<!-- Top HUD Tag -->
+<div class="absolute -top-14 left-0 bg-primary p-space-xs rounded shadow-lg flex flex-col gap-0.5 min-w-[230px]">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm px-1 py-0.5 rounded bg-tertiary-container text-tertiary-fixed font-bold">HỢP LỆ: XE ĐẠP THƯỜNG</span>
+<span class="font-label-sm text-label-sm text-tertiary-fixed font-mono">99.4%</span>
+</div>
+<div class="font-label-sm text-label-sm text-inverse-on-surface truncate">Nguyễn Hoàng Nam - Lớp 10A2</div>
+<div class="font-label-sm text-label-sm text-outline-variant">Khung xe đạp cơ: Miễn bắt buộc mũ</div>
+</div>
+</div>
+<!-- Detection 3: Amber Info (Walking bike) -->
+<div class="absolute top-[36%] right-[6%] w-[22%] h-[44%] z-10">
+<!-- Corner Brackets -->
+<div class="absolute inset-0 bg-secondary/15">
+<div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-secondary"></div>
+<div class="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-secondary"></div>
+<div class="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-secondary"></div>
+<div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-secondary"></div>
+</div>
+<!-- Top HUD Tag -->
+<div class="absolute -top-12 left-0 bg-primary p-space-xs rounded shadow-lg flex flex-col gap-0.5 min-w-[190px]">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm px-1 py-0.5 rounded bg-secondary text-on-secondary font-bold">ĐÚNG QUY ĐỊNH: DẮT XE</span>
+<span class="font-label-sm text-label-sm text-secondary-fixed">OK</span>
+</div>
+<div class="font-label-sm text-label-sm text-inverse-on-surface">Tư thế: Đi bộ dắt xe</div>
+</div>
+</div>
+<!-- Bottom Telemetry HUD Floating Bar -->
+<div class="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-space-sm p-space-sm bg-inverse-surface/85 backdrop-blur-md rounded shadow-lg">
+<div class="flex items-center gap-space-lg">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-secondary text-[20px]">speed</span>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-outline-variant">LƯU LƯỢNG CAO ĐIỂM</span>
+<span class="font-label-md text-label-md text-inverse-on-surface font-semibold">340 xe / 15 phút</span>
+</div>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-tertiary-fixed text-[20px]">precision_manufacturing</span>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-outline-variant">ĐỘ CHÍNH XÁC NHẬN DIỆN</span>
+<span class="font-label-md text-label-md text-inverse-on-surface font-semibold">99.2% Chuẩn kiểm định</span>
+</div>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-secondary-fixed text-[20px]">bolt</span>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-outline-variant">ĐỘ TRỄ PHÁT LOA</span>
+<span class="font-label-md text-label-md text-inverse-on-surface font-semibold">&lt; 200ms Tức thì</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="w-2.5 h-2.5 rounded-full bg-tertiary-fixed animate-ping"></span>
+<span class="font-label-sm text-label-sm text-tertiary-fixed font-mono uppercase tracking-wider">Hệ thống AI Đang Giám Sát</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION 2: PROBLEM SECTION (#thuc-trang) -->
+<section class="w-full px-margin py-space-xl bg-surface" id="thuc-trang">
+<div class="max-w-7xl mx-auto flex flex-col gap-space-lg">
+<div class="flex flex-col gap-space-xs max-w-3xl">
+<span class="font-label-md text-label-md text-secondary uppercase tracking-widest font-semibold">THỰC TRẠNG GIỜ CAO ĐIỂM CỔNG TRƯỜNG</span>
+<h2 class="font-headline-lg text-headline-lg text-primary">
+          Bảo vệ không thể kiểm soát hàng trăm lượt xe chỉ trong 15 phút đầu giờ
+        </h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">
+          Vào khung giờ 6h30 - 7h00 sáng, hàng trăm xe máy, xe máy điện và xe đạp ùa qua cổng cùng lúc. Lực lượng bảo vệ chỉ có 2-3 người, không thể vừa quan sát biển số, vừa kiểm tra học sinh có đội mũ hay không, vừa nhắc nhở an toàn. Khi xảy ra sự cố hoặc kiểm điểm thi đua, nhà trường hoàn toàn không có bằng chứng đối soát.
+        </p>
+</div>
+<!-- 3 Concrete Metric Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter pt-space-sm">
+<!-- Card 1 -->
+<div class="flex flex-col gap-space-sm p-space-lg rounded bg-surface-container-lowest shadow-sm hover:shadow-md transition-shadow">
+<div class="w-12 h-12 rounded bg-surface-container-low flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[28px]">category</span>
+</div>
+<span class="font-headline-md text-headline-md text-primary">04 Phân loại vi phạm</span>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Tự động phân tách chính xác: Không đội mũ bảo hiểm, xe không biển hoặc biển số lạ chưa đăng ký, người ngoài xâm nhập khu vực trường và không tuân thủ quy định dắt xe qua cổng.
+          </p>
+</div>
+<!-- Card 2 -->
+<div class="flex flex-col gap-space-sm p-space-lg rounded bg-surface-container-lowest shadow-sm hover:shadow-md transition-shadow">
+<div class="w-12 h-12 rounded bg-surface-container-low flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[28px]">timer</span>
+</div>
+<span class="font-headline-md text-headline-md text-primary">&lt; 200 Milligiây</span>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Tốc độ phát hiện và phát loa cảnh báo tức thời ngay khi học sinh vừa chạm vạch cổng trường, nhắc nhở nề nếp trực diện mà không làm cản trở dòng người lưu thông.
+          </p>
+</div>
+<!-- Card 3 -->
+<div class="flex flex-col gap-space-sm p-space-lg rounded bg-surface-container-lowest shadow-sm hover:shadow-md transition-shadow">
+<div class="w-12 h-12 rounded bg-surface-container-low flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[28px]">photo_library</span>
+</div>
+<span class="font-headline-md text-headline-md text-primary">100% Lưu trữ bằng chứng</span>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Mọi lượt vi phạm đều được chụp đồng thời 2 khung hình: góc chụp toàn cảnh bối cảnh và ảnh crop cận cảnh biển số phương tiện kèm dấu thời gian nguyên vẹn.
+          </p>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION 3: HOW IT WORKS FLOW (#quy-trinh) -->
+<section class="w-full px-margin py-space-xl bg-surface-container-low" id="quy-trinh">
+<div class="max-w-7xl mx-auto flex flex-col gap-space-xl">
+<div class="flex flex-col items-center text-center gap-space-xs max-w-2xl mx-auto">
+<span class="font-label-md text-label-md text-secondary uppercase tracking-widest font-semibold">QUY TRÌNH VẬN HÀNH 4 BƯỚC</span>
+<h2 class="font-headline-lg text-headline-lg text-primary">
+          Từ lúc xe tiến vào cổng đến khi có bằng chứng lưu trữ hoàn toàn tự động
+        </h2>
+<p class="font-body-md text-body-md text-on-surface-variant">
+          Quy trình diễn ra khép kín ở cấp độ mili-giây, không cần nhân viên can thiệp thủ công trong giờ cao điểm.
+        </p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter">
+<!-- Step 1 -->
+<div class="flex flex-col gap-space-sm p-space-lg bg-surface-container-lowest rounded shadow-sm relative">
+<div class="flex items-center justify-between">
+<span class="font-label-lg text-label-lg font-bold text-secondary">BƯỚC 01</span>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]">videocam</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-primary">Nhận diện đa đối tượng</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Camera AI quét liên tục phương tiện, phân tích người điều khiển, mũ bảo hiểm và biển kiểm soát song song cùng lúc.
+          </p>
+</div>
+<!-- Step 2 -->
+<div class="flex flex-col gap-space-sm p-space-lg bg-surface-container-lowest rounded shadow-sm relative">
+<div class="flex items-center justify-between">
+<span class="font-label-lg text-label-lg font-bold text-secondary">BƯỚC 02</span>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]">sync_alt</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-primary">Phân loại &amp; Đối soát</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Kiểm tra biển số với danh sách phụ huynh/học sinh đã đăng ký; xác định rõ xe đạp thường hay xe máy điện.
+          </p>
+</div>
+<!-- Step 3 -->
+<div class="flex flex-col gap-space-sm p-space-lg bg-surface-container-lowest rounded shadow-sm relative">
+<div class="flex items-center justify-between">
+<span class="font-label-lg text-label-lg font-bold text-secondary">BƯỚC 03</span>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]">campaign</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-primary">Phát tín hiệu cảnh báo</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Phát âm thanh đặc trưng và lời nhắc giọng nói tự động tương ứng từng lỗi vi phạm qua loa tại bốt bảo vệ để nhắc nhở học sinh ngay tại chỗ.
+          </p>
+</div>
+<!-- Step 4 -->
+<div class="flex flex-col gap-space-sm p-space-lg bg-surface-container-lowest rounded shadow-sm relative">
+<div class="flex items-center justify-between">
+<span class="font-label-lg text-label-lg font-bold text-secondary">BƯỚC 04</span>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]">inventory_2</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-primary">Lưu trữ &amp; Trích xuất</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Tự động ghi lại ảnh góc rộng kèm ảnh crop chi tiết, ghi nhận thời gian chính xác đưa vào sổ theo dõi nề nếp của từng lớp.
+          </p>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION 4: FEATURE GRID - 4 TÍNH NĂNG CỐT LÕI (#tinh-nang) -->
+<section class="w-full px-margin py-space-xl bg-surface-container-lowest" id="tinh-nang">
+<div class="max-w-7xl mx-auto flex flex-col gap-space-xl">
+<div class="flex flex-col gap-space-xs max-w-3xl">
+<span class="font-label-md text-label-md text-secondary uppercase tracking-widest font-semibold">TÍNH NĂNG AI CHUYÊN SÂU</span>
+<h2 class="font-headline-lg text-headline-lg text-primary">
+          3 Khả năng phát hiện chuyên sâu cho môi trường học đường
+        </h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">
+          Được huấn luyện trên tập dữ liệu đặc thù Việt Nam: đồng phục học sinh, xe máy điện học sinh, biển kiểm soát MD/AA.
+        </p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+<!-- Feature 1 -->
+<div class="flex flex-col gap-space-md p-space-lg rounded bg-surface-container-low shadow-sm">
+<div class="flex items-center justify-between">
+<div class="w-10 h-10 rounded bg-secondary text-on-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[24px]">sports_motorsports</span>
+</div>
+<span class="font-label-sm text-label-sm px-space-xs py-0.5 rounded bg-surface-container text-on-surface-variant font-bold">ALGORITHM: HELMET-DETECT-V4</span>
+</div>
+<div class="flex flex-col gap-space-xs">
+<h3 class="font-headline-sm text-headline-sm text-primary">Kiểm soát Mũ Bảo Hiểm Chính Xác</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+              Phát hiện tức thì học sinh không đội mũ hoặc cài quai sai quy cách trên mọi dòng xe hai bánh gắn động cơ. Phân biệt rõ mũ bảo hiểm thật với mũ lưỡi trai hay mũ len trùm đầu.
+            </p>
+</div>
+<!-- Mock Micro UI -->
+<div class="p-space-sm bg-surface-container-lowest rounded flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-error"></span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">Phát hiện không cài quai mũ</span>
+</div>
+<span class="font-label-sm text-label-sm text-error font-mono font-bold">99.1% Confidence</span>
+</div>
+</div>
+<!-- Feature 2 -->
+<div class="flex flex-col gap-space-md p-space-lg rounded bg-surface-container-low shadow-sm">
+<div class="flex items-center justify-between">
+<div class="w-10 h-10 rounded bg-secondary text-on-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[24px]">pin</span>
+</div>
+<span class="font-label-sm text-label-sm px-space-xs py-0.5 rounded bg-surface-container text-on-surface-variant font-bold">ALGORITHM: LPR-VN-STUDENT</span>
+</div>
+<div class="flex flex-col gap-space-xs">
+<h3 class="font-headline-sm text-headline-sm text-primary">Nhận Diện Biển Số &amp; Kiểm Tra Đăng Ký</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+              Quét biển số xe máy điện, xe 50cc; cảnh báo ngay các trường hợp biển số bị che lấp, biển số giả hoặc xe chưa được phép gửi trong trường. Đối soát trực tiếp danh sách cấp phép nề nếp.
+            </p>
+</div>
+<!-- Mock Micro UI -->
+<div class="p-space-sm bg-surface-container-lowest rounded flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">Biển: 29AA-044.82</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary font-mono font-bold">Trạng thái: Có phép gửi</span>
+</div>
+</div>
+<!-- Feature 3 -->
+<div class="flex flex-col gap-space-md p-space-lg rounded bg-surface-container-low shadow-sm">
+<div class="flex items-center justify-between">
+<div class="w-10 h-10 rounded bg-secondary text-on-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[24px]">directions_walk</span>
+</div>
+<span class="font-label-sm text-label-sm px-space-xs py-0.5 rounded bg-surface-container text-on-surface-variant font-bold">ALGORITHM: POSE-ESTIMATION</span>
+</div>
+<div class="flex flex-col gap-space-xs">
+<h3 class="font-headline-sm text-headline-sm text-primary">Phân Biệt Tư Thế: Dắt Xe vs Đi Xe Qua Cổng</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">
+              Nhận diện quy định nề nếp của nhiều trường học yêu cầu học sinh dắt bộ khi qua cổng để tránh va chạm với các bạn đi bộ. AI phân tích khung xương chuyển động để gắn cờ vi phạm.
+            </p>
+</div>
+<!-- Mock Micro UI -->
+<div class="p-space-sm bg-surface-container-lowest rounded flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">Tư thế: Dắt bộ qua vạch</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary font-mono font-bold">ĐẠT CHUẨN</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION 5: LEGAL NUANCE CALLOUT (#phap-ly) -->
+<section class="w-full px-margin py-space-xl bg-surface" id="phap-ly">
+<div class="max-w-7xl mx-auto flex flex-col gap-space-lg">
+<div class="p-space-xl bg-surface-container-lowest rounded-xl shadow-md flex flex-col gap-space-lg">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-12 h-12 rounded bg-surface-container flex items-center justify-center text-secondary shrink-0">
+<span class="material-symbols-outlined text-[32px]">gavel</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-secondary font-bold uppercase tracking-wider">TUÂN THỦ QUY PHẠM PHÁP LUẬT</span>
+<h2 class="font-headline-md text-headline-md text-primary">
+                Hiểu đúng Luật Giao thông Đường bộ Việt Nam: Tránh phạt oan học sinh
+              </h2>
+</div>
+</div>
+<span class="inline-flex items-center gap-1.5 px-space-sm py-1 rounded bg-surface-container-low font-label-sm text-label-sm text-on-surface font-semibold">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+            Cập nhật theo Nghị định 100 &amp; Nghị định 123
+          </span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant leading-relaxed">
+          Theo quy định hiện hành của pháp luật Việt Nam, người điều khiển mô tô, xe gắn máy, xe máy điện bắt buộc phải đội mũ bảo hiểm có cài quai đúng quy cách. Người đi xe đạp thông thường <strong class="text-on-surface">KHÔNG thuộc diện bắt buộc</strong>. Nhiều hệ thống AI thông thường hay báo động giả khi nhìn thấy học sinh đi xe đạp không đội mũ, gây tranh cãi và khiếu nại. School Gate Monitor phân tách triệt để 2 phân khúc này:
+        </p>
+<!-- Two-column visual comparison -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-gutter">
+<!-- Col Left: Regular Bike -->
+<div class="p-space-lg bg-surface-container-low rounded flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface font-bold">1. XE ĐẠP THƯỜNG (CƠ HỌC)</span>
+<span class="px-space-xs py-0.5 rounded bg-tertiary-fixed text-tertiary font-label-sm text-label-sm font-bold">HỢP LỆ</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+              Thị giác AI nhận diện bàn đạp, đĩa xích cơ và khung xe đạp truyền thống.
+            </p>
+<div class="p-space-sm bg-surface-container-lowest rounded font-label-sm text-label-sm text-on-surface">
+<span class="text-tertiary-container font-semibold">Trạng thái xử lý:</span> Miễn kiểm tra mũ bảo hiểm. Không gắn cờ vi phạm, không trừ điểm thi đua của lớp.
+            </div>
+</div>
+<!-- Col Right: Electric Scooter / Bike -->
+<div class="p-space-lg bg-surface-container-low rounded flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface font-bold">2. XE ĐIỆN &amp; XE MÁY 50CC</span>
+<span class="px-space-xs py-0.5 rounded bg-error-container text-on-error-container font-label-sm text-label-sm font-bold">BẮT BUỘC MŨ BH</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+              AI nhận diện khối động cơ điện, ắc quy hoặc máy nổ 50cc cùng biển kiểm soát số.
+            </p>
+<div class="p-space-sm bg-surface-container-lowest rounded font-label-sm text-label-sm text-on-surface">
+<span class="text-error font-semibold">Trạng thái xử lý:</span> Bắt buộc phải có mũ bảo hiểm cài quai. Nếu vi phạm, lập tức phát loa cảnh báo và chụp bằng chứng.
+            </div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm p-space-sm bg-surface-container rounded">
+<span class="material-symbols-outlined text-secondary text-[24px]">verified_user</span>
+<span class="font-body-md text-body-md text-on-surface font-semibold">
+            Lợi ích cho Ban giám hiệu: Loại bỏ 100% tình trạng tranh cãi hoặc phụ huynh khiếu nại về việc con em bị trừ điểm thi đua oan uổng.
+          </span>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION 6: EVIDENCE & REPORTING SECTION (#bao-cao) -->
+<section class="w-full px-margin py-space-xl bg-surface-container-lowest" id="bao-cao">
+<div class="max-w-7xl mx-auto flex flex-col gap-space-xl">
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
+<div class="flex flex-col gap-space-xs max-w-2xl">
+<span class="font-label-md text-label-md text-secondary uppercase tracking-widest font-semibold">TRÍCH XUẤT BẰNG CHỨNG &amp; BÁO CÁO THI ĐUA</span>
+<h2 class="font-headline-lg text-headline-lg text-primary">
+            Ban giám hiệu nhìn thấy toàn cảnh kỷ luật thay vì nghe báo cáo truyền miệng
+          </h2>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Dữ liệu minh bạch, có đối soát hình ảnh và video gốc, xuất biên bản định dạng chuẩn cho Đoàn trường và Giáo viên chủ nhiệm chỉ bằng một cú nhấp chuột.
+          </p>
+</div>
+<div class="flex items-center gap-space-xs shrink-0">
+<button class="inline-flex items-center gap-space-xs px-space-md py-space-sm bg-surface-container text-on-surface rounded font-body-sm text-body-sm font-semibold hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-[18px]">table_view</span>
+<span>Xuất Excel Thi Đua</span>
+</button>
+<button class="inline-flex items-center gap-space-xs px-space-md py-space-sm bg-secondary text-on-secondary rounded font-body-sm text-body-sm font-semibold hover:bg-secondary-container transition-colors">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+<span>In Báo Cáo Tuần (PDF)</span>
+</button>
+</div>
+</div>
+<!-- Trend Summary 3 Metrics -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+<div class="p-space-md bg-surface-container-low rounded flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-on-surface-variant">TỶ LỆ CHẤP HÀNH TOÀN TRƯỜNG</span>
+<span class="font-headline-md text-headline-md text-primary font-bold">94.8%</span>
+<span class="font-label-sm text-label-sm text-tertiary-fixed-variant font-semibold">↑ +12% sau 2 tuần lắp đặt</span>
+</div>
+<span class="material-symbols-outlined text-tertiary-container text-[36px]">trending_up</span>
+</div>
+<div class="p-space-md bg-surface-container-low rounded flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-on-surface-variant">LỚP CÓ NỀ NẾP TỐT NHẤT TUẦN</span>
+<span class="font-headline-md text-headline-md text-primary font-bold">10A1, 11A4</span>
+<span class="font-label-sm text-label-sm text-secondary font-semibold">0 lượt vi phạm ghi nhận</span>
+</div>
+<span class="material-symbols-outlined text-secondary text-[36px]">workspace_premium</span>
+</div>
+<div class="p-space-md bg-surface-container-low rounded flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-on-surface-variant">KHUNG GIỜ VI PHẠM NHIỀU NHẤT</span>
+<span class="font-headline-md text-headline-md text-primary font-bold">06:45 - 06:55</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant font-semibold">Khung giờ sát trống vào lớp</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant text-[36px]">schedule</span>
+</div>
+</div>
+<!-- Interactive Dashboard Mockup Showcase -->
+<div class="bg-surface-container-low rounded-xl p-space-md shadow-sm flex flex-col gap-space-md">
+<!-- Filter Bar Mockup -->
+<div class="flex flex-wrap items-center justify-between gap-space-sm p-space-sm bg-surface-container-lowest rounded">
+<div class="flex flex-wrap items-center gap-space-sm">
+<div class="flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-surface font-label-md text-label-md text-on-surface">
+<span class="material-symbols-outlined text-[16px]">calendar_today</span>
+<span>Hôm nay (24/10/2024)</span>
+</div>
+<div class="flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-surface font-label-md text-label-md text-on-surface">
+<span class="material-symbols-outlined text-[16px]">school</span>
+<span>Khối: Tất cả (10, 11, 12)</span>
+</div>
+<div class="flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-surface font-label-md text-label-md text-on-surface">
+<span class="material-symbols-outlined text-[16px]">filter_alt</span>
+<span>Lỗi: Không mũ BH, Chưa đăng ký xe</span>
+</div>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Tổng: 3 vi phạm trong buổi sáng</span>
+</div>
+<!-- Data Table Container -->
+<div class="overflow-x-auto w-full">
+<table class="w-full text-left font-body-md text-body-md">
+<thead>
+<tr class="font-label-sm text-label-sm text-on-surface-variant uppercase bg-surface-container-high/50">
+<th class="p-space-sm">Dấu thời gian</th>
+<th class="p-space-sm">Học sinh / Đối tượng</th>
+<th class="p-space-sm">Phương tiện &amp; Biển số</th>
+<th class="p-space-sm">Lỗi vi phạm phát hiện</th>
+<th class="p-space-sm text-right">Tác vụ BGH</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<!-- Row 1 -->
+<tr class="bg-surface-container-lowest hover:bg-surface transition-colors">
+<td class="p-space-sm font-label-md text-label-md text-on-surface font-mono">06:48:10</td>
+<td class="p-space-sm">
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-primary font-bold font-label-sm">
+                      TM
+                    </div>
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">Trần Minh Tuấn</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Lớp 11B3</span>
+</div>
+</div>
+</td>
+<td class="p-space-sm">
+<div class="flex flex-col">
+<span class="text-on-surface">Xe máy điện</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant font-mono">29MD-512.33</span>
+</div>
+</td>
+<td class="p-space-sm">
+<span class="px-space-xs py-0.5 rounded bg-error-container text-on-error-container font-label-sm text-label-sm font-semibold inline-block">
+                    Không đội mũ bảo hiểm
+                  </span>
+</td>
+<td class="p-space-sm text-right">
+<div class="inline-flex items-center gap-space-xs">
+<button class="px-space-xs py-1 rounded bg-surface-container text-on-surface font-label-sm text-label-sm hover:bg-surface-container-high">
+                      Xem ảnh chụp
+                    </button>
+<button class="px-space-xs py-1 rounded bg-secondary text-on-secondary font-label-sm text-label-sm hover:bg-secondary-container">
+                      Xuất biên bản
+                    </button>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="bg-surface-container-lowest hover:bg-surface transition-colors">
+<td class="p-space-sm font-label-md text-label-md text-on-surface font-mono">06:51:22</td>
+<td class="p-space-sm">
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-primary font-bold font-label-sm">
+                      LB
+                    </div>
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">Lê Bảo Anh</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Lớp 12A1</span>
+</div>
+</div>
+</td>
+<td class="p-space-sm">
+<div class="flex flex-col">
+<span class="text-on-surface">Xe 50cc Wave Alpha</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant font-mono">29AA-044.82</span>
+</div>
+</td>
+<td class="p-space-sm">
+<span class="px-space-xs py-0.5 rounded bg-surface-container-highest text-on-surface font-label-sm text-label-sm font-semibold inline-block">
+                    Biển số chưa đăng ký gửi trường
+                  </span>
+</td>
+<td class="p-space-sm text-right">
+<div class="inline-flex items-center gap-space-xs">
+<button class="px-space-xs py-1 rounded bg-surface-container text-on-surface font-label-sm text-label-sm hover:bg-surface-container-high">
+                      Xem ảnh chụp
+                    </button>
+<button class="px-space-xs py-1 rounded bg-secondary text-on-secondary font-label-sm text-label-sm hover:bg-secondary-container">
+                      Gửi SMS Phụ Huynh
+                    </button>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="bg-surface-container-lowest hover:bg-surface transition-colors">
+<td class="p-space-sm font-label-md text-label-md text-on-surface font-mono">06:55:04</td>
+<td class="p-space-sm">
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded bg-error-container text-on-error-container flex items-center justify-center font-bold font-label-sm">
+                      ?
+                    </div>
+<div class="flex flex-col">
+<span class="font-semibold text-error">Đối tượng chưa định danh</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Người ngoài trường</span>
+</div>
+</div>
+</td>
+<td class="p-space-sm">
+<div class="flex flex-col">
+<span class="text-on-surface">Xe máy SH Mode 125cc</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant font-mono">29V1-998.12</span>
+</div>
+</td>
+<td class="p-space-sm">
+<span class="px-space-xs py-0.5 rounded bg-error text-on-error font-label-sm text-label-sm font-semibold inline-block">
+                    Không có trong danh sách cấp phép
+                  </span>
+</td>
+<td class="p-space-sm text-right">
+<div class="inline-flex items-center gap-space-xs">
+<button class="px-space-xs py-1 rounded bg-error text-on-error font-label-sm text-label-sm hover:bg-error-container hover:text-on-error-container font-semibold">
+                      Báo động an ninh bốt
+                    </button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION 7: CLOSING CTA SECTION (#demo) -->
+<section class="w-full px-margin py-space-xl bg-primary text-on-primary relative overflow-hidden" id="demo">
+<div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-gutter items-center">
+<!-- Left Column Description -->
+<div class="lg:col-span-6 flex flex-col gap-space-md">
+<span class="font-label-md text-label-md text-secondary-fixed uppercase tracking-widest font-semibold">CHƯƠNG TRÌNH TRẢI NGHIỆM MIỄN PHÍ</span>
+<h2 class="font-headline-xl text-headline-xl text-white font-bold leading-tight">
+          Trải nghiệm trực tiếp với chính video cổng trường của Quý trường
+        </h2>
+<p class="font-body-lg text-body-lg text-inverse-on-surface">
+          Chỉ cần gửi cho chúng tôi 1 đoạn video clip 5-10 phút quay lại giờ cao điểm tại cổng trường của Quý trường, chúng tôi sẽ chạy thử nghiệm mô hình AI và gửi lại video phân tích nhận diện thực tế cùng báo cáo mẫu hoàn toàn miễn phí.
+        </p>
+<div class="flex flex-col gap-space-xs pt-space-xs">
+<div class="flex items-center gap-space-xs font-body-sm text-body-sm text-inverse-on-surface">
+<span class="material-symbols-outlined text-tertiary-fixed text-[20px]">check_circle</span>
+<span>Không yêu cầu ký hợp đồng trước hay đặt cọc chi phí</span>
+</div>
+<div class="flex items-center gap-space-xs font-body-sm text-body-sm text-inverse-on-surface">
+<span class="material-symbols-outlined text-tertiary-fixed text-[20px]">check_circle</span>
+<span>Nhận kết quả phân tích AI và video minh chứng trong 24 giờ làm việc</span>
+</div>
+<div class="flex items-center gap-space-xs font-body-sm text-body-sm text-inverse-on-surface">
+<span class="material-symbols-outlined text-tertiary-fixed text-[20px]">lock</span>
+<span>Cam kết bảo mật dữ liệu học sinh tuyệt đối theo Nghị định 13/2023/NĐ-CP</span>
+</div>
+</div>
+</div>
+<!-- Right Column Demo Form -->
+<div class="lg:col-span-6 bg-surface-container-lowest text-on-surface rounded-xl p-space-xl shadow-2xl">
+<div id="demo-thanks" class="hidden flex-col items-center text-center gap-space-sm py-space-xl">
+<span class="material-symbols-outlined text-tertiary-container text-[48px]">check_circle</span>
+<h3 class="font-headline-sm text-headline-sm text-primary">Đã nhận yêu cầu của Quý trường!</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Đội ngũ kỹ sư thị giác máy tính sẽ liên hệ trực tiếp trong 24 giờ tới.</p>
+</div>
+<form id="demo-form" class="flex flex-col gap-space-md" onsubmit="event.preventDefault(); document.getElementById('demo-form').classList.add('hidden'); document.getElementById('demo-thanks').classList.remove('hidden'); document.getElementById('demo-thanks').classList.add('flex');">
+<h3 class="font-headline-sm text-headline-sm text-primary">
+            Đăng ký Nhận Phân Tích Thử Nghiệm
+          </h3>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-label-md text-on-surface-variant font-semibold">Tên Trường Học (*)</label>
+<input class="w-full px-space-md py-space-sm bg-surface rounded text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest shadow-sm placeholder:text-on-surface-variant/50" placeholder="Ví dụ: THPT Lê Quý Đôn, Hà Nội" required="" type="text"/>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-sm">
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-label-md text-on-surface-variant font-semibold">Họ Tên Người Đại Diện (*)</label>
+<input class="w-full px-space-md py-space-sm bg-surface rounded text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest shadow-sm placeholder:text-on-surface-variant/50" placeholder="Thầy/Cô Nguyễn Văn A" required="" type="text"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-label-md text-on-surface-variant font-semibold">Chức Vụ (*)</label>
+<select class="w-full px-space-md py-space-sm bg-surface rounded text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest shadow-sm">
+<option>Hiệu trưởng</option>
+<option>Phó Hiệu trưởng</option>
+<option>Trưởng phòng Quản lý CSVC</option>
+<option>Bí thư Đoàn trường</option>
+<option>Cán bộ Giám thị / Trật tự</option>
+</select>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-label-md text-on-surface-variant font-semibold">Số Điện Thoại Trực Tiếp (*)</label>
+<input class="w-full px-space-md py-space-sm bg-surface rounded text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest shadow-sm placeholder:text-on-surface-variant/50" placeholder="0912 xxx xxx" required="" type="tel"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-label-md text-on-surface-variant font-semibold">Tùy chọn: Link video cổng trường mẫu (Google Drive / YouTube)</label>
+<input class="w-full px-space-md py-space-sm bg-surface rounded text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest shadow-sm placeholder:text-on-surface-variant/50" placeholder="https://drive.google.com/..." type="url"/>
+</div>
+<button class="w-full mt-space-xs py-space-sm px-space-md bg-secondary text-on-secondary rounded font-body-md text-body-md font-semibold hover:bg-secondary-container transition-all flex items-center justify-center gap-space-xs shadow-md" type="submit">
+<span class="material-symbols-outlined text-[20px]">send</span>
+<span>Gửi Yêu Cầu &amp; Nhận Phân Tích Thử Nghiệm</span>
+</button>
+</form>
+</div>
+</div>
+</section>
+</div></main><footer class="w-full bg-surface-container-lowest shadow-[0_-1px_8px_rgba(0,0,0,0.03)] mt-space-xl"><div class="w-full px-margin py-space-xl"><div class="grid grid-cols-1 md:grid-cols-12 gap-gutter mb-space-xl"><div class="md:col-span-5 flex flex-col gap-space-sm"><div class="flex items-center gap-space-sm"><div class="w-9 h-9 rounded bg-primary flex items-center justify-center text-on-primary"><span class="material-symbols-outlined text-[20px]">security</span></div><span class="font-headline-sm text-headline-sm text-primary">School Gate Monitor</span></div><p class="font-body-md text-body-md text-on-surface-variant max-w-lg">Giải pháp thị giác máy tính bảo đảm an toàn giao thông và kỷ luật học đường toàn diện. Kiểm soát điểm ùn tắc, nhận diện phương tiện và cảnh báo vi phạm học sinh tức thời.</p><div class="flex items-center gap-space-xs mt-space-xs"><span class="inline-flex items-center gap-1.5 px-space-sm py-space-xs rounded bg-surface-container font-label-md text-label-md text-on-surface-variant"><span class="w-2 h-2 rounded-full bg-tertiary-fixed-dim"></span>Hệ thống máy chủ nội địa Việt Nam</span></div></div><div class="md:col-span-3 flex flex-col gap-space-sm"><span class="font-headline-sm text-headline-sm text-on-surface">Chuyên mục</span><ul class="flex flex-col gap-space-xs"><li class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface cursor-pointer">Tổng quan công nghệ Edge AI</li><li class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface cursor-pointer">Mô hình triển khai camera cổng</li><li class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface cursor-pointer">Tuân thủ Nghị định 13/2023/NĐ-CP</li><li class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface cursor-pointer">Tài liệu dành cho Ban giám hiệu</li></ul></div><div class="md:col-span-4 flex flex-col gap-space-sm"><span class="font-headline-sm text-headline-sm text-on-surface">Liên hệ &amp; Tiếp nhận thông tin</span><div class="flex flex-col gap-space-xs font-body-sm text-body-sm text-on-surface-variant"><div class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[16px] text-secondary">mail</span><span>Email: lienhe@schoolgatemonitor.vn</span></div><div class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[16px] text-secondary">call</span><span>Đường dây nóng: 1900 xxxx (Hỗ trợ 24/7)</span></div><div class="flex items-start gap-space-xs"><span class="material-symbols-outlined text-[16px] text-secondary mt-0.5">location_on</span><span>Địa chỉ: Trung tâm Công nghệ AI Giáo dục, Tầng 8, Tòa nhà Đổi mới Sáng tạo, Hà Nội, Việt Nam</span></div></div></div></div><div class="pt-space-md bg-surface-container-low px-space-md py-space-sm rounded flex flex-col sm:flex-row items-center justify-between gap-space-sm"><span class="font-label-md text-label-md text-on-surface-variant">© 2024 School Gate Monitor. Bản quyền thuộc về Đơn vị Giải pháp Thị giác Máy tính Giáo dục.</span><span class="font-label-md text-label-md text-on-surface-variant">Tiêu chuẩn An toàn Học đường &amp; An ninh Khu vực Công cộng</span></div></div></footer></body></html>
