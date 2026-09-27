@@ -11,6 +11,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Camera
 CAMERA_INDEX = 1  # OBS Virtual Camera (index 0 la webcam vat ly, xac nhan qua probe)
 
+# CAMERA_SOURCE: nguon camera thuc te dung boi pipeline. Doc tu env var de doi
+# nguon (webcam index, duong dan video file, hoac rtsp:// URL) ma khong sua code.
+# Mac dinh giu nguyen CAMERA_INDEX de khong pha setup OBS da cau hinh san.
+_camera_source_env = os.environ.get("CAMERA_SOURCE")
+if _camera_source_env is None:
+    CAMERA_SOURCE = CAMERA_INDEX
+elif _camera_source_env.strip().lstrip("-").isdigit():
+    CAMERA_SOURCE = int(_camera_source_env)
+else:
+    CAMERA_SOURCE = _camera_source_env
+
+# Loop video khi doc het file (EOF) thay vi dung lai - chi co y nghia khi
+# CAMERA_SOURCE la duong dan file, khong anh huong webcam/RTSP.
+CAMERA_LOOP = os.environ.get("CAMERA_LOOP", "1") == "1"
+
 # Model paths
 HELMET_MODEL_PATH = str(BASE_DIR / "models" / "helmet_best.pt")
 PLATE_MODEL_PATH = str(BASE_DIR / "models" / "plate_best.pt")

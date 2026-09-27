@@ -14,14 +14,14 @@ import numpy as np
 from typing import Optional
 
 from app.config import (
-    CAMERA_INDEX, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
+    CAMERA_SOURCE, CAMERA_LOOP, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
     HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
-    FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, 
+    FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
-from app.cv.ocr import read_plate
+from app.cv.ocr import read_plate, validate_plate_format
 from app.db import get_vehicle_by_plate, add_violation_event
 
 # Face match cooldown (seconds) — separate from violation cooldown
@@ -167,24 +167,33 @@ class VideoPipeline:
             "uptime_sec": round(now - self._start_time, 1),
         }
     
+    def _open_webcam(self):
+        return WebcamStream(
+            source=CAMERA_SOURCE,
+            width=VIDEO_WIDTH,
+            height=VIDEO_HEIGHT,
+            loop=CAMERA_LOOP,
+        )
+
     def _run_loop(self):
         """Vòng lặp chính của thread nền."""
         try:
-            self._webcam = WebcamStream(
-                source=CAMERA_INDEX,
-                width=VIDEO_WIDTH,
-                height=VIDEO_HEIGHT
-            )
+            self._webcam = self._open_webcam()
             print("[Pipeline] Webcam opened")
         except Exception as e:
             print(f"[Pipeline] ERROR: Cannot open webcam: {e}")
             self._running = False
             return
-        
+
+        _consecutive_errors = 0
+        _RECONNECT_AFTER = 5
+        _RECONNECT_BACKOFF_SEC = 2.0
+
         while self._running:
             try:
                 # Đọc frame
                 frame = self._webcam.read_frame()
+                _consecutive_errors = 0
                 self._frame_count += 1
                 self._last_frame_time = time.time()
                 
@@ -259,8 +268,23 @@ class VideoPipeline:
                     
             except Exception as e:
                 print(f"[Pipeline] Error in loop: {e}")
-                time.sleep(0.1)
-        
+                _consecutive_errors += 1
+                if _consecutive_errors >= _RECONNECT_AFTER:
+                    print(f"[Pipeline] {_consecutive_errors} consecutive read failures — reconnecting camera")
+                    try:
+                        self._webcam.release()
+                    except Exception:
+                        pass
+                    try:
+                        self._webcam = self._open_webcam()
+                        print("[Pipeline] Webcam reconnected")
+                    except Exception as reconnect_err:
+                        print(f"[Pipeline] Reconnect failed: {reconnect_err}")
+                    _consecutive_errors = 0
+                    time.sleep(_RECONNECT_BACKOFF_SEC)
+                else:
+                    time.sleep(0.1)
+
         # Cleanup
         if self._webcam:
             self._webcam.release()
@@ -381,6 +405,10 @@ class VideoPipeline:
             if vehicle:
                 plate_matched = vehicle['plate_number']
 
+        # Cờ tham khảo: biển đọc được có khớp định dạng VN phổ biến không.
+        # Không dùng để loại bỏ plate_read — chỉ để bảo vệ lưu ý khi xem lại.
+        plate_format_valid = validate_plate_format(plate_read) if plate_read else None
+
         # Xác định helmet_status
         if has_with_helmet:
             helmet_status = "helmet"
@@ -432,23 +460,23 @@ class VideoPipeline:
         current_time = time.time()
         last_log = self._last_log_time.get(cooldown_key, 0)
         if current_time - last_log < VIOLATION_COOLDOWN:
-            # Trong cooldown → chỉ đẩy cảnh báo WebSocket (không ghi log)
-            self._push_alert(violation_type, plate_read, plate_matched)
+            # Trong cooldown → chỉ đẩy cảnh báo WebSocket (không ghi log, không snapshot mới)
+            self._push_alert(violation_type, plate_read, plate_matched, plate_format_valid=plate_format_valid)
             return
-        
+
         # Lưu snapshot
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         snapshot_filename = f"{timestamp_str}_{violation_type}.jpg"
         snapshot_path = os.path.join(SNAPSHOTS_DIR, snapshot_filename)
-        
+
         # Đảm bảo thư mục tồn tại
         os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
-        
+
         # Lưu frame gốc (chưa vẽ box) vào snapshots
         success = cv2.imwrite(snapshot_path, frame)
         if not success:
             snapshot_path = None
-        
+
         # Ghi log vào DB
         try:
             add_violation_event(
@@ -459,18 +487,24 @@ class VideoPipeline:
                 violation_type=violation_type,
                 snapshot_path=f"data/snapshots/{snapshot_filename}" if snapshot_path else None,
                 posture_status=posture_status,
+                plate_format_valid=plate_format_valid,
             )
             print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}")
         except Exception as e:
             print(f"[Pipeline] Error logging violation: {e}")
-        
+
         # Cập nhật cooldown
         self._last_log_time[cooldown_key] = current_time
-        
-        # Đẩy cảnh báo WebSocket
-        self._push_alert(violation_type, plate_read, plate_matched)
 
-    def _push_alert(self, violation_type: str, plate_read: str, plate_matched: str):
+        # Đẩy cảnh báo WebSocket
+        self._push_alert(
+            violation_type, plate_read, plate_matched,
+            snapshot_filename=snapshot_filename if snapshot_path else None,
+            plate_format_valid=plate_format_valid,
+        )
+
+    def _push_alert(self, violation_type: str, plate_read: str, plate_matched: str,
+                     snapshot_filename: str | None = None, plate_format_valid: bool | None = None):
         """Đẩy cảnh báo vi phạm vào WebSocket queue (có alert cooldown)."""
         current_time = time.time()
         if current_time - self._last_alert_time >= ALERT_COOLDOWN:
@@ -479,6 +513,8 @@ class VideoPipeline:
                 "violation_type": violation_type,
                 "plate_read": plate_read or None,
                 "plate_matched": plate_matched or None,
+                "plate_format_valid": plate_format_valid,
+                "snapshot_url": f"/media/{snapshot_filename}" if snapshot_filename else None,
                 "timestamp": datetime.datetime.now().isoformat(),
             }
             self._alert_queue.put(alert)
@@ -491,10 +527,12 @@ class VideoPipeline:
         if current_time - self._last_face_match_time < FACE_MATCH_COOLDOWN:
             return  # still in cooldown
 
+        snapshot_filename = os.path.basename(snapshot_path) if snapshot_path else None
         alert = {
             "type": "face_match",
             "matched_label": matched_label,
             "similarity": round(similarity, 4),
+            "snapshot_url": f"/media/{snapshot_filename}" if snapshot_filename else None,
             "timestamp": datetime.datetime.now().isoformat(),
         }
         self._alert_queue.put(alert)
@@ -511,7 +549,7 @@ class VideoPipeline:
         """
         try:
             from app.cv.face import detect_and_embed, match_embedding
-            from app.db import get_face_embeddings
+            from app.db import get_face_embeddings, add_face_match_event
             person_dets = self._last_person_dets
             if not person_dets:
                 return
@@ -520,6 +558,7 @@ class VideoPipeline:
                 return
             import struct
             known_labels = []
+            known_vehicle_ids = []
             known_vecs = []
             for rec in registered:
                 emb_bytes = rec.get("embedding")
@@ -528,6 +567,7 @@ class VideoPipeline:
                 vec = np.array(struct.unpack(f"{len(emb_bytes)//4}f", emb_bytes), dtype=np.float32)
                 known_vecs.append(vec)
                 known_labels.append(rec["label_name"])
+                known_vehicle_ids.append(rec.get("vehicle_id"))
             if not known_vecs:
                 return
             frame_h, frame_w = frame.shape[:2]
@@ -548,10 +588,31 @@ class VideoPipeline:
                 vec = np.array(struct.unpack(f"{len(emb_bytes)//4}f", emb_bytes), dtype=np.float32)
                 matched, best_sim, best_idx = match_embedding(vec, known_vecs)
                 if matched:
+                    matched_label = known_labels[best_idx]
+
+                    # Lưu full frame làm bằng chứng (giống pattern violation snapshot)
+                    os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
+                    ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    snapshot_filename = f"{ts_str}_face_{matched_label}.jpg"
+                    snapshot_path = os.path.join(SNAPSHOTS_DIR, snapshot_filename)
+                    if not cv2.imwrite(snapshot_path, frame):
+                        snapshot_filename = None
+
+                    # Ghi audit trail vào DB — trước đây hàm này chưa từng được gọi
+                    try:
+                        add_face_match_event(
+                            matched_label=matched_label,
+                            similarity=float(best_sim),
+                            vehicle_id=known_vehicle_ids[best_idx],
+                            snapshot_path=f"data/snapshots/{snapshot_filename}" if snapshot_filename else None,
+                        )
+                    except Exception as e:
+                        print(f"[Pipeline] Error logging face match event: {e}")
+
                     self._push_face_match_alert(
-                        matched_label=known_labels[best_idx],
+                        matched_label=matched_label,
                         similarity=best_sim,
-                        snapshot_path=None,
+                        snapshot_path=snapshot_path if snapshot_filename else None,
                     )
                     break
         except Exception:
@@ -571,7 +632,7 @@ class VideoPipeline:
 
             for group in groups:
                 # Get person bbox from group (stored in the group from _group_by_person)
-                person = getattr(group, '_person', None)
+                person = group.get('_person')
                 if person is None:
                     group['posture_status'] = 'unknown'
                     continue

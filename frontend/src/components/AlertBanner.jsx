@@ -3,16 +3,58 @@ import { API_BASE_URL } from '../api/client';
 
 /**
  * AlertBanner — connects to /guard/ws WebSocket and shows a banner
- * with audio beep when a violation or face_match alert arrives.
+ * with a distinct beep pattern + Vietnamese TTS when a violation or
+ * face_match alert arrives, plus a snapshot thumbnail if one is available.
  *
  * Style:
  *   - violation: red (#dc3545)
  *   - face_match: amber (#f59e0b)
+ *
+ * ponytail: còi/loa vật lý qua GPIO chưa được xây dựng — chưa có phần cứng
+ * (không có speaker/relay/GPIO nào để lái). Khi có phần cứng thật, thêm một
+ * lệnh gọi API riêng ở đây (hoặc side-effect ở backend khi push alert) để
+ * kích còi vật lý; audio hiện tại chỉ chạy trong trình duyệt của bảo vệ.
  */
+
+// Mỗi loại cảnh báo có tần số + số nhịp beep riêng để phân biệt bằng tai
+// trước khi nghe rõ nội dung TTS.
+const ALERT_SOUNDS = {
+  NO_HELMET: { freq: 600, beeps: 1, beepDuration: 0.3, gap: 0.1 },
+  PLATE_NOT_REGISTERED: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
+  PLATE_UNREADABLE: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
+  RIDING_THROUGH_GATE: { freq: 500, beeps: 3, beepDuration: 0.15, gap: 0.1 },
+  MULTIPLE: { freq: 700, beeps: 2, beepDuration: 0.2, gap: 0.1 },
+  face_match: { freq: 1200, beeps: 2, beepDuration: 0.1, gap: 0.08 },
+  default: { freq: 800, beeps: 1, beepDuration: 0.2, gap: 0.1 },
+};
+
+function buildSpeechText(data) {
+  if (data.type === 'face_match') {
+    return `Cảnh báo: nhận diện khuôn mặt ${data.matched_label || 'không rõ'}`;
+  }
+  const plate = data.plate_matched || data.plate_read;
+  const plateText = plate ? `xe biển số ${plate}` : 'xe không đọc được biển số';
+  switch (data.violation_type) {
+    case 'NO_HELMET':
+      return `Cảnh báo: ${plateText} chưa đội mũ bảo hiểm`;
+    case 'PLATE_NOT_REGISTERED':
+      return `Cảnh báo: ${plateText} chưa đăng ký`;
+    case 'PLATE_UNREADABLE':
+      return 'Cảnh báo: không đọc được biển số xe';
+    case 'RIDING_THROUGH_GATE':
+      return `Cảnh báo: ${plateText} đang chạy xe qua cổng, vui lòng dắt xe`;
+    case 'MULTIPLE':
+      return `Cảnh báo: ${plateText} vi phạm nhiều lỗi`;
+    default:
+      return `Cảnh báo vi phạm: ${plateText}`;
+  }
+}
+
 export default function AlertBanner({ token }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [alertType, setAlertType] = useState('violation'); // 'violation' | 'face_match'
+  const [snapshotUrl, setSnapshotUrl] = useState(null);
   const timeoutRef = useRef(null);
   const wsRef = useRef(null);
 
@@ -23,38 +65,63 @@ export default function AlertBanner({ token }) {
     const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
     const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}`;
 
-    function playBeep() {
+    // Phát chuỗi beep phân biệt theo loại cảnh báo, trả về tổng thời lượng
+    // (ms) để lên lịch TTS phát ngay sau khi beep kết thúc.
+    function playAlertSound(key) {
+      const sound = ALERT_SOUNDS[key] || ALERT_SOUNDS.default;
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 800;
-        gain.gain.value = 0.3;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.2);
+        for (let i = 0; i < sound.beeps; i++) {
+          const startAt = ctx.currentTime + i * (sound.beepDuration + sound.gap);
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = sound.freq;
+          gain.gain.value = 0.3;
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(startAt);
+          osc.stop(startAt + sound.beepDuration);
+        }
       } catch (e) {
         console.warn('[AlertBanner] Audio blocked:', e.message);
+      }
+      return Math.round((sound.beeps * (sound.beepDuration + sound.gap)) * 1000);
+    }
+
+    function speak(text) {
+      try {
+        if (!window.speechSynthesis) return;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'vi-VN';
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.warn('[AlertBanner] TTS blocked:', e.message);
       }
     }
 
     function handleAlert(data) {
+      const soundKey = data.type === 'face_match' ? 'face_match' : (data.violation_type || 'default');
+
       if (data.type === 'face_match') {
         setAlertType('face_match');
         setMessage(
-          '\u{1F3ED} NH\u1eacN DI\u1ec6N KHU\u00d4N M\u1eb6T: ' +
+          '\u{1F3ED} NHẬN DIỆN KHUÔN MẶT: ' +
           `${data.matched_label} (${(data.similarity * 100).toFixed(0)}%)`
         );
       } else {
         setAlertType('violation');
-        setMessage('\u26a0\ufe0f C\u1ea2NH B\u00c1O: ' + (data.violation_type || data.type));
+        setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
       }
+      setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => setVisible(false), 3000);
+
+      // Beep trước để bảo vệ chú ý ngay, TTS đọc nội dung ngay sau đó.
+      const beepDurationMs = playAlertSound(soundKey);
+      setTimeout(() => speak(buildSpeechText(data)), beepDurationMs + 50);
     }
 
     function connect() {
@@ -68,7 +135,6 @@ export default function AlertBanner({ token }) {
           try {
             const data = JSON.parse(event.data);
             handleAlert(data);
-            playBeep();
           } catch (e) {
             // Malformed message
           }
@@ -111,10 +177,20 @@ export default function AlertBanner({ token }) {
         fontSize: '18px',
         fontWeight: 'bold',
         zIndex: 1000,
-        display: visible ? 'block' : 'none',
+        display: visible ? 'flex' : 'none',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
       }}
     >
-      {message}
+      <span>{message}</span>
+      {snapshotUrl && (
+        <img
+          src={`${API_BASE_URL}${snapshotUrl}`}
+          alt="Ảnh chụp bằng chứng"
+          style={{ height: '48px', borderRadius: '4px', border: '2px solid white' }}
+        />
+      )}
     </div>
   );
 }

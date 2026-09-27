@@ -51,6 +51,26 @@ def normalize_plate(text: str) -> str:
     return text
 
 
+# Biển số VN sau khi normalize_plate (đã bỏ khoảng trắng/gạch ngang, chỉ còn A-Z0-9):
+# 2 số tỉnh + 1-2 chữ (series) + 4-6 số. Bao quát cả 1 dòng và 2 dòng ghép lại,
+# biển thường (1 chữ) và biển mới/rơ-moóc/điện (đôi khi 2 chữ) — cố ý rộng vì
+# đây chỉ dùng để GẮN CỜ nghi ngờ, không dùng để loại bỏ kết quả OCR.
+_PLATE_FORMAT_RE = re.compile(r'^\d{2}[A-Z]{1,2}\d{4,6}$')
+
+
+def validate_plate_format(text: str) -> bool:
+    """
+    Kiểm tra chuỗi biển số (đã normalize) có khớp định dạng VN phổ biến không.
+
+    Đây chỉ là một cờ tham khảo cho bảo vệ xem lại — không dùng để loại bỏ
+    kết quả OCR, vì biển số hiếm (rơ-moóc, xe điện, ngoại giao...) có thể
+    không khớp regex này dù vẫn là biển thật.
+    """
+    if not text:
+        return False
+    return bool(_PLATE_FORMAT_RE.match(text))
+
+
 def read_plate(crop: np.ndarray) -> str:
     """
     Đọc biển số từ ảnh crop đã cắt vùng biển số.

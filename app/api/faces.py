@@ -140,5 +140,11 @@ def list_face_events(
     GET /api/faces/events — list face match events (recent first).
     """
     items = get_face_match_events(limit=limit, offset=offset)
+    for item in items:
+        if item.get('snapshot_path'):
+            filename = item['snapshot_path'].split('/')[-1]
+            item['snapshot_url'] = f'/media/{filename}'
+        else:
+            item['snapshot_url'] = None
     total = len(items)  # ponytail: for small DB this is fine; add count query if needed
     return FaceEventResponse(total=total, limit=limit, offset=offset, items=items)

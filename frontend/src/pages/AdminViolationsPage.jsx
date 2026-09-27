@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import client from '../api/client';
+import client, { API_BASE_URL } from '../api/client';
 
 // Violation type labels for display
 const VIOLATION_LABELS = {
@@ -161,12 +161,15 @@ export default function AdminViolationsPage() {
                         <td className="px-4 py-3">
                           {v.snapshot_url ? (
                             <a
-                              href={v.snapshot_url}
+                              href={`${API_BASE_URL}${v.snapshot_url}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-blue-600 hover:text-blue-800 text-sm"
                             >
-                              Xem ảnh
+                              <img
+                                src={`${API_BASE_URL}${v.snapshot_url}`}
+                                alt="Ảnh chụp vi phạm"
+                                className="h-10 rounded border border-gray-200 hover:opacity-80"
+                              />
                             </a>
                           ) : (
                             <span className="text-gray-400 text-sm">—</span>

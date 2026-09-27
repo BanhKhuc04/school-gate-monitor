@@ -96,6 +96,43 @@ class TestRunFaceMatch:
         with patch("app.db.get_face_embeddings", return_value=[]):
             pipeline._run_face_match(frame)
 
+    def test_run_face_match_saves_snapshot_and_logs_db_event(self):
+        """
+        Regression test: on a match, _run_face_match must (1) write a snapshot
+        file and (2) call add_face_match_event to persist an audit row — both
+        were previously silently skipped (snapshot_path was hardcoded to None
+        and add_face_match_event was never called at all).
+        """
+        from app.cv.pipeline import VideoPipeline
+        from app.cv.detector import Detection
+
+        pipeline = VideoPipeline.__new__(VideoPipeline)
+        pipeline._last_person_dets = [Detection(class_name="person", confidence=0.9, bbox=(0, 0, 100, 300))]
+        pipeline._running = True
+        pipeline._alert_queue = MagicMock()
+        pipeline._last_face_match_time = 0.0
+
+        registered = [{"label_name": "Nguyễn Văn A", "vehicle_id": 7, "embedding": np.zeros(4, dtype=np.float32).tobytes()}]
+        frame = np.zeros((300, 100, 3), dtype=np.uint8)
+
+        with patch("app.db.get_face_embeddings", return_value=registered), \
+             patch("app.db.add_face_match_event") as mock_add_event, \
+             patch("app.cv.face.detect_and_embed", return_value=np.zeros(4, dtype=np.float32).tobytes()), \
+             patch("app.cv.face.match_embedding", return_value=(True, 0.9, 0)), \
+             patch("app.cv.pipeline.cv2.imwrite", return_value=True) as mock_imwrite:
+            pipeline._run_face_match(frame)
+
+        mock_imwrite.assert_called_once()
+        mock_add_event.assert_called_once()
+        _, kwargs = mock_add_event.call_args
+        assert kwargs["matched_label"] == "Nguyễn Văn A"
+        assert kwargs["vehicle_id"] == 7
+        assert kwargs["snapshot_path"]  # non-empty path, not None
+
+        pipeline._alert_queue.put.assert_called_once()
+        alert = pipeline._alert_queue.put.call_args[0][0]
+        assert alert["snapshot_url"]  # WS payload now carries the snapshot URL too
+
     def test_run_face_match_isolated_exception(self):
         """Exception inside _run_face_match does NOT propagate."""
         from app.cv.pipeline import VideoPipeline

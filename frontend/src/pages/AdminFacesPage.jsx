@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import client from '../api/client';
+import client, { API_BASE_URL } from '../api/client';
 
 export default function AdminFacesPage() {
   const [faces, setFaces] = useState([]);
@@ -267,6 +267,7 @@ export default function AdminFacesPage() {
                         <th className="text-left px-4 py-3 font-medium text-gray-600">Người nhận diện</th>
                         <th className="text-left px-4 py-3 font-medium text-gray-600">Độ tương đồng</th>
                         <th className="text-left px-4 py-3 font-medium text-gray-600">ID Xe</th>
+                        <th className="text-left px-4 py-3 font-medium text-gray-600">Ảnh</th>
                         <th className="text-left px-4 py-3 font-medium text-gray-600">Thời gian</th>
                       </tr>
                     </thead>
@@ -289,6 +290,23 @@ export default function AdminFacesPage() {
                             ) : '—'}
                           </td>
                           <td className="px-4 py-3 text-gray-600">{ev.vehicle_id || '—'}</td>
+                          <td className="px-4 py-3">
+                            {ev.snapshot_url ? (
+                              <a
+                                href={`${API_BASE_URL}${ev.snapshot_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <img
+                                  src={`${API_BASE_URL}${ev.snapshot_url}`}
+                                  alt="Ảnh nhận diện khuôn mặt"
+                                  className="h-10 rounded border border-gray-200 hover:opacity-80"
+                                />
+                              </a>
+                            ) : (
+                              <span className="text-gray-400 text-sm">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(ev.created_at)}</td>
                         </tr>
                       ))}

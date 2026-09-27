@@ -1,0 +1,34 @@
+"""
+pytest tests for app/cv/ocr.py — validate_plate_format (Vietnamese plate regex flag).
+"""
+from app.cv.ocr import validate_plate_format, normalize_plate
+
+
+def test_valid_common_format():
+    assert validate_plate_format("59H112345") is True
+    assert validate_plate_format("30A12345") is True
+    assert validate_plate_format("51F123456") is True
+
+
+def test_valid_two_letter_series():
+    assert validate_plate_format("59AB1234") is True
+
+
+def test_invalid_too_short():
+    assert validate_plate_format("59H1") is False
+
+
+def test_invalid_no_letters():
+    assert validate_plate_format("59112345") is False
+
+
+def test_empty_string():
+    assert validate_plate_format("") is False
+    assert validate_plate_format(None) is False
+
+
+def test_normalize_then_validate_roundtrip():
+    # OCR thường trả về có gạch ngang/khoảng trắng — normalize trước khi validate
+    raw = "59-H1 123.45"
+    normalized = normalize_plate(raw)
+    assert validate_plate_format(normalized) is True

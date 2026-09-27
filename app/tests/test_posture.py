@@ -2,7 +2,36 @@
 pytest tests for Step 20: posture_status column + RIDING_THROUGH_GATE stats.
 """
 import pytest
+import numpy as np
+from unittest.mock import patch
 from fastapi import status
+from app.cv.detector import Detection
+
+
+class TestRunPostureDetectionGroupDict:
+    """
+    Regression test: _run_posture_detection must read the person out of the
+    group dict (group['_person']), not getattr(group, '_person', None) —
+    getattr on a dict never matches a dict key, which silently forced every
+    group to posture_status='unknown' regardless of the actual pose.
+    """
+
+    def test_uses_person_bbox_from_group_dict(self):
+        from app.cv.pipeline import VideoPipeline
+
+        pipeline = VideoPipeline.__new__(VideoPipeline)  # skip __init__ (no camera/models)
+        frame = np.zeros((200, 200, 3), dtype=np.uint8)
+        person = Detection(class_name="person", confidence=0.9, bbox=(10, 10, 100, 190))
+        groups = [{"_person": person, "helmet_dets": [], "plate_dets": []}]
+
+        with patch("app.cv.pose.PostureDetector.detect_pose") as mock_detect, \
+             patch("app.cv.pose.classify_posture", return_value="riding") as mock_classify:
+            mock_detect.return_value = [{"x": 0, "y": 0, "confidence": 0.9}] * 17
+
+            result = pipeline._run_posture_detection(frame, groups)
+
+        assert mock_detect.called, "detect_pose was never reached — person lookup still broken"
+        assert result[0]["posture_status"] == "riding"
 
 
 class TestPostureStatusColumn:
