@@ -57,6 +57,7 @@ def init_db():
                 helmet_status  TEXT NOT NULL,
                 violation_type TEXT NOT NULL,
                 snapshot_path  TEXT,
+                posture_status TEXT,  -- 'standing' | 'riding' | 'unknown' | None
                 created_at     TEXT NOT NULL DEFAULT (datetime('now'))
             )
         ''')
@@ -66,6 +67,12 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_violation_events_timestamp 
             ON violation_events(timestamp)
         ''')
+
+        # Migration: add posture_status column if it doesn't exist (for existing DBs)
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN posture_status TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         
         # Bảng người dùng
         cursor.execute('''
@@ -233,7 +240,8 @@ def delete_vehicle(vehicle_id: int) -> bool:
 
 def add_violation_event(timestamp: str, plate_read: str = None,
                        plate_matched: str = None, helmet_status: str = None,
-                       violation_type: str = None, snapshot_path: str = None) -> int:
+                       violation_type: str = None, snapshot_path: str = None,
+                       posture_status: str = None) -> int:
     """
     Thêm sự kiện vi phạm.
     
@@ -242,8 +250,9 @@ def add_violation_event(timestamp: str, plate_read: str = None,
         plate_read: Biển số đọc được (thô)
         plate_matched: Biển số khớp trong whitelist
         helmet_status: 'helmet' | 'no_helmet' | 'unknown'
-        violation_type: 'NO_HELMET' | 'PLATE_NOT_REGISTERED' | ...
+        violation_type: 'NO_HELMET' | 'PLATE_NOT_REGISTERED' | 'RIDING_THROUGH_GATE' | ...
         snapshot_path: Đường dẫn ảnh chụp
+        posture_status: 'standing' | 'riding' | 'unknown' | None
         
     Returns:
         ID của sự kiện mới
@@ -254,9 +263,9 @@ def add_violation_event(timestamp: str, plate_read: str = None,
             cursor = conn.cursor()
             cursor.execute(
                 '''INSERT INTO violation_events 
-                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path)
-                   VALUES (?, ?, ?, ?, ?, ?)''',
-                (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path)
+                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status)
             )
             conn.commit()
             return cursor.lastrowid
@@ -509,6 +518,7 @@ def get_violation_stats() -> Dict[str, Any]:
             "PLATE_NOT_REGISTERED": 0,
             "PLATE_UNREADABLE": 0,
             "MULTIPLE": 0,
+            "RIDING_THROUGH_GATE": 0,
         }
         cursor.execute(
             '''SELECT violation_type, COUNT(*) as cnt
