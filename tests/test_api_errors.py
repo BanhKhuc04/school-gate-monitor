@@ -202,6 +202,27 @@ class TestViolations:
         }, timeout=TIMEOUT)
         assert resp.status_code == 403
 
+    def test_get_violations_pagination_params(self, admin_token):
+        """Pagination params (limit, offset) should be accepted and reflected in response."""
+        resp = httpx.get(f"{BASE}/api/violations", params={"limit": 5, "offset": 0}, headers={
+            "Authorization": f"Bearer {admin_token}"
+        }, timeout=TIMEOUT)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total" in data
+        assert "items" in data
+        assert isinstance(data["items"], list)
+        assert len(data["items"]) <= 5
+
+    def test_get_violations_filter_by_type(self, admin_token):
+        """Filter by violation_type should be accepted."""
+        resp = httpx.get(f"{BASE}/api/violations", params={"violation_type": "NO_HELMET"}, headers={
+            "Authorization": f"Bearer {admin_token}"
+        }, timeout=TIMEOUT)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["items"], list)
+
 
 # ─── Stats endpoint tests ───────────────────────────────────────────────────
 

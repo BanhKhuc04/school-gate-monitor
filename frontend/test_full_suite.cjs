@@ -191,6 +191,16 @@ async function freshLogin(page, username, password) {
     assert(page.url().includes('/admin/violations'), 'Navigated to /admin/violations');
     assert(!!(await page.$('table')), 'Violations table exists');
 
+    // Check response format has {total, items}
+    const token = await page.evaluate(() => localStorage.getItem('token'));
+    const violResp = await axios.get(`${BASE_PROD}/api/violations`, {
+      headers: { Authorization: `Bearer ${token}` }, timeout: 5000,
+    });
+    const violData = violResp.data;
+    assert(typeof violData.total === 'number', 'Violations API returns total');
+    assert(Array.isArray(violData.items), 'Violations API returns items array');
+    assert(violData.items.length >= 0, 'Violations items is array');
+
     const snapImgs = await page.$$('img[src*="/media/"]');
     if (snapImgs.length > 0) {
       const src = await snapImgs[0].getAttribute('src');

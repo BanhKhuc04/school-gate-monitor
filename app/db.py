@@ -260,24 +260,72 @@ def add_violation_event(timestamp: str, plate_read: str = None,
             conn.close()
 
 
-def list_violations(limit: int = 50) -> List[dict]:
+def list_violations(
+    limit: int = 50,
+    offset: int = 0,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    violation_type: Optional[str] = None,
+    plate: Optional[str] = None,
+) -> List[dict]:
     """
-    Liệt kê các sự kiện vi phạm gần nhất.
-    
+    Liệt kê các sự kiện vi phạm với phân trang và lọc.
+
     Args:
-        limit: Số lượng tối đa
-        
+        limit: Số lượng tối đa mỗi trang
+        offset: Bỏ qua N bản ghi đầu
+        date_from: ISO timestamp bắt đầu (inclusive)
+        date_to: ISO timestamp kết thúc (inclusive)
+        violation_type: Lọc theo loại vi phạm (e.g. 'NO_HELMET')
+        plate: Lọc theo biển số (tìm chứa, không phải khớp tuyệt đối)
+
     Returns:
         List of violation records
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            'SELECT * FROM violation_events ORDER BY timestamp DESC LIMIT ?',
-            (limit,)
-        )
-        return [dict(row) for row in cursor.fetchall()]
+
+        # Build WHERE clause dynamically
+        conditions = []
+        params: List = []
+
+        if date_from:
+            conditions.append('timestamp >= ?')
+            params.append(date_from)
+        if date_to:
+            conditions.append('timestamp <= ?')
+            params.append(date_to)
+        if violation_type:
+            conditions.append('violation_type = ?')
+            params.append(violation_type)
+        if plate:
+            conditions.append('(plate_read LIKE ? OR plate_matched LIKE ?)')
+            like_val = f'%{plate}%'
+            params.extend([like_val, like_val])
+
+        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+
+        # Total count (ignoring LIMIT/OFFSET)
+        cursor.execute(f'SELECT COUNT(*) FROM violation_events WHERE {where_clause}', params)
+        total = cursor.fetchone()[0]
+
+        # Paginated results
+        query = f'''
+            SELECT * FROM violation_events
+            WHERE {where_clause}
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+        '''
+        cursor.execute(query, params + [limit, offset])
+        items = [dict(row) for row in cursor.fetchall()]
+
+        return {
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'items': items,
+        }
     finally:
         conn.close()
 
