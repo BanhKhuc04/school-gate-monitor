@@ -26,6 +26,12 @@ data/snapshots/
 models/*.pt
 yolov8n.pt
 
+# Training datasets (large, not source — keep data.yaml/docs only)
+datasets/*/images/
+datasets/*/labels/
+datasets/*/*.jpg
+datasets/*/*.txt
+
 # graphify analysis output
 graphify-out/
 
