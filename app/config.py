@@ -37,6 +37,11 @@ HELMET_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho helmet detection
 PLATE_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho plate detection
 PERSON_CONF_THRESHOLD = 0.4  # Ngưỡng confidence cho person detection (COCO)
 
+# Face match cosine similarity threshold — nghiêng về giảm false positive
+# (0.40 mặc định cũ dễ nhận nhầm người lạ). Chưa đo bằng dữ liệu thật, cần
+# clip test có nhãn (người đã enroll + người lạ) để tinh chỉnh số chính xác.
+FACE_MATCH_THRESHOLD = 0.45
+
 # Frame processing
 FRAME_SKIP = 2  # Xử lý cách 1 frame để giảm tải CPU (1 = mọi frame, 2 = cách 1 frame)
 

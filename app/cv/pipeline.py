@@ -17,7 +17,7 @@ from app.config import (
     CAMERA_SOURCE, CAMERA_LOOP, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
     HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT,
-    ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR
+    ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, FACE_MATCH_THRESHOLD
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
@@ -586,7 +586,7 @@ class VideoPipeline:
                 if emb_bytes is None:
                     continue
                 vec = np.array(struct.unpack(f"{len(emb_bytes)//4}f", emb_bytes), dtype=np.float32)
-                matched, best_sim, best_idx = match_embedding(vec, known_vecs)
+                matched, best_sim, best_idx = match_embedding(vec, known_vecs, threshold=FACE_MATCH_THRESHOLD)
                 if matched:
                     matched_label = known_labels[best_idx]
 

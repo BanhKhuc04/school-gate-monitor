@@ -63,4 +63,24 @@ test.describe('Guard Page', () => {
     expect(found).toBe(true);
   });
 
+  test('Alert banner shows snapshot thumbnail when snapshot_url is present', async ({ page }) => {
+    await page.waitForTimeout(1000);
+    const result = await page.evaluate(async () => {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({
+        violation_type: 'NO_HELMET',
+        plate_read: 'TESTTHUMB001',
+        snapshot_url: '/media/fake_test_snapshot.jpg',
+      });
+      const resp = await fetch(`http://localhost:8000/api/dev/trigger-test-alert?${params}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      return { status: resp.status, ok: resp.ok };
+    });
+    expect(result.ok).toBe(true);
+
+    await expect(page.locator('img[alt="Ảnh chụp bằng chứng"]')).toBeVisible({ timeout: 12000 });
+  });
+
 });

@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/dev", tags=["dev"])
 def trigger_test_alert(
     violation_type: str = "NO_HELMET",
     plate_read: str = "TEST123",
+    snapshot_url: str | None = None,
     _current_user: dict = Depends(require_role("security", "admin")),
 ):
     """
@@ -31,6 +32,8 @@ def trigger_test_alert(
             "violation_type": violation_type,
             "plate_read": plate_read,
             "plate_matched": None,
+            "plate_format_valid": None,
+            "snapshot_url": snapshot_url,
             "timestamp": datetime.now().isoformat(),
         }
         # ponytail: bypass cooldown — put directly in queue so tests are reliable.
@@ -45,6 +48,7 @@ def trigger_test_alert(
 def trigger_test_face_match(
     matched_label: str = "Nguyễn Văn A",
     similarity: float = 0.75,
+    snapshot_url: str | None = None,
     _current_user: dict = Depends(require_role("security", "admin")),
 ):
     """
@@ -58,6 +62,7 @@ def trigger_test_face_match(
             "type": "face_match",
             "matched_label": matched_label,
             "similarity": similarity,
+            "snapshot_url": snapshot_url,
             "timestamp": datetime.now().isoformat(),
         }
         # ponytail: bypass cooldown — put directly in queue so tests are reliable.
