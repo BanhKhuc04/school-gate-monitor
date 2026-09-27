@@ -25,9 +25,11 @@ npm install
 Trước khi chạy, tải 2 file model vào thư mục `models/`:
 
 | File | Nguồn |
-|------|-------|
+|------|--------|
 | `models/helmet_best.pt` | [iam-tsr/yolov8n-helmet-detection](https://huggingface.co/iam-tsr/yolov8n-helmet-detection) |
 | `models/plate_best.pt` | [Koushim/yolov8-license-plate-detection](https://huggingface.co/Koushim/yolov8-license-plate-detection) |
+
+Model `models/yolov8n.pt` (person COCO) sẽ tự tải lần đầu khi chạy.
 
 ## Chạy (Development)
 
@@ -55,7 +57,7 @@ Mở trình duyệt: `http://localhost:8000`
 
 | Username | Password | Role | Mô tả |
 |----------|----------|------|--------|
-| `admin` | `admin123` | admin | CRUD xe, xem vi phạm, xem camera |
+| `admin` | `admin123` | admin | CRUD xe, xem vi phạm, quản lý tài khoản, sức khỏe hệ thống |
 | `security` | `security123` | security | Xem camera + cảnh báo |
 | `management` | `management123` | management | Xem dashboard thống kê |
 
@@ -65,9 +67,11 @@ Mở trình duyệt: `http://localhost:8000`
 |-------|------|--------|
 | `/` | — | Redirect → login |
 | `/login` | — | Đăng nhập |
-| `/admin/vehicles` | admin | CRUD xe đăng ký |
-| `/admin/violations` | admin | Bảng vi phạm + ảnh snapshot |
-| `/guard` | security, admin | Camera MJPEG + AlertBanner |
+| `/admin/vehicles` | admin | CRUD xe đăng ký + import CSV |
+| `/admin/violations` | admin | Bảng vi phạm + ảnh snapshot + lọc + phân trang |
+| `/admin/users` | admin | Quản lý tài khoản (CRUD user) |
+| `/admin/health` | admin | Trạng thái pipeline + lưu trữ + dọn ảnh cũ |
+| `/guard` | security, admin | Camera MJPEG + AlertBanner (cảnh báo thời gian thực) |
 | `/dashboard` | management, admin | KPI + biểu đồ thống kê |
 
 ## API Routes (JSON)
@@ -78,10 +82,16 @@ Mở trình duyệt: `http://localhost:8000`
 | `/api/auth/me` | GET | any | Thông tin user hiện tại |
 | `/api/vehicles` | GET/POST | admin | List/thêm xe |
 | `/api/vehicles/{id}` | PUT/DELETE | admin | Sửa/xóa xe |
-| `/api/violations` | GET | admin | Danh sách vi phạm |
+| `/api/vehicles/import` | POST | admin | Import hàng loạt từ CSV |
+| `/api/violations` | GET | admin | Danh sách vi phạm (lọc + phân trang) |
+| `/api/users` | GET/POST | admin | List/tạo user |
+| `/api/users/{id}` | PUT/DELETE | admin | Sửa/xóa user |
 | `/api/stats/summary` | GET | management, admin | Thống kê vi phạm |
+| `/api/system/health` | GET | admin, management | Trạng thái pipeline + storage |
+| `/api/system/snapshots/cleanup` | POST | admin | Dọn ảnh vi phạm cũ |
 | `/guard/video_feed` | GET | security, admin | MJPEG stream (query: `?token=`) |
 | `/guard/ws` | WS | security, admin | WebSocket cảnh báo (query: `?token=`) |
+| `/api/dev/trigger-test-alert` | POST | security, admin | Giả lập cảnh báo (test) |
 | `/media/{file}` | GET | any | Ảnh snapshot vi phạm |
 
 ## Kiến trúc
@@ -89,7 +99,8 @@ Mở trình duyệt: `http://localhost:8000`
 - **Frontend**: React 18 + Vite + Tailwind + React Router + axios + recharts
 - **Backend**: FastAPI, xử lý webcam trong thread nền riêng
 - **Video streaming**: MJPEG (`/guard/video_feed`)
-- **Cảnh báo**: WebSocket + AlertBanner (banner đỏ + beep)
-- **Detection**: YOLOv8 (helmet + plate) + EasyOCR
+- **Cảnh báo**: WebSocket + AlertBanner (banner đỏ + beep 800Hz)
+- **Detection**: YOLOv8 (helmet + plate + person COCO) + EasyOCR
 - **Auth**: JWT (12h), bcrypt password hash
-- **Lưu trữ**: SQLite, ảnh vi phạm (`data/snapshots/`)
+- **Lưu trữ**: SQLite (data/app.db), ảnh vi phạm (`data/snapshots/`)
+- **Test**: pytest (`app/tests/`) + Playwright E2E (`frontend/e2e/`)
