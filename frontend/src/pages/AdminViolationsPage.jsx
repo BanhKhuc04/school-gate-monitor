@@ -1,15 +1,8 @@
 import { useState, useEffect } from 'react';
 import client, { API_BASE_URL } from '../api/client';
 import { formatDate } from '../utils/format';
+import { VIOLATION_LABELS } from '../utils/violationLabels';
 
-// Violation type labels for display
-const VIOLATION_LABELS = {
-  'NO_HELMET': 'Không đội mũ',
-  'PLATE_NOT_REGISTERED': 'Biển số lạ',
-  'PLATE_UNREADABLE': 'Không đọc được biển số',
-  'MULTIPLE': 'Nhiều vi phạm',
-  'RIDING_THROUGH_GATE': 'Xe chạy qua cổng',
-};
 const PAGE_SIZE = 20;
 
 export default function AdminViolationsPage() {

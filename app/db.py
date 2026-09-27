@@ -308,35 +308,40 @@ def list_violations(
     try:
         cursor = conn.cursor()
 
-        # Build WHERE clause dynamically
+        # Build WHERE clause dynamically — columns aliased to `ve.` up front since
+        # the query below joins registered_vehicles (`rv.`) for student name/class.
         conditions = []
         params: List = []
 
         if date_from:
-            conditions.append('timestamp >= ?')
+            conditions.append('ve.timestamp >= ?')
             params.append(date_from)
         if date_to:
-            conditions.append('timestamp <= ?')
+            conditions.append('ve.timestamp <= ?')
             params.append(date_to)
         if violation_type:
-            conditions.append('violation_type = ?')
+            conditions.append('ve.violation_type = ?')
             params.append(violation_type)
         if plate:
-            conditions.append('(plate_read LIKE ? OR plate_matched LIKE ?)')
+            conditions.append('(ve.plate_read LIKE ? OR ve.plate_matched LIKE ?)')
             like_val = f'%{plate}%'
             params.extend([like_val, like_val])
 
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
 
         # Total count (ignoring LIMIT/OFFSET)
-        cursor.execute(f'SELECT COUNT(*) FROM violation_events WHERE {where_clause}', params)
+        cursor.execute(f'SELECT COUNT(*) FROM violation_events ve WHERE {where_clause}', params)
         total = cursor.fetchone()[0]
 
-        # Paginated results
+        # Paginated results — LEFT JOIN registered_vehicles để lấy tên/lớp học sinh
+        # theo plate_matched (trước đây thiếu JOIN này nên student_name/student_class
+        # luôn None, cột "Lớp"/"Học sinh" trên trang admin luôn hiện "—").
         query = f'''
-            SELECT * FROM violation_events
+            SELECT ve.*, rv.student_name, rv.student_class
+            FROM violation_events ve
+            LEFT JOIN registered_vehicles rv ON rv.plate_number = ve.plate_matched
             WHERE {where_clause}
-            ORDER BY timestamp DESC
+            ORDER BY ve.timestamp DESC
             LIMIT ? OFFSET ?
         '''
         cursor.execute(query, params + [limit, offset])
@@ -504,7 +509,9 @@ def get_violation_stats() -> Dict[str, Any]:
                 "PLATE_NOT_REGISTERED": int,
                 "PLATE_UNREADABLE": int,
                 "MULTIPLE": int,
-            }
+            },
+            "trend": [{"date": "YYYY-MM-DD", "count": int}, ...],  -- 14 ngày gần nhất, đủ ngày kể cả count=0
+            "by_class": [{"class_name": str, "count": int}, ...],  -- "Không xác định" cho vi phạm không khớp biển số đăng ký
         }
     """
     conn = get_connection()
@@ -539,10 +546,38 @@ def get_violation_stats() -> Dict[str, Any]:
             if vt in by_type:
                 by_type[vt] = row["cnt"]
 
+        # Xu hướng 14 ngày gần nhất — đủ điểm để vẽ biểu đồ đường mà không quá dày.
+        # Điền đủ 0 cho ngày không có vi phạm (không chỉ trả về ngày có dữ liệu),
+        # để trục thời gian trên chart liên tục, không bị nhảy cóc.
+        cursor.execute(
+            '''SELECT date(timestamp) as day, COUNT(*) as cnt
+               FROM violation_events
+               WHERE timestamp >= datetime('now', 'localtime', '-14 days')
+               GROUP BY day'''
+        )
+        counts_by_day = {row["day"]: row["cnt"] for row in cursor.fetchall()}
+        trend = []
+        for i in range(13, -1, -1):
+            day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+            trend.append({"date": day, "count": counts_by_day.get(day, 0)})
+
+        # Theo lớp — chỉ tính được cho vi phạm có plate_matched trùng xe đã đăng ký
+        # (join registered_vehicles); vi phạm không khớp biển số gộp vào "Không xác định".
+        cursor.execute(
+            '''SELECT COALESCE(rv.student_class, 'Không xác định') as class_name, COUNT(*) as cnt
+               FROM violation_events ve
+               LEFT JOIN registered_vehicles rv ON rv.plate_number = ve.plate_matched
+               GROUP BY class_name
+               ORDER BY cnt DESC'''
+        )
+        by_class = [{"class_name": row["class_name"], "count": row["cnt"]} for row in cursor.fetchall()]
+
         return {
             "total_today": total_today,
             "total_week": total_week,
             "by_type": by_type,
+            "trend": trend,
+            "by_class": by_class,
         }
     finally:
         conn.close()
