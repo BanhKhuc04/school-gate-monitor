@@ -541,6 +541,7 @@ def get_violation_stats() -> Dict[str, Any]:
             "PLATE_UNREADABLE": 0,
             "MULTIPLE": 0,
             "RIDING_THROUGH_GATE": 0,
+            "TOO_MANY_RIDERS": 0,
         }
         cursor.execute(
             '''SELECT violation_type, COUNT(*) as cnt

@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
 import client from '../api/client';
 
+function StatusDot({ ok, label }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`w-3 h-3 rounded-full ${ok ? 'bg-[#10b981]' : 'bg-[#c92035]'} shrink-0`}
+        style={{ boxShadow: ok ? '0 0 6px #10b981' : '0 0 6px #c92035' }} />
+      <span className="text-[12px] font-mono text-[#374151]">{label}</span>
+    </div>
+  );
+}
+
 export default function AdminHealthPage() {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -35,37 +45,19 @@ export default function AdminHealthPage() {
       setCleanupMsg(`Đã xóa ${res.data.deleted_files} file, cập nhật ${res.data.updated_records} record.`);
       loadHealth();
     } catch (err) {
-      setCleanupMsg('Lỗi khi dọn ảnh: ' + (err.response?.data?.detail || err.message));
+      setCleanupMsg('Lỗi: ' + (err.response?.data?.detail || err.message));
     } finally {
       setCleaning(false);
     }
   }
 
-  function StatusDot({ ok, label }) {
-    return (
-      <div className="flex items-center gap-2">
-        <span
-          className={`inline-block w-3 h-3 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`}
-          style={{ boxShadow: ok ? '0 0 6px #22c55e' : '0 0 6px #ef4444' }}
-        />
-        <span className="text-sm text-gray-700">{label}</span>
-      </div>
-    );
-  }
-
-  function WarningBanner({ message }) {
-    if (!message) return null;
-    return (
-      <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 px-4 py-3 rounded-lg text-sm">
-        ⚠️ {message}
-      </div>
-    );
-  }
-
   if (loading && !health) {
     return (
-      <div className="min-h-screen bg-gray-100 p-6 flex items-center justify-center">
-        <div className="text-gray-500">Đang tải...</div>
+      <div className="min-h-screen bg-[#ffffff] p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-[#c92035] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-[#6b7280] font-mono text-[12px]">Đang kiểm tra...</p>
+        </div>
       </div>
     );
   }
@@ -74,101 +66,141 @@ export default function AdminHealthPage() {
   const cameraStale = p.last_frame_age_sec !== null && p.last_frame_age_sec > 5;
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-800 mb-6">Sức khỏe hệ thống</h1>
+    <div className="min-h-screen bg-[#ffffff] p-6">
+      <div className="max-w-4xl mx-auto">
+
+        {/* Header */}
+        <p className="font-mono text-xs uppercase tracking-wider text-[#c92035] mb-1">Hạ tầng biên</p>
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`w-2.5 h-2.5 rounded-full ${p.running ? 'bg-[#10b981] animate-pulse' : 'bg-[#c92035]'}`} />
+          <h1 className="text-2xl font-bold text-[#374151]">Sức khỏe &amp; Lưu trữ Hệ thống</h1>
+        </div>
+        <p className="text-sm text-[#6b7280] mb-6">Giám sát pipeline nhận diện và dung lượng lưu trữ thật của server.</p>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-sm">{error}</div>
+          <div className="bg-[#f8d7dc] border border-[#f0aab3] text-[#7a1422] px-4 py-3 rounded-xl mb-4 text-[12px] font-mono">
+            {error}
+          </div>
         )}
 
         {cameraStale && (
-          <WarningBanner message={`Camera có vẻ đứng (${p.last_frame_age_sec}s không có frame mới)`} />
+          <div className="bg-[#fef3c7] border border-[#fde68a] text-[#92400e] px-4 py-3 rounded-xl mb-4 text-[12px] flex items-center gap-2">
+            <span className="text-[16px]">⚠️</span>
+            Camera có vẻ đứng ({p.last_frame_age_sec}s không có frame mới)
+          </div>
         )}
 
         {/* Pipeline Status */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h2 className="text-base font-semibold text-gray-700 mb-4">Pipeline</h2>
+        <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider flex items-center gap-2">
+              <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+                <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Pipeline
+            </h2>
+            <span className="font-mono text-[10px] text-[#6b7280]">CAM_01 · CỔNG CHÍNH</span>
+          </div>
           <div className="grid grid-cols-2 gap-4">
-            <StatusDot ok={p.running} label={`Pipeline: ${p.running ? 'Đang chạy' : 'Đã dừng'}`} />
+            <StatusDot ok={p.running} label={`Pipeline: ${p.running ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`} />
             <StatusDot ok={p.thread_alive} label={`Thread: ${p.thread_alive ? 'Alive' : 'Dead'}`} />
-            <StatusDot ok={p.camera_open} label={`Camera: ${p.camera_open ? 'Mở' : 'Đóng/Không có'}`} />
+            <StatusDot ok={p.camera_open} label={`Camera: ${p.camera_open ? 'Mở' : 'Đóng'}`} />
+            <StatusDot ok={p.last_frame_age_sec !== null && !cameraStale}
+              label={`Frame: ${p.last_frame_age_sec !== null ? `${p.last_frame_age_sec}s` : 'N/A'}`} />
             <div className="flex items-center gap-2">
-              <span className={`inline-block w-3 h-3 rounded-full ${p.last_frame_age_sec !== null && !cameraStale ? 'bg-green-500' : 'bg-red-500'}`}
-                style={{ boxShadow: p.last_frame_age_sec !== null && !cameraStale ? '0 0 6px #22c55e' : '0 0 6px #ef4444' }} />
-              <span className="text-sm text-gray-700">
-                Frame: {p.last_frame_age_sec !== null ? `${p.last_frame_age_sec}s` : 'N/A'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">
+              <span className="text-[12px] font-mono text-[#6b7280]">
                 Detect: {p.last_detection_age_sec !== null ? `${p.last_detection_age_sec}s` : 'N/A'}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">
+              <span className="text-[12px] font-mono text-[#6b7280]">
                 Frames: {p.frame_count ?? 0}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">
+              <span className="text-[12px] font-mono text-[#6b7280]">
                 Uptime: {p.uptime_sec !== null ? `${Math.round(p.uptime_sec / 60)} phút` : 'N/A'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Storage */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h2 className="text-base font-semibold text-gray-700 mb-4">Lưu trữ</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">{health?.violations_today ?? 0}</div>
-              <div className="text-xs text-gray-500 mt-1">Vi phạm hôm nay</div>
+        {/* Storage Stats */}
+        <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
+          <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+              <path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+            Lưu trữ
+          </h2>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="text-center p-4 bg-[#f4f6f9] rounded-xl">
+              <div className="text-3xl font-bold font-mono text-[#c92035]">{health?.violations_today ?? 0}</div>
+              <div className="text-[10px] font-mono text-[#6b7280] mt-1">Vi phạm hôm nay</div>
             </div>
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <div className="text-2xl font-bold text-gray-700">{health?.snapshot_count ?? 0}</div>
-              <div className="text-xs text-gray-500 mt-1">Ảnh snapshot ({health?.snapshot_size_mb ?? 0} MB)</div>
+            <div className="text-center p-4 bg-[#f4f6f9] rounded-xl">
+              <div className="text-3xl font-bold font-mono text-[#374151]">{health?.snapshot_count ?? 0}</div>
+              <div className="text-[10px] font-mono text-[#6b7280] mt-1">Ảnh snapshot</div>
+              <div className="text-[10px] font-mono text-[#9ca3af]">{health?.snapshot_size_mb ?? 0} MB</div>
             </div>
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <div className="text-2xl font-bold text-green-600">{health?.db_size_mb ?? 0} MB</div>
-              <div className="text-xs text-gray-500 mt-1">Dung lượng DB</div>
+            <div className="text-center p-4 bg-[#f4f6f9] rounded-xl">
+              <div className="text-3xl font-bold font-mono text-[#10b981]">{health?.db_size_mb ?? 0} MB</div>
+              <div className="text-[10px] font-mono text-[#6b7280] mt-1">Dung lượng DB</div>
             </div>
           </div>
         </div>
 
         {/* Cleanup */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-base font-semibold text-gray-700 mb-3">Dọn ảnh cũ</h2>
-          <p className="text-sm text-gray-500 mb-4">
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-[#d1d5db]">
+          <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider mb-2 flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+              <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Dọn ảnh cũ
+          </h2>
+          <p className="text-[12px] text-[#6b7280] mb-4">
             Xóa file ảnh vi phạm cũ để giải phóng dung lượng. Record vi phạm vẫn giữ lại, chỉ null đường dẫn ảnh.
           </p>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={() => handleCleanup(30)}
               disabled={cleaning}
-              className="bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 bg-[#f4f6f9] hover:bg-[#eceff3] text-[#374151] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
             >
-              Dọn ảnh &gt;30 ngày
+              <svg className="w-4 h-4 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              &gt;30 ngày
             </button>
             <button
               onClick={() => handleCleanup(90)}
               disabled={cleaning}
-              className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 bg-[#fde68a] hover:bg-[#f59e0b] hover:text-white text-[#92400e] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
             >
-              Dọn ảnh &gt;90 ngày
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              &gt;90 ngày
             </button>
             <button
               onClick={() => handleCleanup(180)}
               disabled={cleaning}
-              className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 bg-[#f8d7dc] hover:bg-[#c92035] hover:text-white text-[#7a1422] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
             >
-              Dọn ảnh &gt;180 ngày
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              &gt;180 ngày
             </button>
           </div>
-          {cleaning && <p className="text-sm text-gray-500 mt-2">Đang dọn...</p>}
+          {cleaning && (
+            <div className="mt-3 flex items-center gap-2 text-[#6b7280] text-[12px]">
+              <div className="w-4 h-4 border-2 border-[#c92035] border-t-transparent rounded-full animate-spin" />
+              Đang dọn...
+            </div>
+          )}
           {cleanupMsg && (
-            <p className={`text-sm mt-2 ${cleanupMsg.includes('Lỗi') ? 'text-red-600' : 'text-green-600'}`}>
+            <p className={`mt-3 text-[12px] font-mono ${cleanupMsg.includes('Lỗi') ? 'text-[#c92035]' : 'text-[#10b981]'}`}>
               {cleanupMsg}
             </p>
           )}

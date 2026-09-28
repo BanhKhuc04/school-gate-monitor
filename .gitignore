@@ -24,13 +24,23 @@ data/snapshots/
 
 # Models
 models/*.pt
+models/*.pt.bak
+models/*.onnx
+models/*.onnx.data
 yolov8n.pt
+yolov8n-pose.pt
+yolov8n.onnx
+yolov8n-pose.onnx
 
 # Training datasets (large, not source — keep data.yaml/docs only)
 datasets/*/images/
 datasets/*/labels/
 datasets/*/*.jpg
 datasets/*/*.txt
+datasets/vn_plate_detect_raw/
+
+# Training run output (ultralytics results — regenerable)
+runs/
 
 # graphify analysis output
 graphify-out/

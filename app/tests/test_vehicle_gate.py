@@ -52,3 +52,97 @@ def test_motorcycle_is_unaffected_by_gate():
     # No plate_dets at all → pre-existing behavior (unchanged by the gate) is PLATE_UNREADABLE.
     mock_add.assert_called_once()
     assert mock_add.call_args.kwargs["violation_type"] == "PLATE_UNREADABLE"
+
+
+def test_walking_bike_bare_head_is_not_no_helmet():
+    """Dắt xe (đứng, posture 'standing'), đầu trần: không bắt buộc đội mũ khi không lái —
+    chỉ bắt PLATE_UNREADABLE (không có plate_dets), không được có NO_HELMET."""
+    pipeline = _make_pipeline()
+    helmet_dets = [MagicMock(class_name="Without Helmet")]
+    with patch("app.cv.pipeline.add_violation_event", return_value=1) as mock_add, \
+         patch("app.cv.pipeline.cv2.imwrite", return_value=True), \
+         patch("os.makedirs"):
+        pipeline._process_violations(
+            _frame(), helmet_dets=helmet_dets, plate_dets=[],
+            posture_status="standing", vehicle_type="motorcycle",
+        )
+    mock_add.assert_called_once()
+    assert mock_add.call_args.kwargs["violation_type"] == "PLATE_UNREADABLE"
+
+
+def test_riding_bare_head_is_still_flagged():
+    """Ngồi lái (posture 'riding'), đầu trần: vẫn phải bắt lỗi (RIDING_THROUGH_GATE), không được bỏ qua."""
+    pipeline = _make_pipeline()
+    helmet_dets = [MagicMock(class_name="Without Helmet")]
+    with patch("app.cv.pipeline.add_violation_event", return_value=1) as mock_add, \
+         patch("app.cv.pipeline.cv2.imwrite", return_value=True), \
+         patch("os.makedirs"):
+        pipeline._process_violations(
+            _frame(), helmet_dets=helmet_dets, plate_dets=[],
+            posture_status="riding", vehicle_type="motorcycle",
+        )
+    mock_add.assert_called_once()
+    assert mock_add.call_args.kwargs["violation_type"] == "MULTIPLE"
+
+
+def test_too_many_riders_flags_violation():
+    """Chở quá số người quy định, không kèm vi phạm khác → TOO_MANY_RIDERS riêng."""
+    pipeline = _make_pipeline()
+    helmet_dets = [MagicMock(class_name="With Helmet")]
+    plate_dets = [MagicMock(bbox=(10, 10, 70, 45))]
+    with patch("app.cv.pipeline.add_violation_event", return_value=1) as mock_add, \
+         patch("app.cv.pipeline.cv2.imwrite", return_value=True), \
+         patch("app.cv.pipeline.read_plate", return_value="29A12345"), \
+         patch("app.cv.pipeline.get_vehicle_by_plate", return_value={"plate_number": "29A12345"}), \
+         patch("os.makedirs"):
+        pipeline._process_violations(
+            _frame(), helmet_dets=helmet_dets, plate_dets=plate_dets,
+            vehicle_type="motorcycle", too_many_riders=True,
+        )
+    mock_add.assert_called_once()
+    assert mock_add.call_args.kwargs["violation_type"] == "TOO_MANY_RIDERS"
+
+
+def test_too_many_riders_combines_with_no_helmet():
+    """Chở quá người + không đội mũ cùng lúc → gộp thành MULTIPLE."""
+    pipeline = _make_pipeline()
+    helmet_dets = [MagicMock(class_name="Without Helmet")]
+    with patch("app.cv.pipeline.add_violation_event", return_value=1) as mock_add, \
+         patch("app.cv.pipeline.cv2.imwrite", return_value=True), \
+         patch("os.makedirs"):
+        pipeline._process_violations(
+            _frame(), helmet_dets=helmet_dets, plate_dets=[],
+            vehicle_type="motorcycle", too_many_riders=True,
+        )
+    mock_add.assert_called_once()
+    assert mock_add.call_args.kwargs["violation_type"] == "MULTIPLE"
+
+
+def test_count_riders_per_vehicle_flags_all_when_over_limit():
+    """3 người cùng khớp 1 xe (giới hạn mặc định 2) → cả 3 group đều bị đánh dấu."""
+    from app.cv.pipeline import VideoPipeline
+    pipeline = VideoPipeline.__new__(VideoPipeline)
+    vehicle = MagicMock(bbox=(0, 0, 100, 100))
+    groups = [{'_vehicle': vehicle} for _ in range(3)]
+    pipeline._count_riders_per_vehicle(groups)
+    assert all(g.get('too_many_riders') is True for g in groups)
+
+
+def test_count_riders_per_vehicle_ok_at_exact_limit():
+    """Đúng 2 người khớp 1 xe (bằng giới hạn, không vượt) → KHÔNG bị đánh dấu."""
+    from app.cv.pipeline import VideoPipeline
+    pipeline = VideoPipeline.__new__(VideoPipeline)
+    vehicle = MagicMock(bbox=(0, 0, 100, 100))
+    groups = [{'_vehicle': vehicle} for _ in range(2)]
+    pipeline._count_riders_per_vehicle(groups)
+    assert all('too_many_riders' not in g for g in groups)
+
+
+def test_count_riders_per_vehicle_ignores_pedestrians():
+    """Group không khớp xe nào (_vehicle=None, người đi bộ) không được tính vào bất kỳ xe nào."""
+    from app.cv.pipeline import VideoPipeline
+    pipeline = VideoPipeline.__new__(VideoPipeline)
+    vehicle = MagicMock(bbox=(0, 0, 100, 100))
+    groups = [{'_vehicle': vehicle} for _ in range(2)] + [{'_vehicle': None} for _ in range(5)]
+    pipeline._count_riders_per_vehicle(groups)
+    assert all('too_many_riders' not in g for g in groups)

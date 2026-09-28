@@ -1,0 +1,5 @@
+path: D:/Work/Project_motorbike/datasets/vn_plate_detect
+train: images/train
+val: images/val
+nc: 1
+names: ['plate']

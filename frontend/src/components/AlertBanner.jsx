@@ -42,7 +42,7 @@ function buildSpeechText(data) {
   }
 }
 
-export default function AlertBanner({ token, onAlert }) {
+export default function AlertBanner({ token, onAlert, gate = 'main' }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [snapshotUrl, setSnapshotUrl] = useState(null);
@@ -52,11 +52,17 @@ export default function AlertBanner({ token, onAlert }) {
   onAlertRef.current = onAlert;
 
   useEffect(() => {
+    // Chrome nạp danh sách giọng đọc bất đồng bộ — gọi sớm 1 lần để giọng nữ
+    // tiếng Việt kịp có mặt trước khi cảnh báo đầu tiên cần đọc.
+    window.speechSynthesis?.getVoices();
+  }, []);
+
+  useEffect(() => {
     if (!token) return;
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
-    const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}`;
+    const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}&gate=${gate}`;
 
     // Phát chuỗi beep phân biệt theo loại vi phạm, trả về tổng thời lượng
     // (ms) để lên lịch TTS phát ngay sau khi beep kết thúc.
@@ -83,11 +89,27 @@ export default function AlertBanner({ token, onAlert }) {
       return Math.round((sound.beeps * (sound.beepDuration + sound.gap)) * 1000);
     }
 
+    // Tên giọng nữ tiếng Việt phổ biến theo hệ điều hành/trình duyệt (Windows,
+    // Google, Edge). Không có tên khớp nào → tự động rơi về giọng vi-VN đầu tiên
+    // (tốt hơn để trình duyệt tự chọn, vì không phải giọng nào cũng khai tên).
+    const FEMALE_VOICE_HINTS = ['hoaimy', 'nữ', 'female', 'linh', 'mai', 'huyền'];
+
+    function pickVietnameseFemaleVoice() {
+      const voices = window.speechSynthesis.getVoices();
+      const viVoices = voices.filter((v) => v.lang?.toLowerCase().startsWith('vi'));
+      const female = viVoices.find((v) =>
+        FEMALE_VOICE_HINTS.some((hint) => v.name.toLowerCase().includes(hint))
+      );
+      return female || viVoices[0] || null;
+    }
+
     function speak(text) {
       try {
         if (!window.speechSynthesis) return;
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'vi-VN';
+        const voice = pickVietnameseFemaleVoice();
+        if (voice) utterance.voice = voice;
         window.speechSynthesis.speak(utterance);
       } catch (e) {
         console.warn('[AlertBanner] TTS blocked:', e.message);
@@ -145,14 +167,14 @@ export default function AlertBanner({ token, onAlert }) {
         wsRef.current = null;
       }
     };
-  }, [token]);
+  }, [token, gate]);
 
   return (
     <div
       style={{
         position: 'fixed',
         top: 0, left: 0, right: 0,
-        backgroundColor: '#dc3545',
+        backgroundColor: '#c92035',
         color: 'white',
         padding: '15px 20px',
         textAlign: 'center',
@@ -170,7 +192,7 @@ export default function AlertBanner({ token, onAlert }) {
         <img
           src={`${API_BASE_URL}${snapshotUrl}`}
           alt="Ảnh chụp bằng chứng"
-          style={{ height: '48px', borderRadius: '4px', border: '2px solid white' }}
+          style={{ height: '84px', borderRadius: '4px', border: '2px solid white' }}
         />
       )}
     </div>

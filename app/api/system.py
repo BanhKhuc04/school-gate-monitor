@@ -18,15 +18,14 @@ from app.db import (
 )
 from app.config import SNAPSHOTS_DIR
 
-
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 
-def _pipeline_status() -> dict:
-    """Get pipeline health status (returns safe defaults if pipeline not running)."""
+def _pipeline_status(gate_id: str = "main") -> dict:
+    """Get pipeline health status for a given gate (returns safe defaults if not running)."""
     try:
         from app.cv.pipeline import get_pipeline
-        pipeline = get_pipeline()
+        pipeline = get_pipeline(gate_id)
         if pipeline is None:
             return {
                 "running": False,
@@ -80,6 +79,7 @@ class HealthResponse(BaseModel):
     snapshot_count: int
     snapshot_size_mb: float
     violations_today: int
+    gates: list[dict]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -92,9 +92,19 @@ def get_health(
     status on the live view; the storage/violation-count fields are read-only
     and not sensitive, so no separate slim endpoint is worth building for them).
     """
-    pipeline_status = _pipeline_status()
+    from app.config import GATES
+    from app.cv.pipeline import get_pipeline
+
     stats = get_violation_stats()
     snapshot_count, snapshot_size = _snapshots_size_mb()
+
+    # Build per-gate pipeline status
+    gates_status = {}
+    for gid, cfg in GATES.items():
+        gates_status[gid] = _pipeline_status(gid)
+
+    # Legacy top-level pipeline field — main gate only (backwards compat)
+    pipeline_status = gates_status.get("main", _pipeline_status("main"))
 
     return {
         "pipeline": pipeline_status,
@@ -102,6 +112,10 @@ def get_health(
         "snapshot_count": snapshot_count,
         "snapshot_size_mb": snapshot_size,
         "violations_today": stats["total_today"],
+        "gates": [
+            {"id": gid, "name": cfg.get("name", gid), "pipeline": gates_status.get(gid, {})}
+            for gid, cfg in GATES.items()
+        ],
     }
 
 

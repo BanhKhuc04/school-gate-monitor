@@ -6,4 +6,5 @@ export const VIOLATION_LABELS = {
   PLATE_UNREADABLE: 'Không đọc được biển số',
   MULTIPLE: 'Nhiều vi phạm',
   RIDING_THROUGH_GATE: 'Xe chạy qua cổng',
+  TOO_MANY_RIDERS: 'Chở quá số người quy định',
 };

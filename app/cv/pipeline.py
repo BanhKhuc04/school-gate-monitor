@@ -14,10 +14,10 @@ import numpy as np
 from typing import Optional
 
 from app.config import (
-    CAMERA_SOURCE, CAMERA_LOOP, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
+    GATES, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
     HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT,
-    ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR
+    ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
@@ -36,13 +36,16 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 class VideoPipeline:
     """
-    Thread nền xử lý webcam + YOLO detection + vẽ box.
-    
+    Thread nền xử lý webcam + YOLO detection + vẽ box cho MỘT gate.
+
     Frame đã xử lý được lưu vào biến dùng chung, có Lock bảo vệ.
     Có queue cho cảnh báo vi phạm qua WebSocket.
     """
-    
-    def __init__(self):
+
+    def __init__(self, gate_id: str, gate_config: dict):
+        self.gate_id = gate_id
+        self.gate_name = gate_config.get("name", gate_id)
+
         # Lock bảo vệ frame
         self._lock = threading.Lock()
         self._latest_frame: Optional[np.ndarray] = None
@@ -159,18 +162,19 @@ class VideoPipeline:
             "uptime_sec": round(now - self._start_time, 1),
         }
     
-    def _open_webcam(self):
+    def _open_webcam(self, gate_config: dict):
         return WebcamStream(
-            source=CAMERA_SOURCE,
+            source=gate_config["source"],
             width=VIDEO_WIDTH,
             height=VIDEO_HEIGHT,
-            loop=CAMERA_LOOP,
+            loop=gate_config.get("loop", True),
         )
 
     def _run_loop(self):
         """Vòng lặp chính của thread nền."""
+        gate_config = GATES.get(self.gate_id, {"source": 0, "loop": True, "name": self.gate_id})
         try:
-            self._webcam = self._open_webcam()
+            self._webcam = self._open_webcam(gate_config)
             print("[Pipeline] Webcam opened")
         except Exception as e:
             print(f"[Pipeline] ERROR: Cannot open webcam: {e}")
@@ -229,6 +233,9 @@ class VideoPipeline:
                 # Gom helmet + plate + loại phương tiện vào từng nhóm theo person
                 groups = self._group_by_person(person_dets, helmet_dets, plate_dets, vehicle_dets)
 
+                # Đếm số người/xe — đánh dấu chở quá số người quy định
+                self._count_riders_per_vehicle(groups)
+
                 # Phát hiện tư thế cho mỗi person box — ISOLATED try/except
                 groups = self._run_posture_detection(frame, groups)
 
@@ -240,6 +247,7 @@ class VideoPipeline:
                         group['plate_dets'],
                         posture_status=group.get('posture_status', 'unknown'),
                         vehicle_type=group.get('vehicle_type'),
+                        too_many_riders=group.get('too_many_riders', False),
                     )
 
                 # Vẽ box helmet (theo nhóm)
@@ -268,7 +276,7 @@ class VideoPipeline:
                     except Exception:
                         pass
                     try:
-                        self._webcam = self._open_webcam()
+                        self._webcam = self._open_webcam(gate_config)
                         print("[Pipeline] Webcam reconnected")
                     except Exception as reconnect_err:
                         print(f"[Pipeline] Reconnect failed: {reconnect_err}")
@@ -365,6 +373,7 @@ class VideoPipeline:
             # Gán phương tiện: x-center gần nhất, trong phạm vi chiều rộng person
             best_v_dist = float('inf')
             vehicle_type = None
+            matched_vehicle = None
             for v in vehicle_dets:
                 vx1, vy1, vx2, vy2 = v.bbox
                 vcx = (vx1 + vx2) / 2
@@ -372,9 +381,11 @@ class VideoPipeline:
                 if dist < best_v_dist and dist <= p_width:
                     best_v_dist = dist
                     vehicle_type = v.class_name.lower()
+                    matched_vehicle = v
 
             groups.append({
                 '_person': person,
+                '_vehicle': matched_vehicle,
                 'helmet_dets': group_helmets,
                 'plate_dets': group_plates,
                 'vehicle_type': vehicle_type,
@@ -382,8 +393,27 @@ class VideoPipeline:
 
         return groups
 
+    def _count_riders_per_vehicle(self, groups: list) -> None:
+        """
+        Đếm số người khớp cùng 1 xe máy — xe nào vượt quá MAX_RIDERS_PER_MOTORCYCLE
+        thì đánh dấu 'too_many_riders'=True cho mọi group thuộc xe đó (sửa tại chỗ).
+        Người đi bộ (group['_vehicle'] is None) không tính.
+        """
+        buckets: dict[tuple, list[dict]] = {}
+        for group in groups:
+            vehicle = group.get('_vehicle')
+            if vehicle is None:
+                continue
+            buckets.setdefault(vehicle.bbox, []).append(group)
+
+        for riders in buckets.values():
+            if len(riders) > MAX_RIDERS_PER_MOTORCYCLE:
+                for g in riders:
+                    g['too_many_riders'] = True
+
     def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list,
-                         posture_status: str = 'unknown', vehicle_type: str | None = None):
+                         posture_status: str = 'unknown', vehicle_type: str | None = None,
+                         too_many_riders: bool = False):
         """
         Xử lý toàn bộ logic vi phạm cho MỘT nhóm (1 person):
         0. Chặn theo loại phương tiện — không có xe hoặc đi xe đạp thì không bắt mũ/biển số
@@ -450,8 +480,11 @@ class VideoPipeline:
         if plate_read and not plate_matched:
             violation_types.append("PLATE_NOT_REGISTERED")
         
-        # 3. Không có mũ bảo hiểm (có Without Helmet mà không có With Helmet)
-        if has_without_helmet and not has_with_helmet:
+        # 3. Không có mũ bảo hiểm (có Without Helmet mà không có With Helmet).
+        # Dắt bộ xe (posture == 'standing') không bắt buộc đội mũ theo luật —
+        # chỉ bắt lỗi khi đang ngồi lái (riding) hoặc không xác định được tư thế
+        # (unknown, giữ hành vi cũ để không bỏ sót khi pose detection thất bại).
+        if has_without_helmet and not has_with_helmet and posture_status != 'standing':
             violation_types.append("NO_HELMET")
 
         # 4. Tư thế đang ngồi xe (riding) + có helmet → vi phạm đặc biệt
@@ -464,7 +497,11 @@ class VideoPipeline:
                 violation_types.remove("NO_HELMET")
             if "RIDING_THROUGH_GATE" not in violation_types:
                 violation_types.append("RIDING_THROUGH_GATE")
-        
+
+        # 6. Chở quá số người quy định (đếm sẵn ở _count_riders_per_vehicle)
+        if too_many_riders:
+            violation_types.append("TOO_MANY_RIDERS")
+
         # Nếu không có vi phạm nào → không làm gì
         if not violation_types:
             return
@@ -577,6 +614,8 @@ class VideoPipeline:
                 keypoints = detector.detect_pose(person_crop)
                 posture = classify_posture(keypoints) if keypoints else 'unknown'
                 group['posture_status'] = posture
+                if keypoints:
+                    self._draw_pose_keypoints(frame, keypoints, offset=(x1, y1))
 
         except Exception:
             # ISOLATED: posture errors must not break the main pipeline
@@ -586,25 +625,82 @@ class VideoPipeline:
 
         return groups
 
+    # COCO 17-keypoint skeleton — cặp nối để vẽ đường xương, và nhãn ngắn cho
+    # riêng 6 khớp chân (hông/gối/mắt cá) vì đây là 3 khớp quyết định phân loại
+    # tư thế (classify_posture) — nhãn phần còn lại (tay/mặt) sẽ rối hình không
+    # phục vụ quyết định gì nên chỉ vẽ chấm, không ghi chữ.
+    _SKELETON_PAIRS = [
+        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # vai-khuỷu-cổ tay
+        (5, 11), (6, 12), (11, 12),               # thân
+        (11, 13), (13, 15), (12, 14), (14, 16),   # hông-gối-mắt cá
+    ]
+    _KEYPOINT_LABELS = {11: 'Hong T', 12: 'Hong P', 13: 'Goi T', 14: 'Goi P', 15: 'MatCa T', 16: 'MatCa P'}
+    _KP_CONF_THRESHOLD = 0.3
 
-# Singleton instance
-_pipeline: Optional[VideoPipeline] = None
+    def _draw_pose_keypoints(self, frame: np.ndarray, keypoints: list, offset: tuple):
+        """Vẽ khung xương + nhãn khớp hông/gối/mắt cá lên frame (tọa độ crop + offset)."""
+        ox, oy = offset
+        color_kp = (0, 220, 255)   # vàng-cam — tách biệt với box helmet/plate/person
+        color_bone = (0, 160, 200)
+
+        def pt(i):
+            if i >= len(keypoints) or keypoints[i].get('confidence', 0) < self._KP_CONF_THRESHOLD:
+                return None
+            return (int(keypoints[i]['x'] + ox), int(keypoints[i]['y'] + oy))
+
+        for a, b in self._SKELETON_PAIRS:
+            pa, pb = pt(a), pt(b)
+            if pa and pb:
+                cv2.line(frame, pa, pb, color_bone, 1, cv2.LINE_AA)
+
+        for i in range(len(keypoints)):
+            p = pt(i)
+            if not p:
+                continue
+            cv2.circle(frame, p, 3, color_kp, -1, cv2.LINE_AA)
+            label = self._KEYPOINT_LABELS.get(i)
+            if label:
+                cv2.putText(frame, label, (p[0] + 4, p[1] - 4), FONT, 0.35, color_kp, 1, cv2.LINE_AA)
 
 
-def get_pipeline() -> VideoPipeline:
-    """Lấy singleton pipeline instance."""
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = VideoPipeline()
-    return _pipeline
+# Pipeline instances keyed by gate_id
+_pipelines: dict[str, VideoPipeline] = {}
 
 
-def start_pipeline():
-    """Start pipeline thread."""
-    get_pipeline().start()
+def get_pipeline(gate_id: str = "main") -> VideoPipeline:
+    """Lấy (hoặc tạo mới) pipeline instance cho gate_id."""
+    global _pipelines
+    if gate_id not in _pipelines:
+        gate_config = GATES.get(gate_id)
+        if gate_config is None:
+            raise ValueError(f"Unknown gate_id: {gate_id}. Available gates: {list(GATES.keys())}")
+        _pipelines[gate_id] = VideoPipeline(gate_id, gate_config)
+    return _pipelines[gate_id]
 
 
-def stop_pipeline():
-    """Stop pipeline thread."""
-    if _pipeline:
-        _pipeline.stop()
+def start_all_pipelines():
+    """Start pipeline threads for ALL configured gates."""
+    from app.config import GATES
+    for gate_id in GATES:
+        get_pipeline(gate_id).start()
+
+
+def stop_all_pipelines():
+    """Stop pipeline threads for ALL active gates."""
+    global _pipelines
+    for gate_id in list(_pipelines.keys()):
+        pipeline = _pipelines.pop(gate_id, None)
+        if pipeline:
+            pipeline.stop()
+
+
+def start_pipeline(gate_id: str = "main"):
+    """Start pipeline thread for the specified gate."""
+    get_pipeline(gate_id).start()
+
+
+def stop_pipeline(gate_id: str = "main"):
+    """Stop pipeline thread for the specified gate."""
+    pipeline = _pipelines.get(gate_id)
+    if pipeline:
+        pipeline.stop()

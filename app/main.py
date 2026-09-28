@@ -14,24 +14,24 @@ from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.dev import router as dev_router
 from app.api.system import router as system_router
-from app.cv.pipeline import start_pipeline, stop_pipeline
+from app.cv.pipeline import start_all_pipelines, stop_all_pipelines
 from app.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan - start/stop pipeline thread."""
+    """FastAPI lifespan - start/stop all pipeline threads."""
     # Startup
     print("[App] Initializing database...")
     init_db()
-    print("[App] Starting pipeline thread...")
-    start_pipeline()
+    print("[App] Starting all pipeline threads...")
+    start_all_pipelines()
 
     yield
 
     # Shutdown
-    print("[App] Stopping pipeline thread...")
-    stop_pipeline()
+    print("[App] Stopping all pipeline threads...")
+    stop_all_pipelines()
 
 
 def create_app() -> FastAPI:
@@ -43,10 +43,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
-    # CORS for SPA frontend
+    # CORS for SPA frontend — allow both possible dev ports
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173"],
+        allow_origins=["http://localhost:5173", "http://localhost:5174"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

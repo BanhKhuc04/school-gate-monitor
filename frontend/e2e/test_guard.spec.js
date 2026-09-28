@@ -4,19 +4,27 @@ const SECURITY_USER = 'security';
 const SECURITY_PASS = 'security123';
 
 async function login(page, username, password) {
-  await page.goto('/login', { waitUntil: 'networkidle' });
-  await page.fill('#username', username);
-  await page.fill('#password', password);
-  await page.click('button[type="submit"]');
-  await page.waitForResponse(resp => resp.url().includes('/api/auth/login') && resp.status() < 500, { timeout: 10000 });
-  await page.waitForTimeout(500);
+  // Fetch token from Node side (bypassing Playwright browser network issues
+  // on Windows with localhost), then inject into browser storage.
+  const resp = await fetch('http://localhost:8000/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!resp.ok) throw new Error('Login failed: ' + resp.status);
+  const body = await resp.json();
+  await page.goto('/login', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(({ token, user }) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+  }, { token: body.access_token, user: { username: body.username, role: body.role } });
+  await page.goto('/guard', { waitUntil: 'domcontentloaded' });
 }
 
 test.describe('Guard Page', () => {
 
   test.beforeEach(async ({ page }) => {
     await login(page, SECURITY_USER, SECURITY_PASS);
-    await page.goto('/guard', { waitUntil: 'networkidle' });
   });
 
   test('Security login -> /guard', async ({ page }) => {
@@ -80,7 +88,7 @@ test.describe('Guard Page', () => {
     });
     expect(result.ok).toBe(true);
 
-    await expect(page.locator('img[alt="Ảnh chụp bằng chứng"]')).toBeVisible({ timeout: 12000 });
+    await expect(page.locator('img[alt="Ảnh chụp bằng chứng"]').first()).toBeVisible({ timeout: 12000 });
   });
 
 });

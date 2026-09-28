@@ -44,11 +44,7 @@ export default function LoginPage() {
       <div className="hidden lg:flex lg:w-[46%] xl:w-[42%] flex-col justify-between bg-primary text-inverse-on-surface p-10">
         <div>
           <div className="flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-              <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5">
-                <path d="M12 3l8 4v5c0 5-3.4 8.4-8 9-4.6-.6-8-4-8-9V7l8-4Z" stroke="#fff" strokeWidth="1.6" />
-              </svg>
-            </div>
+            <img src="/favicon.svg" alt="" className="w-10 h-10 rounded-lg bg-surface shrink-0" />
             <div className="flex flex-col leading-tight">
               <span className="font-bold text-base">School Gate Monitor</span>
               <span className="text-xs uppercase tracking-wider text-on-primary-container font-mono">
@@ -179,7 +175,30 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="text-xs text-outline mt-6 font-mono">
+          <div className="mt-6 border border-outline-variant rounded-lg p-3">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant mb-2">
+              Tài khoản demo theo vai trò (click để tự điền)
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { role: 'admin', pass: 'admin123', label: 'Quản trị viên' },
+                { role: 'security', pass: 'security123', label: 'Bảo vệ cổng' },
+                { role: 'management', pass: 'management123', label: 'Ban giám hiệu' },
+              ].map((acc) => (
+                <button
+                  key={acc.role}
+                  type="button"
+                  onClick={() => { setUsername(acc.role); setPassword(acc.pass); }}
+                  className="text-left border border-outline-variant rounded-md px-2 py-1.5 hover:bg-surface-container-low transition-colors"
+                >
+                  <span className="block text-[11px] font-semibold text-on-surface">{acc.label}</span>
+                  <span className="block font-mono text-[10px] text-on-surface-variant">{acc.role}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-xs text-outline mt-4 font-mono">
             Phiên đăng nhập dùng JWT, tự hết hạn sau 12 giờ.
           </p>
         </div>

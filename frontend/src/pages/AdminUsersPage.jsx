@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import client from '../api/client';
-import { formatDate } from '../utils/format';
 
 const ROLES = ['admin', 'security', 'management'];
 const ROLE_LABELS = { admin: 'Admin', security: 'Bảo vệ', management: 'Quản lý' };
@@ -10,7 +9,6 @@ export default function AdminUsersPage() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  // Form state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('security');
@@ -33,9 +31,7 @@ export default function AdminUsersPage() {
     try {
       const res = await client.get('/api/auth/me');
       setCurrentUser(res.data);
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 
   useEffect(() => {
@@ -56,17 +52,12 @@ export default function AdminUsersPage() {
     setError('');
     try {
       if (editingId) {
-        const body = {};
-        body.role = role;
+        const body = { role };
         if (password) body.password = password;
         await client.put(`/api/users/${editingId}`, body);
       } else {
         if (!username || !password) return;
-        await client.post('/api/users', {
-          username: username.trim(),
-          password,
-          role,
-        });
+        await client.post('/api/users', { username: username.trim(), password, role });
       }
       resetForm();
       loadUsers();
@@ -95,72 +86,123 @@ export default function AdminUsersPage() {
     }
   }
 
-  return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-800 mb-6">Quản lý tài khoản</h1>
+  const ROLE_COLORS = {
+    admin: { bg: 'bg-[#dbe3ee]', text: 'text-[#dbe3ee]', dot: 'bg-[#f8d7dc]' },
+    security: { bg: 'bg-[#f4f6f9]', text: 'text-[#c92035]', dot: 'bg-[#c92035]' },
+    management: { bg: 'bg-[#e8f5e9]', text: 'text-[#2e7d32]', dot: 'bg-[#10b981]' },
+  };
 
-        {/* Form */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h2 className="text-base font-semibold text-gray-700 mb-4">
-            {editingId ? `Sửa user #${editingId}` : 'Thêm user mới'}
+  return (
+    <div className="min-h-screen bg-[#ffffff] p-6">
+      <div className="max-w-4xl mx-auto">
+
+        {/* Header */}
+        <p className="font-mono text-xs uppercase tracking-wider text-[#c92035] mb-1">Bảo mật &amp; cấp quyền</p>
+        <div className="flex items-center gap-2 mb-1">
+          <h1 className="text-2xl font-bold text-[#374151]">Quản lý Tài khoản Hệ thống</h1>
+          <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#eceff3] text-[#6b7280]">
+            {users.length} tài khoản
+          </span>
+        </div>
+        <p className="text-sm text-[#6b7280] mb-6">Phân quyền truy cập hệ thống camera AI theo 3 vai trò.</p>
+
+        {/* Role count cards — số thật từ danh sách user, không bịa lịch sử đăng nhập/thiết bị */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          {ROLES.map((r) => (
+            <div key={r} className="bg-white rounded-xl p-4 shadow-sm border border-[#d1d5db]">
+              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">
+                {ROLE_LABELS[r]}
+              </p>
+              <p className="text-3xl font-bold font-mono text-[#123b6d] mt-1">
+                {users.filter((u) => u.role === r).length}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Add/Edit form */}
+        <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
+          <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            {editingId ? `Sửa tài khoản` : 'Thêm tài khoản mới'}
           </h2>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-sm">{error}</div>
+            <div className="bg-[#f8d7dc] border border-[#f0aab3] text-[#7a1422] px-4 py-3 rounded-xl mb-4 text-[12px] font-mono">
+              {error}
+            </div>
           )}
 
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder={editingId ? '(không đổi username)' : 'Username'}
-                required={!editingId}
-                disabled={!!editingId}
-              />
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] font-mono text-[#374151] border-0 outline-none focus:ring-2 focus:ring-[#c92035]"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder={editingId ? '(không đổi)' : 'Username'}
+                  required={!editingId}
+                  disabled={!!editingId}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
+                  {editingId ? 'Mật khẩu mới' : 'Mật khẩu'}
+                </label>
+                <input
+                  type="password"
+                  className="w-full bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] font-mono text-[#374151] border-0 outline-none focus:ring-2 focus:ring-[#c92035]"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required={!editingId}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
+                  Vai trò
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] font-mono text-[#374151] border-0 outline-none appearance-none cursor-pointer pr-8"
+                    value={role}
+                    onChange={e => setRole(e.target.value)}
+                  >
+                    {ROLES.map(r => (
+                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                    ))}
+                  </select>
+                  <svg className="absolute right-2.5 top-2.5 w-4 h-4 text-[#6b7280] pointer-events-none" viewBox="0 0 24 24" fill="none">
+                    <path d="M19 9l-7 7-7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {editingId ? 'Mật khẩu mới (để trống = giữ)' : 'Mật khẩu'}
-              </label>
-              <input
-                type="password"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required={!editingId}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vai trò</label>
-              <select
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={role}
-                onChange={e => setRole(e.target.value)}
-              >
-                {ROLES.map(r => (
-                  <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                ))}
-              </select>
-            </div>
-            <div className="sm:col-span-4 flex gap-2 items-end">
+            <div className="flex gap-2">
               <button
                 type="submit"
-                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 bg-[#c92035] hover:bg-[#c92035] text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
               >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
                 {editingId ? 'Lưu' : 'Thêm'}
               </button>
               {editingId && (
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+                  className="flex items-center gap-1.5 bg-[#f4f6f9] hover:bg-[#eceff3] text-[#374151] text-[12px] font-medium py-2 px-4 rounded-lg transition-colors"
                 >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
                   Hủy
                 </button>
               )}
@@ -168,63 +210,74 @@ export default function AdminUsersPage() {
           </form>
         </div>
 
-        {/* Table */}
+        {/* Users table */}
         {loading ? (
-          <div className="text-center text-gray-500 py-8">Đang tải...</div>
+          <div className="text-center text-[#6b7280] py-12">
+            <div className="w-8 h-8 border-2 border-[#c92035] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            Đang tải...
+          </div>
         ) : users.length === 0 ? (
-          <div className="text-center text-gray-400 py-8">Chưa có user nào.</div>
+          <div className="bg-white rounded-xl p-12 text-center border border-[#d1d5db]">
+            <p className="text-[#6b7280]">Chưa có tài khoản nào.</p>
+          </div>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Username</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Vai trò</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Ngày tạo</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-600">Thao tác</th>
+          <div className="bg-white rounded-xl shadow-sm border border-[#d1d5db] overflow-hidden">
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-left min-w-[600px]">
+                <thead>
+                  <tr className="bg-[#f4f6f9] text-[#6b7280] font-mono text-[11px] uppercase tracking-wider">
+                    <th className="py-3 px-4 font-semibold">Username</th>
+                    <th className="py-3 px-3 font-semibold">Vai trò</th>
+                    <th className="py-3 px-3 font-semibold">Ngày tạo</th>
+                    <th className="py-3 px-4 text-right font-semibold">Thao tác</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {users.map((u) => (
-                    <tr key={u.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{u.username}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                          u.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                          u.role === 'security' ? 'bg-blue-100 text-blue-700' :
-                          'bg-green-100 text-green-700'
-                        }`}>
-                          {ROLE_LABELS[u.role] || u.role}
-                        </span>
-                        {currentUser?.username === u.username && (
-                          <span className="ml-1 text-xs text-gray-400">(bạn)</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(u.created_at)}</td>
-                      <td className="px-4 py-3 text-right space-x-2">
-                        <button
-                          onClick={() => startEdit(u)}
-                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          Sửa
-                        </button>
-                        {currentUser?.username !== u.username && (
-                          <button
-                            onClick={() => handleDelete(u.id)}
-                            className="text-red-600 hover:text-red-800 text-sm font-medium"
-                          >
-                            Xóa
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                <tbody className="divide-y divide-[#f4f6f9] text-[12px] text-[#374151]">
+                  {users.map((u) => {
+                    const colors = ROLE_COLORS[u.role] || ROLE_COLORS.security;
+                    return (
+                      <tr key={u.id} className="hover:bg-[#ffffff] transition-colors">
+                        <td className="py-3 px-4 font-semibold">{u.username}</td>
+                        <td className="py-3 px-3">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[10px] font-semibold ${colors.bg} ${colors.text}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
+                            {ROLE_LABELS[u.role] || u.role}
+                          </span>
+                          {currentUser?.username === u.username && (
+                            <span className="ml-1.5 font-mono text-[10px] text-[#9ca3af]">(bạn)</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[11px] text-[#6b7280] whitespace-nowrap">
+                          {new Date(u.created_at).toLocaleDateString('vi-VN')}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => startEdit(u)}
+                              className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f4f6f9] transition-colors"
+                            >
+                              Sửa
+                            </button>
+                            {currentUser?.username !== u.username && (
+                              <button
+                                onClick={() => handleDelete(u.id)}
+                                className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
+                              >
+                                Xóa
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 bg-gray-50 text-xs text-gray-500 border-t">
-              Tổng: {users.length} tài khoản
+            <div className="px-4 py-3 bg-[#f4f6f9] border-t border-[#d1d5db]">
+              <span className="font-mono text-[11px] text-[#6b7280]">
+                Tổng: <span className="font-bold text-[#374151]">{users.length}</span> tài khoản
+              </span>
             </div>
           </div>
         )}
