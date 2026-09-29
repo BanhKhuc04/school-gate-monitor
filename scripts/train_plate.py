@@ -5,8 +5,7 @@ Nguồn dataset: winter2897/Real-time-Auto-License-Plate-Recognition-with-Jetson
 (8259 ảnh biển số VN thật — xe máy, ô tô, quân đội, ngoại giao), 1 class 'plate'.
 
 Chạy: python scripts/train_plate.py
-Không có GPU cục bộ (CPU-only) — chạy chậm, để trong background là bình thường.
-Nếu có Colab/GPU, đổi device='cpu' -> device=0 để nhanh hơn nhiều.
+Có GPU cục bộ (RTX 3050, CUDA) — device=0, nhanh hơn CPU rất nhiều.
 
 ponytail: epoch=20, imgsz=640 — đủ để đo model có cải thiện hay không so với
 plate_best.pt hiện tại (0/5 detect trên ảnh thật). Nếu kết quả tốt nhưng chưa
@@ -25,7 +24,7 @@ if __name__ == "__main__":
         epochs=20,
         imgsz=640,
         batch=16,
-        device="cpu",
+        device=0,
         project="runs/train",
         name=OUT_NAME,
         patience=5,

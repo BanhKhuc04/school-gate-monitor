@@ -117,6 +117,7 @@ Camera (1 gate, WebcamStream.read_frame)
 | Export | DONE | CSV export vehicles + violations (`GET /api/vehicles/export`, `GET /api/violations/export`) | — | Chưa có export Excel (.xlsx), chỉ CSV |
 | Role permissions | DONE | `app/auth.py::require_role`, 4 role: admin/security/management/teacher | Toàn bộ test file có auth | Management vừa được mở quyền xem camera+vi phạm+xe (commit `9d81244`) |
 | Audit trail | DONE | `violation_audit_log` table, `PATCH /violations/{id}/status` | `test_violation_status.py` | Append-only, ghi actor+action+note+thời gian |
+| Detection zone (ROI) | **DONE** | `app/cv/roi.py`, `app/db.py::get_gate_roi/set_gate_roi`, `app/api/roi.py`, `app/cv/pipeline.py::set_roi/_draw_roi`, `frontend/src/pages/AdminRoiPage.jsx` | `test_roi.py` (14 case) | Đa giác tùy ý per-gate, vẽ trên UI Admin (`/admin/roi`, click thêm điểm lên video feed thật). Lưu DB bảng `gate_roi` (points tỉ lệ % khung hình). Lọc CẢ 4 loại detection (`person`/`vehicle`/`helmet`/`plate`) có tâm ngoài vùng — bản đầu chỉ lọc person/vehicle, để sót helmet/plate vẫn vẽ ngoài vùng (bug phát hiện qua ảnh chụp thật, đã fix cùng session). Cập nhật sống qua `pipeline.set_roi()`, không cần restart. `points=[]` = tắt ROI (mặc định, không đổi hành vi cũ). Viền vùng vẽ màu vàng lên video (`_draw_roi`) để bảo vệ/admin thấy trực quan. |
 
 ## 6. DATABASE
 
@@ -155,7 +156,7 @@ Camera Front (gate "main"):
 
 Camera Rear (gate "secondary"):
 - Purpose: Camera phụ, **tùy chọn** — chỉ tạo pipeline nếu set env.
-- Source/config: env `CAMERA_SOURCE_SECONDARY`. **Chưa test thật với 2 camera vật lý trước+sau cùng lúc trong session này** — chỉ verify được code path tồn tại và UI xem song song (split-view) hoạt động.
+- Source/config: env `CAMERA_SOURCE_SECONDARY`. **Chưa test thật với 2 camera vật lý trước+sau cùng lúc** — chỉ verify được qua `scripts/verify_step3_2cameras.py` (2 file video thật, chạy lại 2026-09-29 sau khi thêm ROI: 3 event mỗi gate, không crash) và UI xem song song (split-view). Xem `.env.example` (mới) để biết cách set biến môi trường bật cổng thứ 2 khi có camera thật.
 
 Resolution: Capture `VIDEO_WIDTH×VIDEO_HEIGHT` = 1280×720 (dùng cho lưu evidence/OCR); detect resize xuống `DETECT_WIDTH×HEIGHT` = 640×480 (dùng riêng cho 3 model YOLO, map tọa độ ngược lại sau khi detect).
 FPS: Video feed stream giới hạn 20fps (`app/api/guard.py`). FPS xử lý AI thật đo qua `get_status()['fps']` (rolling window 30 frame) — **chưa có số liệu thật vì chưa test với người/xe đi qua camera thật trong session dev này**.
@@ -622,11 +623,54 @@ Next task: ✅ **Hết đợt nâng cấp 7 bước.** Người dùng review:
 
 Commit: (xem commit ngay sau entry này)
 
+### SESSION LOG — 2026-09-29 (đợt 3: Vùng nhận diện ROI + xác nhận đa-camera)
+
+Goal: Người dùng báo "chưa có đa camera", nhưng khảo sát thấy đa-camera (2 gate) đã code sẵn từ Bước 3 — chỉ thiếu `.env.example` + chưa test 2 camera vật lý thật. Việc thật sự mới: thêm vùng nhận diện (ROI) — đa giác tùy ý per-gate, vẽ trên UI Admin, lọc bỏ detect ngoài vùng.
+
+Completed:
+- **`app/cv/roi.py`** (mới, module thuần theo pattern `event_correlator.py`): `parse_points()` (validate, `[]`→`None`=tắt ROI, <3 điểm→`ValueError`), `to_pixel_polygon()`, `filter_by_roi()` (lọc theo tâm bbox qua `cv2.pointPolygonTest`).
+- **`app/db.py`**: bảng `gate_roi` (gate_id PK, points_json, updated_at) — bảng config admin-editable ĐẦU TIÊN trong schema. `get_gate_roi()`/`set_gate_roi()`.
+- **`app/cv/pipeline.py`**: `VideoPipeline` đọc ROI từ DB lúc init, `set_roi()` cập nhật sống (không restart), filter cả 4 loại detection (`person`/`vehicle`/`helmet`/`plate`) ngay sau rescale, `_draw_roi()` vẽ viền vàng lên frame ở cả 3 nhánh return (skip-frame, no-person, full-detect).
+  - **Bug fix sau khi test bằng ảnh camera thật (cùng session)**: bản đầu chỉ lọc `person`/`vehicle`, để sót `helmet`/`plate` — 2 loại này vẫn được vẽ lên frame dù nằm ngoài vùng ROI (không gán được vào person nào nhưng vẫn vẽ box), gây cảm giác "vẽ vùng rồi mà vẫn nhận diện ngoài vùng". Fix: lọc `helmet_dets`/`plate_dets` bằng `filter_by_roi()` giống person/vehicle, ngay tại cùng 1 chỗ.
+- **`app/api/roi.py`** (mới): `GET`/`POST /api/roi/{gate_id}` (admin only), POST áp dụng sống qua `get_pipeline(gate_id).set_roi()`, fallback ghi thẳng DB nếu pipeline chưa chạy (test env). Đăng ký trong `app/main.py` VÀ `app/tests/conftest.py` (test tự build app riêng, không dùng `main.py`).
+- **`frontend/src/pages/AdminRoiPage.jsx`** (mới): canvas overlay lên `<img>` video feed MJPEG thật, click thêm điểm, "Hoàn tác điểm cuối"/"Xoá vùng"/"Lưu vùng". Route `/admin/roi` + menu sidebar "Vùng nhận diện".
+- **`.env.example`** (mới): liệt kê biến môi trường bật cổng camera thứ 2.
+
+Files changed: `app/cv/roi.py`, `app/api/roi.py`, `app/tests/test_roi.py` (mới); `app/db.py`, `app/cv/pipeline.py`, `app/main.py`, `app/tests/conftest.py`, `frontend/src/App.jsx`, `frontend/src/components/Sidebar.jsx`, `frontend/src/pages/AdminRoiPage.jsx` (mới), `.env.example` (mới), `DEVELOPMENT_HANDOVER.md`.
+
+Tests: **161/161 pass** (147 cũ + 14 mới trong `test_roi.py`: unit test thuần cho `roi.py` + API round-trip/403/400).
+
+Verify tay:
+- `scripts/verify_step3_2cameras.py` (2 video thật, 60s): 3 event/gate cả 2 bên, không crash — xác nhận ROI không phá vỡ pipeline 2-camera.
+- Chạy uvicorn thật + frontend dev server: vẽ 1 vùng tại `/admin/roi`, lưu → reload trang vẫn còn (persist DB đúng) → mở `/guard` thấy viền vàng ROI hiện trên video live NGAY (không cần restart pipeline) — xác nhận `set_roi()` áp dụng sống hoạt động.
+
+Vấn đề gặp + cách giải:
+- `get_gate_roi()` ban đầu trả `[]` thay vì `None` khi ROI đã bị xoá (points_json="[]" lưu trong DB) — test `test_roi_post_clear_with_empty_list` phát hiện ngay. Fix: `get_gate_roi()` normalize `points or None` trước khi trả về.
+- `app/tests/conftest.py` build app FastAPI RIÊNG (không import `app/main.py::create_app`) — quên đăng ký router mới ở đây làm mọi test trả 404. **Bài học cho router mới sau này: phải đăng ký ở CẢ 2 chỗ** (`app/main.py` cho app thật, `app/tests/conftest.py::test_app` cho test).
+
+Known limitations: 1 vùng-1 gate (không multi-polygon), không có undo lịch sử (chỉ hoàn tác điểm cuối cùng), chưa test ROI với camera vật lý thật (chỉ test qua MJPEG stream từ video file).
+
+Bug fix bổ sung (cùng ngày, phát hiện qua xem video thật):
+- **Pose keypoints chớp tắt theo chu kỳ `FRAME_SKIP`**: chỉ vẽ ở frame có detect thật, KHÔNG cache lại cho nhánh skip-frame (khác `_last_helmet_dets`/`_last_plate_dets`/`_last_person_dets` đã cache từ trước) → khớp xương hiện rồi biến mất liên tục. Fix: thêm `self._last_pose_data` cache trong `_run_posture_detection`, vẽ lại ở nhánh skip-frame giống 3 cache kia.
+- **NO_PLATE/PLATE_OBSCURED báo sai khi xe/người còn chạm mép khung hình** (chưa vào hết khung — không có tracker nên không biết được điều này qua nhiều frame): thêm `VideoPipeline._is_touching_frame_edge()` (static, margin 3% theo `FRAME_EDGE_MARGIN_RATIO` trong config), bỏ qua đánh giá vi phạm + KHÔNG chụp snapshot cho nhóm nào (ưu tiên vehicle bbox, fallback person bbox) còn chạm mép — tự động fix luôn vấn đề "snapshot chụp cảnh xe bị cắt cụt" vì snapshot chỉ lưu khi đã qua bước này. Test: `app/tests/test_frame_edge.py` (6 case, static method thuần không cần load model).
+
+Tests: **167/167 pass** (161 + 6 mới).
+
+Đã code tiếp plan "phân biệt người đi bộ / người đi xe" (người dùng chọn: khi posture không rõ ràng, GIỮ NGUYÊN nghiêng về bắt lỗi như cũ — không đổi hành vi đó):
+- **`VideoPipeline._vertical_overlap()`** (static, mới): thêm điều kiện chồng lấp trục Y khi khớp person↔vehicle trong `_group_by_person`, bên cạnh x-distance sẵn có — giảm gán nhầm người đi bộ đứng/đi ngang thẳng hàng X với 1 xe máy khác "độ sâu" (Y khác hẳn do phối cảnh) thành người đang lái xe.
+- **Không động vào nhánh posture 'unknown'** — vẫn bắt lỗi bình thường khi pose fail, đúng quyết định của người dùng.
+- **Số liệu quan sát**: `pedestrian_count`/`rider_count` (cộng dồn từ lúc pipeline start) thêm vào `get_status()` → `/api/system/health` → hiển thị ở `AdminHealthPage.jsx` ("Lượt người đi bộ"/"Lượt người đi xe"). Đếm theo LƯỢT xuất hiện mỗi frame, không phải người duy nhất — chỉ để phát hiện bất thường tương đối, không phải số liệu chính xác tuyệt đối.
+- Test: `app/tests/test_group_by_person.py` (5 case, dùng `VideoPipeline.__new__()` bypass `__init__` — không cần load model, theo đúng pattern `test_vehicle_gate.py`/`test_posture.py` đã có).
+
+Tests: **172/172 pass** (167 + 5 mới).
+
+Next task: Không có việc bắt buộc tiếp theo (đợt vá lỗi + cải thiện phân biệt người đi bộ/đi xe từ camera thật đã xong). Gợi ý nếu muốn làm tiếp: alert escalation, parent notification tự động, export danh sách xe.
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit Bước 7 continuous recording)
-System status: Backend/frontend chạy được, **147/147 test pass**. Đợt nâng cấp lớn 7 bước đã code xong: Bước 1 + 3 + 4 + 5 + 6 + 7 (Bước 2 không tồn tại trong plan, đánh số nhảy). Riêng Bước 7 (continuous recording) **MẶC ĐỊNH TẮT** — đã chạy benchmark sơ bộ, báo số liệu ở mục 5/Bước 7 và quyết định bật hay không do người dùng duyệt.
-Current development phase: ✅ Đợt nâng cấp 7 bước đã HOÀN THÀNH. Chờ người dùng review số liệu benchmark Bước 7 + đánh giá tổng thể.
-Next recommended task: (1) Người dùng review benchmark Bước 7 — quyết định có bật `CONTINUOUS_RECORDING_ENABLED=True` làm mặc định hay không. (2) Nếu muốn dùng continuous recording thật, chạy `scripts/benchmark_recording.py` trên máy production với camera thật để có số liệu chính xác (script hiện dùng synthetic frame).
+Current stable commit: (xem git log — commit "đợt 3: Vùng nhận diện ROI")
+System status: Backend/frontend chạy được, **161/161 test pass**. Đợt nâng cấp lớn 7 bước (Bước 1+3-7) đã HOÀN THÀNH từ trước. Đợt 3 (2026-09-29) thêm vùng nhận diện (ROI) per-gate + xác nhận đa-camera đã sẵn có (chỉ thiếu `.env.example`, nay đã thêm). Bước 7 (continuous recording) vẫn **MẶC ĐỊNH TẮT** — chưa đổi, chờ benchmark thật.
+Current development phase: ✅ Đợt 3 (ROI) đã HOÀN THÀNH. Chờ người dùng: (1) review benchmark Bước 7 continuous recording, (2) test ROI + 2 camera với phần cứng thật khi có.
+Next recommended task: (1) Người dùng review benchmark Bước 7 — quyết định có bật `CONTINUOUS_RECORDING_ENABLED=True` làm mặc định hay không. (2) Nếu muốn dùng continuous recording thật, chạy `scripts/benchmark_recording.py` trên máy production với camera thật để có số liệu chính xác (script hiện dùng synthetic frame). (3) Khi có camera vật lý thứ 2, set `CAMERA_SOURCE_SECONDARY` theo `.env.example` rồi vẽ vùng ROI riêng cho từng gate tại `/admin/roi`.
 Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 5 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation, Automatic cleanup, Storage statistics). Làm đúng thứ tự Bước 6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
 **Bài học từ các lần review — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (Bước 3: `_try_correlate()` gọi `mark_correlation_unmatched()` sai tham số; Bước 4: đã có ngay test end-to-end qua `_run_loop` thật). Bước 5 bổ sung 1 lỗi nhỏ phát hiện ngay trong lúc code: `HealthResponse` Pydantic model không khai báo field mới → FastAPI `response_model=HealthResponse` strip mất → test phát hiện liền. Bài học: **khi thêm field vào endpoint có `response_model`, PHẢI khai báo field đó trong Pydantic model** (default value để tương thích ngược). Khi viết test cho Bước 6-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật chứ không chỉ test từng hàm con riêng lẻ.
