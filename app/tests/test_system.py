@@ -30,6 +30,10 @@ def test_health_admin_ok(client):
     assert "snapshot_size_mb" in data
     assert "violations_today" in data
     assert isinstance(data["db_size_mb"], (int, float))
+    # Đợt 2, Bước 7: recording field luôn có (kể cả khi TẮT → enabled=False).
+    assert "recording" in data
+    assert isinstance(data["recording"], dict)
+    assert "enabled" in data["recording"]
 
 
 def test_health_management_ok(client):

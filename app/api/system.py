@@ -158,6 +158,8 @@ class HealthResponse(BaseModel):
     disk_used_mb: float = 0.0
     disk_free_mb: float = 0.0
     storage_breakdown: dict = {}
+    # Đợt 2, Bước 7: trạng thái continuous recording (ẩn khi TẮT).
+    recording: dict = {}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -208,7 +210,34 @@ def get_health(
         "disk_used_mb": disk["disk_used_mb"],
         "disk_free_mb": disk["disk_free_mb"],
         "storage_breakdown": storage_breakdown,
+        # Đợt 2, Bước 7: trạng thái continuous recording mỗi gate (chỉ hiện nếu BẬT).
+        # Nếu TẮT (mặc định), trả {"recording_enabled": False} — frontend ẩn UI.
+        "recording": _recording_status_all_gates(),
     }
+
+
+def _recording_status_all_gates() -> dict:
+    """
+    Trả về trạng thái recorder cho mọi gate. Đợt 2, Bước 7.
+    Khi CONTINUOUS_RECORDING_ENABLED=False (mặc định), chỉ trả flag để frontend biết
+    không cần poll UI — KHÔNG đụng vào pipeline (tránh import cv2 khi test env).
+    """
+    from app.config import CONTINUOUS_RECORDING_ENABLED
+    if not CONTINUOUS_RECORDING_ENABLED:
+        return {"enabled": False}
+    try:
+        from app.cv.pipeline import get_pipeline
+    except ImportError:
+        return {"enabled": True, "error": "pipeline unavailable"}
+    result = {"enabled": True, "gates": {}}
+    for gid in GATES:
+        try:
+            p = get_pipeline(gid)
+            if p is not None and p._recorder is not None:
+                result["gates"][gid] = p._recorder.get_stats()
+        except Exception as e:
+            result["gates"][gid] = {"error": str(e)}
+    return result
 
 
 class CleanupResponse(BaseModel):

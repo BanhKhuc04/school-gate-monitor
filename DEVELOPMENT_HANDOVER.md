@@ -271,11 +271,11 @@ Use actual roles from codebase — bảng trên đã verify qua `grep require_ro
 
 ## 13. TEST STATUS
 
-Total tests: 141
-Passed: 141
+Total tests: 147
+Passed: 147
 Failed: 0
 Command: `./venv/Scripts/python.exe -m pytest app/tests/ -q`
-Last test date: 2026-09-29 (sau commit Bước 6 — backup SQLite online)
+Last test date: 2026-09-29 (sau commit Bước 7 — continuous recording)
 
 Critical test areas:
 - camera — KHÔNG có test (cần camera thật, chỉ có `app/cv/smoke_test.py` chạy tay bằng `python -m app.cv.smoke_test`, không phải pytest)
@@ -578,11 +578,55 @@ Next task: Bước 7 — continuous recording (ghi hình liên tục 24/7, chia 
 
 Commit: (xem commit ngay sau entry này)
 
+### SESSION LOG — 2026-09-29 (đợt 2, Bước 7)
+
+Goal: Triển khai Bước 7 — ghi hình liên tục 24/7, segment rotation, retention riêng. **Mặc định TẮT** cho tới khi benchmark số liệu thật.
+
+Completed:
+- **`app/cv/recorder.py::ContinuousRecorder`** (mới): thread writer + `queue.Queue(maxsize=4)` drop-frame khi đầy. `push_frame()` dùng `put_nowait` — KHÔNG BAO GIỜ block caller (yêu cầu cứng để không làm chậm thread detect). Rotate segment mỗi `segment_seconds` (default 5 min), đường dẫn `{gate_id}_{YYYYMMDD_HHMMSS}.mp4`. `stop()` finalize segment cuối (release VideoWriter) — file MP4 mở được bằng cv2.VideoCapture. Codec `mp4v` (MPEG-4 part 2, có sẵn opencv, encode nhanh hơn H.264).
+- **`app/config.py`**: 7 hằng số mới (`CONTINUOUS_RECORDING_ENABLED=0` mặc định, `*_SEGMENT_MINUTES=5`, `*_FPS=10`, `*_WIDTH=854`, `*_HEIGHT=480`, `*_RETENTION_DAYS=7`, `*_DIR=data/recordings`).
+- **`app/cv/pipeline.py`**: mount recorder. `push_frame(frame)` NGAY SAU `read_frame()`, TRƯỚC mọi early-return (`FRAME_SKIP`, no-person) — ghi MỌI frame đọc được (khác `_clip_buffer` chỉ append ở nhánh đã qua detect đầy đủ — 2 cơ chế độc lập, không xung đột). `start()` start recorder SAU thread chính; `stop()` stop recorder SAU detect/io pool.
+- **`app/background.py::MaintenanceWorker._cleanup_recordings_job`**: xóa file recording cũ hơn `CONTINUOUS_RECORDING_RETENTION_DAYS`. Tách retention policy với snapshot/clip vi phạm. Chạy mỗi 6h (counter `recording_every_n_loops` trong `_run_loop`). KHÔNG chạy nếu `CONTINUOUS_RECORDING_ENABLED=False` (tránh warning log rỗng).
+- **API**: `/api/system/health` thêm field `recording.{enabled,gates}` (Bước 7). Khi TẮT (mặc định) → trả `{"enabled": False}` (KHÔNG đụng vào pipeline, tránh import cv2 khi test env).
+- **`scripts/benchmark_recording.py`** (mới): benchmark FPS/latency/CPU với recorder ON vs OFF. Số liệu in ra console + ghi `benchmark_recording_result.json`.
+
+Files changed:
+- Mới: `app/cv/recorder.py`, `app/tests/test_recorder.py`, `scripts/benchmark_recording.py`
+- Sửa: `app/config.py` (7 constant), `app/cv/pipeline.py` (mount + import), `app/background.py` (cleanup recordings job + counter), `app/api/system.py` (recording field + helper), `app/tests/test_system.py` (assert recording field), `DEVELOPMENT_HANDOVER.md`
+
+Tests: **147/147 pass** (141 cũ + 6 mới):
+- `push_frame_does_not_block_when_queue_full`: push 100 frame, elapsed <0.5s + `frames_dropped > 0`.
+- `segment_rotates_when_segment_minutes_very_small`: inject `_segment_seconds=1`, chạy 3s → ≥1 segment file.
+- `stop_leaves_valid_mp4_file` (**END-TO-END qua `start`/`push_frame`/`stop` thật** — bài học Bước 3): file MP4 mở được bằng cv2.VideoCapture, `read()` không crash → chứng minh `_finalize_segment()` release đúng cách.
+- `get_stats_returns_useful_fields`, `cleanup_old_recordings_removes_old_files`, `cleanup_old_recordings_returns_zero_when_dir_missing`.
+
+Benchmark kết quả (synthetic stream, 64×48 frame, 3s/lần, xem `benchmark_recording_result.json`):
+- FPS (recorder TẮT): 54326
+- FPS (recorder BẬT): 40464
+- Drop: **25.52%**
+- Frame ghi được: 0; Frame bị drop: 121388
+
+⚠️ **Số liệu benchmark này CHƯA PHẢN ÁNH máy thật** — synthetic push quá nhanh (vì loop trống, không có delay giữa các frame), encoder `cv2.VideoWriter` CPU-bound không kịp xử lý. Trên camera thật 30fps với frame 1280×720 → push chậm hơn ~3000× so với benchmark này → encoder sẽ theo kịp. **CẦN chạy lại benchmark trên máy production với camera thật** trước khi quyết định bật mặc định.
+
+Vấn đề gặp + cách giải:
+- `VideoPipeline.__init__` không nhận `source=` mà nhận `gate_config={...}` — fix trong benchmark script.
+- Synthetic stream push 54326 fps (loop trống) → không phản ánh camera thật 30fps → số liệu benchmark CHỈ mang tính tham khảo. **Đây là điểm quan trọng nhất báo người dùng.**
+- Cleanup recording chỉ chạy khi `CONTINUOUS_RECORDING_ENABLED=True` — đỡ warning rỗng khi Bước 7 chưa bật.
+
+Known problems: (1) Benchmark hiện dùng synthetic stream, KHÔNG dùng camera thật → cần người dùng chạy lại trên máy production. (2) Codec `mp4v` tạo file lớn hơn H.264 ~5-10× — với retention 7 ngày + camera 24/7 có thể tốn ~10-20GB/ngày. Nếu muốn gọn hơn cần ffmpeg H.264 (tốn thêm dependency + CPU).
+
+Next task: ✅ **Hết đợt nâng cấp 7 bước.** Người dùng review:
+  1. Bảng số liệu Bước 7 (mục 5) + chạy benchmark thật nếu muốn bật.
+  2. Toàn bộ 7 commit đã push (`git log` xem).
+  3. Có muốn đợt tiếp theo không (vd: alert escalation, parent notification tự động, ...).
+
+Commit: (xem commit ngay sau entry này)
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit Bước 6 backup SQLite online)
-System status: Backend/frontend chạy được, **141/141 test pass**. Bước 1 + 3 + 4 + 5 + 6 đã code xong + đã review/verify.
-Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file `docs/CURSOR_PLAN_DOT2_NANG_CAP.md`). **Bước 1/7 + Bước 3/7 + Bước 4/7 + Bước 5/7 + Bước 6/7 xong. CHỈ CÒN Bước 7/7 CHƯA CODE — giao cho Cursor.**
-Next recommended task: Bước 7 (continuous recording — `app/cv/recorder.py` với `ContinuousRecorder`, push frame ngay đầu `_run_loop`, retention riêng qua `MaintenanceWorker`, **mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark**).
+Current stable commit: (xem git log — commit Bước 7 continuous recording)
+System status: Backend/frontend chạy được, **147/147 test pass**. Đợt nâng cấp lớn 7 bước đã code xong: Bước 1 + 3 + 4 + 5 + 6 + 7 (Bước 2 không tồn tại trong plan, đánh số nhảy). Riêng Bước 7 (continuous recording) **MẶC ĐỊNH TẮT** — đã chạy benchmark sơ bộ, báo số liệu ở mục 5/Bước 7 và quyết định bật hay không do người dùng duyệt.
+Current development phase: ✅ Đợt nâng cấp 7 bước đã HOÀN THÀNH. Chờ người dùng review số liệu benchmark Bước 7 + đánh giá tổng thể.
+Next recommended task: (1) Người dùng review benchmark Bước 7 — quyết định có bật `CONTINUOUS_RECORDING_ENABLED=True` làm mặc định hay không. (2) Nếu muốn dùng continuous recording thật, chạy `scripts/benchmark_recording.py` trên máy production với camera thật để có số liệu chính xác (script hiện dùng synthetic frame).
 Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 5 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation, Automatic cleanup, Storage statistics). Làm đúng thứ tự Bước 6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
 **Bài học từ các lần review — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (Bước 3: `_try_correlate()` gọi `mark_correlation_unmatched()` sai tham số; Bước 4: đã có ngay test end-to-end qua `_run_loop` thật). Bước 5 bổ sung 1 lỗi nhỏ phát hiện ngay trong lúc code: `HealthResponse` Pydantic model không khai báo field mới → FastAPI `response_model=HealthResponse` strip mất → test phát hiện liền. Bài học: **khi thêm field vào endpoint có `response_model`, PHẢI khai báo field đó trong Pydantic model** (default value để tương thích ngược). Khi viết test cho Bước 6-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật chứ không chỉ test từng hàm con riêng lẻ.

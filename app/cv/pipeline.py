@@ -22,6 +22,9 @@ from app.config import (
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
     CORRELATION_TIME_WINDOW_SEC, CORRELATION_MIN_SIMILARITY,
+    CONTINUOUS_RECORDING_ENABLED, CONTINUOUS_RECORDING_SEGMENT_MINUTES,
+    CONTINUOUS_RECORDING_FPS, CONTINUOUS_RECORDING_WIDTH, CONTINUOUS_RECORDING_HEIGHT,
+    CONTINUOUS_RECORDING_DIR,
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
@@ -141,29 +144,51 @@ class VideoPipeline:
         # Feature 4: ring buffer for violation video clips
         self._clip_buffer: deque = deque(maxlen=VIOLATION_CLIP_SECONDS * VIOLATION_CLIP_FPS)
 
+        # Đợt 2, Bước 7: continuous recorder — None nếu TẮT (mặc định).
+        # Đặt SAU clip_buffer để 2 cơ chế ghi hình độc lập nhau không xung đột.
+        self._recorder = None
+        if CONTINUOUS_RECORDING_ENABLED:
+            from app.cv.recorder import ContinuousRecorder
+            self._recorder = ContinuousRecorder(
+                gate_id=self.gate_id,
+                segment_minutes=CONTINUOUS_RECORDING_SEGMENT_MINUTES,
+                fps=CONTINUOUS_RECORDING_FPS,
+                width=CONTINUOUS_RECORDING_WIDTH,
+                height=CONTINUOUS_RECORDING_HEIGHT,
+                output_dir=CONTINUOUS_RECORDING_DIR,
+            )
+
     def start(self):
         """Bắt đầu thread nền."""
         if self._running:
             print("[Pipeline] Already running")
             return
-        
+
         print("[Pipeline] Starting...")
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        # Bước 7: start recorder SAU thread chính — push_frame ngay frame đầu tiên
+        # (trước mọi early-return trong _run_loop). Xem comment trong _run_loop.
+        if self._recorder is not None:
+            self._recorder.start()
         print("[Pipeline] Started")
-    
+
     def stop(self):
         """Dừng thread nền."""
         if not self._running:
             return
-        
+
         print("[Pipeline] Stopping...")
         self._running = False
         if self._thread:
             self._thread.join(timeout=3.0)
         self._detect_pool.shutdown(wait=False)
         self._io_pool.shutdown(wait=False)
+        # Bước 7: stop recorder SAU detect_pool + io_pool — join thread writer,
+        # finalize segment cuối (release VideoWriter) trước khi process tắt.
+        if self._recorder is not None:
+            self._recorder.stop()
         print("[Pipeline] Stopped")
     
     def get_frame(self) -> Optional[np.ndarray]:
@@ -250,7 +275,15 @@ class VideoPipeline:
                 _consecutive_errors = 0
                 self._frame_count += 1
                 self._last_frame_time = time.time()
-                
+
+                # Đợt 2, Bước 7: push frame vào continuous recorder NGAY SAU read_frame,
+                # TRƯỚC mọi early-return (FRAME_SKIP, no-person, ...). Đây là điểm mấu
+                # chốt: continuous recording phải ghi MỌI frame đọc được, kể cả frame bị
+                # skip hay không có người — khác hẳn _clip_buffer (chỉ append ở nhánh đã
+                # qua detect đầy đủ). 2 cơ chế ghi hình độc lập, không dùng chung buffer.
+                if self._recorder is not None:
+                    self._recorder.push_frame(frame)
+
                 # Xử lý cách frame
                 if self._frame_count % FRAME_SKIP != 0:
                     # Vẽ box từ cache (kết quả detect gần nhất) lên frame hiện tại

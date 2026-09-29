@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from app.config import (
     CLEANUP_ENABLED, CLEANUP_INTERVAL_HOURS, CLEANUP_RETENTION_DAYS,
     BACKUP_ENABLED, BACKUP_INTERVAL_HOURS, BACKUP_KEEP_COUNT, BACKUP_DIR,
+    CONTINUOUS_RECORDING_ENABLED, CONTINUOUS_RECORDING_RETENTION_DAYS,
+    CONTINUOUS_RECORDING_DIR,
 )
 from app.db import (
     clear_violation_snapshot_paths, log_maintenance_run,
@@ -97,15 +99,29 @@ class MaintenanceWorker:
                     cleanup=24h, backup=48h → N=2 (chạy cách 1 lần).
                     cleanup=1h, backup=24h  → N=24 (chạy 1 lần/ngày).
             Pattern này tránh 2 sleep tách rời (phức tạp) mà vẫn tôn trọng interval riêng.
+          - Recording cleanup (Bước 7) chạy MỖI `recording_every_n_loops` lần lặp,
+            tương tự backup (tách retention policy vì recording không có DB record).
         """
         backup_every_n_loops = max(1, -(-BACKUP_INTERVAL_HOURS // max(CLEANUP_INTERVAL_HOURS, 1)))
+        # Recording cleanup interval mặc định 6h (4 lần/ngày) — không cần thường
+        # vì recording chỉ xóa file cũ hơn retention_days (mặc định 7 ngày).
+        _RECORDING_CLEANUP_INTERVAL_HOURS = 6
+        recording_every_n_loops = max(1, -(-_RECORDING_CLEANUP_INTERVAL_HOURS // max(CLEANUP_INTERVAL_HOURS, 1)))
         loop_count = 0
+        recording_loop_count = 0
         while self._running:
             self._run_job_safely(self._cleanup_job)
             loop_count += 1
             if loop_count >= backup_every_n_loops:
                 loop_count = 0
                 self._run_job_safely(self._backup_job)
+            recording_loop_count += 1
+            if recording_loop_count >= recording_every_n_loops:
+                recording_loop_count = 0
+                # Chỉ chạy recording cleanup nếu Bước 7 được bật (tránh warning
+                # log rỗng khi chưa bật CONTINUOUS_RECORDING_ENABLED)
+                if CONTINUOUS_RECORDING_ENABLED:
+                    self._run_job_safely(self._cleanup_recordings_job)
             self._sleep_interruptible(CLEANUP_INTERVAL_HOURS * 3600)
 
     def _sleep_interruptible(self, seconds: float) -> None:
@@ -251,6 +267,36 @@ class MaintenanceWorker:
             success=True,
             detail=detail,
         )
+
+    def _cleanup_recordings_job(self) -> None:
+        """
+        Cleanup file continuous recording cũ hơn CONTINUOUS_RECORDING_RETENTION_DAYS.
+
+        Đợt 2, Bước 7: tách retention policy riêng khỏi snapshot/clip vi phạm
+        (đây là yêu cầu #6 trong plan gốc — "Media and metadata have different
+        retention policies"). Recording chỉ có file vật lý (không có DB record)
+        nên không dùng được _cleanup_job cũ (xóa theo `violation_events.timestamp`).
+        """
+        from app.cv.recorder import cleanup_old_recordings
+
+        started_at = datetime.now(timezone.utc).isoformat()
+        try:
+            deleted = cleanup_old_recordings(
+                CONTINUOUS_RECORDING_DIR, CONTINUOUS_RECORDING_RETENTION_DAYS,
+            )
+            detail = {
+                "retention_days": CONTINUOUS_RECORDING_RETENTION_DAYS,
+                "deleted_files": deleted,
+            }
+            log_maintenance_run(
+                job_name="_cleanup_recordings_job",
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                success=True,
+                detail=detail,
+            )
+        except Exception:
+            raise
 
 
 # ─── Module-level singleton (pattern giống _pipelines trong cv/pipeline.py) ───

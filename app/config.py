@@ -148,6 +148,20 @@ BACKUP_KEEP_COUNT = int(os.environ.get("BACKUP_KEEP_COUNT", "14"))
 BACKUP_DIR = os.environ.get("BACKUP_DIR") or str(BASE_DIR / "data" / "backups")
 BACKUP_MEDIA_ENABLED = os.environ.get("BACKUP_MEDIA_ENABLED", "0") == "1"
 
+# Đợt 2, Bước 7: ghi hình liên tục (continuous recording)
+# MẶC ĐỊNH TẮT — benchmark FPS/latency thật trước khi đề xuất bật cho máy thật
+# (xem bài học _clip_buffer: ghi MP4 qua cv2.VideoWriter chiếm CPU đáng kể, có thể
+# làm AI pipeline chậm). Xem docs/CURSOR_PLAN_DOT2_NANG_CAP.md mục "Bước 7".
+CONTINUOUS_RECORDING_ENABLED = os.environ.get("CONTINUOUS_RECORDING_ENABLED", "0") == "1"
+CONTINUOUS_RECORDING_SEGMENT_MINUTES = int(os.environ.get("CONTINUOUS_RECORDING_SEGMENT_MINUTES", "5"))
+CONTINUOUS_RECORDING_FPS = int(os.environ.get("CONTINUOUS_RECORDING_FPS", "10"))
+# Resolution ghi thấp hơn VIDEO_WIDTH/HEIGHT để giảm CPU encode + dung lượng (giống
+# cách _clip_buffer resize xuống 640x360 trước khi ghi clip vi phạm).
+CONTINUOUS_RECORDING_WIDTH = int(os.environ.get("CONTINUOUS_RECORDING_WIDTH", "854"))
+CONTINUOUS_RECORDING_HEIGHT = int(os.environ.get("CONTINUOUS_RECORDING_HEIGHT", "480"))
+CONTINUOUS_RECORDING_RETENTION_DAYS = int(os.environ.get("CONTINUOUS_RECORDING_RETENTION_DAYS", "7"))
+CONTINUOUS_RECORDING_DIR = os.environ.get("CONTINUOUS_RECORDING_DIR") or str(BASE_DIR / "data" / "recordings")
+
 # JWT Authentication
 # secrets.token_hex(32) → hardcoded (không sinh lại mỗi lần khởi động)
 JWT_SECRET_KEY = "a3f8c1b9e2d47f0a5c6e8b3d9f1e2a4c7b5d9f3e1a8c6b4d2f0e7a3c5b9d"
