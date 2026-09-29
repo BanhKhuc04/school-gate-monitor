@@ -190,6 +190,61 @@ export default function AdminHealthPage() {
           </div>
         </div>
 
+        {/* Disk Usage — Đợt 2, Bước 5 */}
+        <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
+          <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+              <path d="M3 7h18M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l2-4h14l2 4M10 11v4M14 11v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Dung lượng đĩa
+          </h2>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <StatCell
+              label="Tổng"
+              value={health?.disk_total_mb != null ? Math.round(health.disk_total_mb) : '—'}
+              unit="MB"
+            />
+            <StatCell
+              label="Đã dùng"
+              value={health?.disk_used_mb != null ? Math.round(health.disk_used_mb) : '—'}
+              unit="MB"
+              color="text-[#f59e0b]"
+            />
+            <StatCell
+              label="Còn trống"
+              value={health?.disk_free_mb != null ? Math.round(health.disk_free_mb) : '—'}
+              unit="MB"
+              color="text-[#10b981]"
+            />
+          </div>
+          {/* Breakdown theo extension (Đợt 2, Bước 5) */}
+          {health?.storage_breakdown && (
+            <div className="bg-[#f4f6f9] rounded-xl p-4">
+              <div className="text-[10px] font-mono text-[#6b7280] uppercase tracking-wider mb-2">
+                Phân bổ theo loại file
+              </div>
+              <div className="space-y-1.5">
+                {(() => {
+                  const b = health.storage_breakdown;
+                  const rows = [
+                    { key: 'jpg', label: 'Ảnh snapshot (.jpg)', color: 'text-[#374151]' },
+                    { key: 'mp4', label: 'Clip vi phạm (.mp4)', color: 'text-[#c92035]' },
+                    { key: 'other', label: 'Khác', color: 'text-[#6b7280]' },
+                  ];
+                  return rows.map(r => (
+                    <div key={r.key} className="flex items-center justify-between text-[12px] font-mono">
+                      <span className={r.color}>{r.label}</span>
+                      <span className="text-[#374151]">
+                        <strong>{(b[r.key]?.count ?? 0)}</strong> file · <strong>{(b[r.key]?.size_mb ?? 0).toFixed(2)}</strong> MB
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Cleanup */}
         <div className="bg-white rounded-xl p-5 shadow-sm border border-[#d1d5db]">
           <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider mb-2 flex items-center gap-2">

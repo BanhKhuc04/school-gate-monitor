@@ -1,6 +1,7 @@
 """
 pytest tests for system health & cleanup API.
 """
+import os
 import pytest
 
 
@@ -36,6 +37,82 @@ def test_health_management_ok(client):
     from app.tests.conftest import auth_headers
     resp = client.get("/api/system/health", headers=auth_headers(client, "management"))
     assert resp.status_code == 200
+
+
+# ─── Đợt 2, Bước 5: Disk usage + storage breakdown ────────────────────────────
+
+def test_health_has_disk_usage_fields(client):
+    """
+    Bước 5: /api/system/health phải trả disk_total_mb / disk_used_mb / disk_free_mb
+    (>=0) — đây là field mới để AdminHealthPage render "Dung lượng đĩa".
+    """
+    from app.tests.conftest import auth_headers
+    resp = client.get("/api/system/health", headers=auth_headers(client, "admin"))
+    assert resp.status_code == 200
+    data = resp.json()
+    for field in ("disk_total_mb", "disk_used_mb", "disk_free_mb"):
+        assert field in data, f"missing field: {field}"
+        assert isinstance(data[field], (int, float))
+        assert data[field] >= 0, f"{field} must be >= 0 (got {data[field]})"
+
+
+def test_health_has_storage_breakdown(client):
+    """
+    Bước 5: storage_breakdown phải có đủ 3 key (jpg/mp4/other) với count + size_mb.
+    Test field shape thuần + tổng count khớp với snapshot_count (legacy field) — đảm bảo
+    2 nguồn số liệu không lệch nhau sau refactor.
+    """
+    from app.tests.conftest import auth_headers
+    resp = client.get("/api/system/health", headers=auth_headers(client, "admin"))
+    data = resp.json()
+    assert "storage_breakdown" in data
+    b = data["storage_breakdown"]
+    for key in ("jpg", "mp4", "other"):
+        assert key in b, f"missing breakdown key: {key}"
+        assert "count" in b[key]
+        assert "size_mb" in b[key]
+        assert isinstance(b[key]["count"], int)
+        assert isinstance(b[key]["size_mb"], (int, float))
+    # Tổng count breakdown phải khớp snapshot_count (backwards compat)
+    total_breakdown = b["jpg"]["count"] + b["mp4"]["count"] + b["other"]["count"]
+    assert total_breakdown == data["snapshot_count"], (
+        f"breakdown total {total_breakdown} != snapshot_count {data['snapshot_count']}"
+    )
+
+
+def test_health_breakdown_counts_real_files_end_to_end(client, tmp_path, monkeypatch):
+    """
+    END-TO-END test cho breakdown: tạo file thật trong SNAPSHOTS_DIR qua monkeypatch
+    (chuyển SNAPSHOTS_DIR sang tmp_path), insert 2 .jpg + 1 .mp4, gọi GET /api/system/health
+    thật → assert breakdown count đúng (1+1+1, không phải 0). Đây là test hồi quy:
+    nếu helper `_storage_breakdown` đếm sai (vd. glob không đệ quy, hoặc lấy nhầm
+    extension viết hoa), test này FAIL.
+    """
+    from app.tests.conftest import auth_headers
+    import app.api.system as sys_module
+    import app.config as cfg
+
+    # Patch SNAPSHOTS_DIR sang tmp_path (cả cfg và sys_module vì sys_module import snapshot lúc load)
+    monkeypatch.setattr(cfg, "SNAPSHOTS_DIR", str(tmp_path))
+    monkeypatch.setattr(sys_module, "SNAPSHOTS_DIR", str(tmp_path))
+
+    # Tạo file thật — size đủ lớn để MB > 0 sau khi round 2 chữ số
+    # (300 bytes ≈ 0.000286 MB → round → 0.0; cần >= ~50KB để MB > 0)
+    (tmp_path / "snap1.jpg").write_bytes(b"\xff\xd8" + b"x" * 60000)
+    (tmp_path / "snap2.jpg").write_bytes(b"\xff\xd8" + b"x" * 120000)
+    (tmp_path / "clip1.mp4").write_bytes(b"x" * 300000)
+    (tmp_path / "README.txt").write_bytes(b"x" * 50000)
+
+    resp = client.get("/api/system/health", headers=auth_headers(client, "admin"))
+    assert resp.status_code == 200
+    data = resp.json()
+    b = data["storage_breakdown"]
+    assert b["jpg"]["count"] == 2, f"jpg count = {b['jpg']['count']}, expected 2"
+    assert b["mp4"]["count"] == 1, f"mp4 count = {b['mp4']['count']}, expected 1"
+    assert b["other"]["count"] == 1, f"other count = {b['other']['count']}, expected 1"
+    # size_mb tổng phải > 0 (file đủ lớn để round 2 chữ số còn > 0)
+    assert b["jpg"]["size_mb"] > 0, f"jpg size_mb = {b['jpg']['size_mb']}"
+    assert b["mp4"]["size_mb"] > 0, f"mp4 size_mb = {b['mp4']['size_mb']}"
 
 
 def test_cleanup_requires_admin(client):

@@ -105,7 +105,7 @@ Camera (1 gate, WebcamStream.read_frame)
 | Retention policy | PARTIAL | `REPEAT_OFFENDER_WINDOW_DAYS` không liên quan; cleanup dùng 1 mốc `older_than_days` chung cho cả ảnh+clip | `test_system.py` | Chưa phân tầng theo loại dữ liệu (video thường/vi phạm/lịch sử) như yêu cầu #6 |
 | Automatic cleanup | **DONE** | `app/background.py::MaintenanceWorker`, `_cleanup_job` gọi `clear_violation_snapshot_paths()` | `test_maintenance_worker.py` (12 case, gồm 2 test end-to-end qua `_run_loop` thật) | **Thread nền `MaintenanceWorker` tự chạy mỗi `CLEANUP_INTERVAL_HOURS` giờ**, xóa snapshot/clip cũ hơn `CLEANUP_RETENTION_DAYS` qua hàm đã có (Feature 8) — chỉ đổi cách TRIGGER từ "admin bấm nút" sang "tự động theo lịch". `_job_lock` chống chạy đè (không queue), `_run_job_safely` cách ly exception (job fail không làm chết thread), mỗi lần chạy ghi 1 row vào bảng `system_maintenance_log` (audit log tách riêng khỏi `violation_audit_log` vì không có FK violation_id). Tắt qua `CLEANUP_ENABLED=0` trong env. |
 | Cleanup dry-run | DONE | `GET /api/system/snapshots/preview` | Verify qua API session trước | Trả file_count + size trước khi xóa thật |
-| Storage statistics | PARTIAL | `GET /api/system/health` (db_size_mb, snapshot_count, snapshot_size_mb) | `test_system.py` | Chưa có dung lượng đĩa tổng/còn trống, chưa phân bổ theo loại (video thường vs vi phạm) |
+| Storage statistics | **DONE** | `GET /api/system/health` thêm `disk_total/used/free_mb` + `storage_breakdown{jpg,mp4,other}` | `test_system.py` (10 case, gồm 1 test end-to-end insert file thật qua monkeypatch) | `shutil.disk_usage(SNAPSHOTS_DIR)` (stdlib) + glob theo extension. Field cũ (`db_size_mb`, `snapshot_count`...) KHÔNG đổi tên/giá trị — chỉ thêm field mới. Frontend `AdminHealthPage.jsx` thêm section "Dung lượng đĩa" (3 stat-cell) + list "Phân bổ theo loại file". Bước 7 sẽ thêm `recordings` vào breakdown. |
 | Backup | NOT STARTED | — | — | Không có script/cron backup DB hay snapshot |
 | Dashboard | DONE | `DashboardPage.jsx` | — | Có trend/by-class chart (`recharts`), chưa có "tổng xe hôm nay/đăng ký/chưa đăng ký/cần kiểm tra" như yêu cầu #7 |
 | Live camera | DONE | `GuardPage.jsx` (kể cả xem song song 2 camera), `guard.py::video_feed` | — | MJPEG qua `<img>`, rate-limit 20fps |
@@ -271,11 +271,11 @@ Use actual roles from codebase — bảng trên đã verify qua `grep require_ro
 
 ## 13. TEST STATUS
 
-Total tests: 127
-Passed: 127
+Total tests: 130
+Passed: 130
 Failed: 0
 Command: `./venv/Scripts/python.exe -m pytest app/tests/ -q`
-Last test date: 2026-09-29 (sau commit Bước 4 — MaintenanceWorker)
+Last test date: 2026-09-29 (sau commit Bước 5 — disk stats + storage breakdown)
 
 Critical test areas:
 - camera — KHÔNG có test (cần camera thật, chỉ có `app/cv/smoke_test.py` chạy tay bằng `python -m app.cv.smoke_test`, không phải pytest)
@@ -519,11 +519,39 @@ Next task: Bước 5 — thống kê dung lượng đĩa thật (`shutil.disk_us
 
 Commit: (xem commit ngay sau entry này)
 
+### SESSION LOG — 2026-09-29 (đợt 2, Bước 5)
+
+Goal: Triển khai Bước 5 — hiện dung lượng đĩa thật (total/used/free) + breakdown storage theo extension, để admin biết được disk còn trống bao nhiêu và storage đang phân bổ thế nào. Xem `docs/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 5".
+
+Completed:
+- **`app/api/system.py`** thêm 2 helper stdlib:
+  - `_disk_usage_mb(path)`: `shutil.disk_usage(SNAPSHOTS_DIR)` → 3 field MB. Trả về 0.0 cho cả 3 nếu path không tồn tại hoặc `OSError` (một số sandbox/container cấm đọc).
+  - `_storage_breakdown()`: glob `SNAPSHOTS_DIR/*`, đếm + sum size theo extension — `jpg`/`mp4`/`other`. Bước 7 sẽ thêm `recordings` cho thư mục `data/recordings/`.
+- **`HealthResponse`** (Pydantic model) bổ sung 4 field mới (`disk_total_mb`/`disk_used_mb`/`disk_free_mb`/`storage_breakdown`) với default value để tương thích ngược. **Bài học:** nếu KHÔNG khai báo field trong Pydantic model + endpoint có `response_model=HealthResponse`, FastAPI sẽ strip field → test fail ngay lần chạy đầu tiên (đã phát hiện và sửa trong session này).
+- **`get_health`** trả thêm 4 field — field cũ (`db_size_mb`, `snapshot_count`, `snapshot_size_mb`, `violations_today`, `pipeline`, `gates`) KHÔNG đổi tên/giá trị, không phá backward-compat.
+- **Frontend `AdminHealthPage.jsx`** thêm section "Dung lượng đĩa" giữa "Lưu trữ" và "Dọn ảnh cũ" — 3 stat-cell (Tổng / Đã dùng / Còn trống) + list "Phân bổ theo loại file" (Ảnh snapshot / Clip vi phạm / Khác), dùng đúng pattern `bg-[#f4f6f9] rounded-xl` + `StatCell` đã có.
+
+Files changed:
+- Sửa: `app/api/system.py` (2 helper + 4 field Pydantic + return thêm), `app/tests/test_system.py` (3 test mới), `frontend/src/pages/AdminHealthPage.jsx` (1 section mới), `DEVELOPMENT_HANDOVER.md`
+
+Tests: **130/130 pass** (127 cũ + 3 mới):
+- `test_health_has_disk_usage_fields`: 3 field disk đều có, type số, >=0.
+- `test_health_has_storage_breakdown`: 3 key (jpg/mp4/other) đều có `count` + `size_mb`; tổng count breakdown khớp `snapshot_count` (đảm bảo 2 nguồn số liệu không lệch nhau sau refactor).
+- `test_health_breakdown_counts_real_files_end_to_end`: **END-TO-END qua `GET /api/system/health` thật** — monkeypatch `SNAPSHOTS_DIR` sang `tmp_path`, tạo 2 .jpg + 1 .mp4 + 1 .txt thật, assert breakdown count + size_mb > 0 (bài học Bước 3: test phải exercise đúng endpoint thật, không mock helper). Phát hiện ngay trong lúc code: Pydantic model strip field mới → test fail liền → sửa bằng cách khai báo field trong `HealthResponse`.
+
+Verification tay: chưa chạy qua uvicorn — khi dev start lại, mở `AdminHealthPage` sẽ thấy section "Dung lượng đĩa" với 3 số liệu thật của máy + breakdown file.
+
+Known problems: Không.
+
+Next task: Bước 6 — backup SQLite online qua `sqlite3.Connection.backup()` (không copy file thô), backup job chạy song song với cleanup trong `MaintenanceWorker`, API `POST /api/system/backup/run` + `GET /api/system/backup/list`. Xem plan đã duyệt mục "Bước 6".
+
+Commit: (xem commit ngay sau entry này)
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit Bước 4 MaintenanceWorker, ngay sau fix bug correlation)
-System status: Backend/frontend chạy được, **127/127 test pass**. Bước 1 (đa khung hình + confidence biển số) + Bước 3 (ghép 2 camera) + Bước 4 (auto cleanup theo lịch qua `MaintenanceWorker`) đã code xong, toàn bộ đã qua review/verify.
-Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file `docs/CURSOR_PLAN_DOT2_NANG_CAP.md`). **Bước 1/7 + Bước 3/7 + Bước 4/7 xong. Bước 5-7 CHƯA CODE — giao cho Cursor.**
-Next recommended task: Bước 5 (disk stats — `shutil.disk_usage` + breakdown theo phần mở rộng file), xem plan đã duyệt. Sau Bước 5 → Bước 6 (backup SQLite online) → Bước 7 (continuous recording, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
-Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 4 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation, Automatic cleanup). Làm đúng thứ tự Bước 5→6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
-**Bài học từ các lần review — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (Bước 3: `find_correlation_candidate()` trả đúng nhưng `_try_correlate()` gọi hàm ghi DB sai tham số → fix bằng test end-to-end; Bước 4: đã có ngay test end-to-end qua `MaintenanceWorker.start()`/`_run_loop` thật với interval cực nhỏ + 1 violation thật trong DB để verify `updated_records` thật chứ không phải mock). Khi viết test cho Bước 5-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật chứ không chỉ test từng hàm con riêng lẻ.
+Current stable commit: (xem git log — commit Bước 5 disk stats + storage breakdown)
+System status: Backend/frontend chạy được, **130/130 test pass**. Bước 1 + 3 + 4 + 5 đã code xong + đã review/verify.
+Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file `docs/CURSOR_PLAN_DOT2_NANG_CAP.md`). **Bước 1/7 + Bước 3/7 + Bước 4/7 + Bước 5/7 xong. Bước 6-7 CHƯA CODE — giao cho Cursor.**
+Next recommended task: Bước 6 (backup SQLite online qua `sqlite3.Connection.backup()`, backup job trong `MaintenanceWorker` chạy song song với cleanup, API run/list). Sau Bước 6 → Bước 7 (continuous recording, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
+Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 5 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation, Automatic cleanup, Storage statistics). Làm đúng thứ tự Bước 6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
+**Bài học từ các lần review — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (Bước 3: `_try_correlate()` gọi `mark_correlation_unmatched()` sai tham số; Bước 4: đã có ngay test end-to-end qua `_run_loop` thật). Bước 5 bổ sung 1 lỗi nhỏ phát hiện ngay trong lúc code: `HealthResponse` Pydantic model không khai báo field mới → FastAPI `response_model=HealthResponse` strip mất → test phát hiện liền. Bài học: **khi thêm field vào endpoint có `response_model`, PHẢI khai báo field đó trong Pydantic model** (default value để tương thích ngược). Khi viết test cho Bước 6-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật chứ không chỉ test từng hàm con riêng lẻ.

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 import os
 import glob
+import shutil
 
 from app.auth import get_current_user, require_role
 from app.db import (
@@ -75,6 +76,74 @@ def _snapshots_size_mb() -> tuple[int, float]:
     return count, round(total_size / (1024 * 1024), 2)
 
 
+def _disk_usage_mb(path: str) -> dict:
+    """
+    Dung lượng đĩa thật của phân vùng chứa `path` (thường là SNAPSHOTS_DIR).
+
+    Đợt 2, Bước 5: stdlib `shutil.disk_usage()` — không thêm dependency mới.
+    Trả về 3 trường: total/used/free (MB, làm tròn 2 chữ số). Nếu path không
+    tồn tại hoặc OS không cho đọc (một số sandbox/container), trả về 0.0 cho
+    cả 3 trường — KHÔNG raise — để frontend vẫn render được (hiện "—").
+    """
+    if not path or not os.path.exists(path):
+        return {"disk_total_mb": 0.0, "disk_used_mb": 0.0, "disk_free_mb": 0.0}
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return {"disk_total_mb": 0.0, "disk_used_mb": 0.0, "disk_free_mb": 0.0}
+    mb = 1024 * 1024
+    return {
+        "disk_total_mb": round(usage.total / mb, 2),
+        "disk_used_mb": round(usage.used / mb, 2),
+        "disk_free_mb": round(usage.free / mb, 2),
+    }
+
+
+def _storage_breakdown() -> dict:
+    """
+    Breakdown dung lượng storage theo phần mở rộng file (Đợt 2, Bước 5).
+
+    Hiện tại phân loại:
+      - `jpg`: ảnh snapshot vi phạm (`{timestamp}_*.jpg`)
+      - `mp4`: clip video vi phạm (`{timestamp}_*.mp4`)
+      - `other`: mọi file khác trong SNAPSHOTS_DIR (nếu có)
+
+    Bước 7 sẽ thêm `recordings` cho thư mục `data/recordings/` (ghi hình liên tục).
+    Tách riêng theo extension bây giờ để sau không phải sửa frontend.
+
+    Trả về: `{"jpg": {"count": N, "size_mb": M}, "mp4": ..., "other": ...}`.
+    """
+    breakdown = {
+        "jpg": {"count": 0, "size_mb": 0.0},
+        "mp4": {"count": 0, "size_mb": 0.0},
+        "other": {"count": 0, "size_mb": 0.0},
+    }
+    if not os.path.exists(SNAPSHOTS_DIR):
+        return breakdown
+    for path in glob.glob(os.path.join(SNAPSHOTS_DIR, "*")):
+        if not os.path.isfile(path):
+            continue
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        size_mb = round(size / (1024 * 1024), 2)
+        if ext == "jpg" or ext == "jpeg":
+            breakdown["jpg"]["count"] += 1
+            breakdown["jpg"]["size_mb"] += size_mb
+        elif ext == "mp4":
+            breakdown["mp4"]["count"] += 1
+            breakdown["mp4"]["size_mb"] += size_mb
+        else:
+            breakdown["other"]["count"] += 1
+            breakdown["other"]["size_mb"] += size_mb
+    # Round tổng để tránh floating-point drift (0.1+0.2...)
+    for k in breakdown:
+        breakdown[k]["size_mb"] = round(breakdown[k]["size_mb"], 2)
+    return breakdown
+
+
 class HealthResponse(BaseModel):
     pipeline: dict
     db_size_mb: float
@@ -82,6 +151,11 @@ class HealthResponse(BaseModel):
     snapshot_size_mb: float
     violations_today: int
     gates: list[dict]
+    # Đợt 2, Bước 5: disk usage thật + breakdown storage theo extension.
+    disk_total_mb: float = 0.0
+    disk_used_mb: float = 0.0
+    disk_free_mb: float = 0.0
+    storage_breakdown: dict = {}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -111,6 +185,12 @@ def get_health(
     # Legacy top-level pipeline field — main gate only (backwards compat)
     pipeline_status = gates_status.get("main", _pipeline_status("main"))
 
+    # Đợt 2, Bước 5: disk usage thật + breakdown storage theo extension.
+    # Field cũ (db_size_mb, snapshot_count, snapshot_size_mb, violations_today)
+    # KHÔNG đổi giá trị/tên — chỉ thêm field mới phía dưới.
+    disk = _disk_usage_mb(SNAPSHOTS_DIR)
+    storage_breakdown = _storage_breakdown()
+
     return {
         "pipeline": pipeline_status,
         "db_size_mb": _db_size_mb(),
@@ -121,6 +201,11 @@ def get_health(
             {"id": gid, "name": cfg.get("name", gid), "pipeline": gates_status.get(gid, {})}
             for gid, cfg in GATES.items()
         ],
+        # ── Bước 5 additions ──
+        "disk_total_mb": disk["disk_total_mb"],
+        "disk_used_mb": disk["disk_used_mb"],
+        "disk_free_mb": disk["disk_free_mb"],
+        "storage_breakdown": storage_breakdown,
     }
 
 
