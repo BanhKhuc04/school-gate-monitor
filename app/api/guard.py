@@ -27,7 +27,7 @@ async def video_feed(
     gate: str = Query(default="main"),
 ):
     """
-    MJPEG streaming — requires token with role security or admin.
+    MJPEG streaming — requires token with role security, admin, or management.
     Optional query param `gate` selects which camera pipeline (default: "main").
     """
     # Auth
@@ -37,7 +37,7 @@ async def video_feed(
         payload = decode_access_token(token)
     except (_jwt.ExpiredSignatureError, _jwt.InvalidTokenError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    if payload.get("role") not in ("security", "admin"):
+    if payload.get("role") not in ("security", "admin", "management"):
         raise HTTPException(status_code=401, detail="Insufficient permissions")
 
     import cv2
@@ -79,7 +79,7 @@ async def video_feed(
 @router.websocket("/ws")
 async def websocket_alerts(websocket: WebSocket, gate: str = "main"):
     """
-    WebSocket endpoint cho cảnh báo vi phạm — requires token with role security or admin.
+    WebSocket endpoint cho cảnh báo vi phạm — requires token with role security, admin, or management.
     Optional query param `gate` selects which camera pipeline (default: "main").
     Uses broadcast pattern: every connected client receives every alert.
     """
@@ -89,7 +89,7 @@ async def websocket_alerts(websocket: WebSocket, gate: str = "main"):
         await websocket.close(code=1008, reason="Missing token")
         return
     payload = decode_access_token(raw_token)
-    if not payload or payload.get("role") not in ("security", "admin"):
+    if not payload or payload.get("role") not in ("security", "admin", "management"):
         await websocket.close(code=1008, reason="Invalid or expired token")
         return
 

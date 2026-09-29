@@ -26,10 +26,10 @@ export default function Sidebar() {
   if (!user) return null;
 
   const links = [];
-  if (user.role === 'security' || user.role === 'admin') {
+  if (user.role === 'security' || user.role === 'admin' || user.role === 'management') {
     links.push({ to: '/guard', label: 'Giám sát trực tiếp', icon: 'camera' });
   }
-  if (user.role === 'admin') {
+  if (user.role === 'admin' || user.role === 'management') {
     links.push({ to: '/admin/violations', label: 'Nhật ký vi phạm', icon: 'alert' });
     links.push({ to: '/admin/vehicles', label: 'Phương tiện đăng ký', icon: 'truck' });
   }

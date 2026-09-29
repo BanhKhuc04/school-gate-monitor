@@ -41,7 +41,7 @@ VIOLATION_TYPE_LABELS = {
 
 
 @vehicles_router.get("")
-def list_vehicles_json(current_user: dict = Depends(require_role("admin", "teacher"))):
+def list_vehicles_json(current_user: dict = Depends(require_role("admin", "teacher", "management"))):
     """GET /api/vehicles — list all registered vehicles. Teacher sees only their class."""
     class_filter = (
         current_user.get("homeroom_class")
@@ -240,7 +240,7 @@ def list_violations_json(
     date_to: str = None,
     violation_type: str = None,
     plate: str = None,
-    current_user: dict = Depends(require_role("admin", "teacher")),
+    current_user: dict = Depends(require_role("admin", "teacher", "management")),
 ):
     """
     GET /api/violations — list violation events with pagination and filters.

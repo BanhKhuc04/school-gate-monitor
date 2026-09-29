@@ -11,6 +11,13 @@ def test_list_vehicles_requires_auth(client):
     assert resp.status_code == 401
 
 
+def test_list_vehicles_management_ok(client):
+    """Management (principal) can view the full vehicle list, not just admin/teacher."""
+    from app.tests.conftest import auth_headers
+    resp = client.get("/api/vehicles", headers=auth_headers(client, "management"))
+    assert resp.status_code == 200
+
+
 def test_add_vehicle_ok(client):
     """Admin can add a vehicle (returns 201)."""
     from app.tests.conftest import auth_headers

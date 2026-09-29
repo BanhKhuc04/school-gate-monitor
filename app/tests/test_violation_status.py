@@ -17,6 +17,13 @@ def test_update_status_ok(client):
     assert resp.status_code == 404
 
 
+def test_list_violations_management_ok(client):
+    """Management (principal) can view the violations list, not just admin/teacher."""
+    from app.tests.conftest import auth_headers
+    resp = client.get("/api/violations", headers=auth_headers(client, "management"))
+    assert resp.status_code == 200
+
+
 def test_update_status_requires_auth(client):
     """Unauthenticated request → 401."""
     resp = client.patch(

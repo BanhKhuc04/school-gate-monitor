@@ -22,10 +22,10 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
-      {/* Guard — security + admin */}
+      {/* Guard — security + admin + management (principal can view live camera too) */}
       <Route
         element={
-          <RequireRole allow={['security', 'admin']}>
+          <RequireRole allow={['security', 'admin', 'management']}>
             <Layout>
               <GuardPage />
             </Layout>
@@ -35,10 +35,10 @@ function AppRoutes() {
         <Route path="/guard" element={null} />
       </Route>
 
-      {/* Admin-only routes */}
+      {/* Admin + management (read-only view for management — enforced by page-level isAdmin checks + server 403s) */}
       <Route
         element={
-          <RequireRole allow={['admin']}>
+          <RequireRole allow={['admin', 'management']}>
             <Layout>
               <AdminVehiclesPage />
             </Layout>
@@ -50,7 +50,7 @@ function AppRoutes() {
 
       <Route
         element={
-          <RequireRole allow={['admin']}>
+          <RequireRole allow={['admin', 'management']}>
             <Layout>
               <AdminViolationsPage />
             </Layout>
