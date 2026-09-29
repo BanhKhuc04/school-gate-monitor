@@ -153,7 +153,8 @@ class PostureDetector:
         if person_crop is None or (hasattr(person_crop, 'size') and person_crop.size == 0):
             return []
         try:
-            results = self.model(person_crop, verbose=False, conf=0.5)
+            from app.config import POSE_CONF_THRESHOLD
+            results = self.model(person_crop, verbose=False, conf=POSE_CONF_THRESHOLD)
         except Exception as e:
             print(f"[Pose] Error during pose detection: {e}")
             return []

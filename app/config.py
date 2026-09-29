@@ -65,6 +65,14 @@ if _secondary_source is not None and _secondary_source.strip() != "":
 # Public constant — read-only after startup
 GATES: dict[str, dict] = _gate_cfgs
 
+# Danh sách nguồn camera hay dùng — hiển thị dạng dropdown ở /admin/camera.
+# Thêm nguồn mới = thêm 1 dòng ở đây, không cần UI quản lý.
+CAMERA_PRESETS = [
+    {"label": "Webcam laptop", "source": "0"},
+    {"label": "OBS Virtual Camera", "source": "1"},
+    {"label": "EZVIZ CS-CV246 (Cổng chính)", "source": "rtsp://admin:CTTPQS@192.168.1.6:554/ch1/main"},
+]
+
 
 # Loop video when reading from file — kept for backwards compat (main gate only)
 CAMERA_LOOP = _gate_cfgs["main"]["loop"]
@@ -85,9 +93,21 @@ POSE_MODEL_PATH = "yolov8n-pose.pt"
 HELMET_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho helmet detection
 PLATE_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho plate detection
 PERSON_CONF_THRESHOLD = 0.4  # Ngưỡng confidence cho person detection (COCO)
+# Hạ từ 0.5 xuống 0.3 (2026-09-29) — người ở xa/bị che một phần trong crop nhỏ
+# thường không đạt 0.5, khiến pose model bỏ qua hoàn toàn (không trả khớp nào),
+# posture_status rơi về 'unknown'. Đánh đổi: dễ bắt khớp sai hơn khi ảnh mờ/nhiễu.
+POSE_CONF_THRESHOLD = 0.3  # Ngưỡng confidence cho pose/khớp xương (YOLOv8-pose)
 
 # Chở quá số người quy định — xe máy chở nhiều hơn số này bị bắt lỗi TOO_MANY_RIDERS
 MAX_RIDERS_PER_MOTORCYCLE = 2
+
+# Xe/người còn đang ở SÁT MÉP khung hình (chưa vào/đang ra hết khung) → CHƯA đánh
+# giá vi phạm cho nhóm đó ở frame này (không có tracker theo dõi liên tục qua nhiều
+# frame, nên "còn chạm mép" là tín hiệu rẻ tiền nhất để biết vật thể chưa vào hết
+# khung — tránh báo sai NO_PLATE/PLATE_OBSCURED chỉ vì biển số chưa kịp lọt vào
+# khung hình, và tránh chụp snapshot khi xe/người còn bị cắt cụt ở rìa ảnh).
+# Tính theo % kích thước khung hình để không phụ thuộc độ phân giải camera.
+FRAME_EDGE_MARGIN_RATIO = 0.03
 
 # Frame processing
 FRAME_SKIP = 2  # Xử lý cách 1 frame để giảm tải CPU (1 = mọi frame, 2 = cách 1 frame)
