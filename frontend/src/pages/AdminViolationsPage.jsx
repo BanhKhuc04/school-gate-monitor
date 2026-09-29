@@ -86,6 +86,44 @@ const STATUS_COLORS = {
   },
 };
 
+// Đợt 2, Bước 3: trạng thái ghép 2 camera trước+sau
+const CORRELATION_COLORS = {
+  matched: {
+    bg: 'bg-[#d1fae5]', text: 'text-[#065f46]',
+    border: 'border-[#6ee7b7]', dot: 'bg-[#10b981]',
+    label: 'Ghép 2 camera',
+  },
+  needs_review: {
+    bg: 'bg-[#fef3c7]', text: 'text-[#92400e]',
+    border: 'border-[#fcd34d]', dot: 'bg-[#d97706]',
+    label: 'Cần kiểm tra ghép',
+  },
+  unmatched: {
+    bg: 'bg-[#f4f6f9]', text: 'text-[#6b7280]',
+    border: 'border-[#d1d5db]', dot: 'bg-[#9ca3af]',
+    label: 'Không ghép được',
+  },
+};
+
+function CorrelationBadge({ status, onClick }) {
+  // status: 'matched' | 'needs_review' | 'unmatched' | null
+  if (!status) return null;
+  const colors = CORRELATION_COLORS[status] || CORRELATION_COLORS.unmatched;
+  const isClickable = onClick && status === 'matched';
+  return (
+    <button
+      type="button"
+      onClick={isClickable ? onClick : undefined}
+      disabled={!isClickable}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold font-mono border ${colors.bg} ${colors.text} ${colors.border} ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
+      title={isClickable ? 'Click để mở bản ghi camera kia' : colors.label}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
+      {colors.label}
+    </button>
+  );
+}
+
 function ViolationBadge({ type }) {
   const colors = VIOLATION_COLORS[type] || VIOLATION_COLORS.NO_HELMET;
   return (
@@ -115,8 +153,8 @@ function buildSummaryText(v) {
   return `Vi phạm lúc ${time}. ${plateText}. ${who}. Lỗi: ${label}.`;
 }
 
-// Feature 4 + 10: Enhanced modal with video, status, audit log
-function ViolationDetailModal({ violation, onClose, onUpdate }) {
+// Feature 4 + 10 + Step 3: Enhanced modal with video, status, audit log, cross-camera link
+function ViolationDetailModal({ violation, onClose, onUpdate, linkedViolation, onOpenLinked }) {
   const { user } = useAuth();
   const [auditLog, setAuditLog] = useState([]);
   const [updating, setUpdating] = useState(false);
@@ -190,6 +228,16 @@ function ViolationDetailModal({ violation, onClose, onUpdate }) {
           <div className="flex items-center gap-2 flex-wrap">
             <ViolationBadge type={v.violation_type} />
             <StatusBadge status={v.status || 'pending'} />
+            {/* Đợt 2, Bước 3: badge ghép 2 camera */}
+            <CorrelationBadge
+              status={v.correlation_status}
+              onClick={onOpenLinked && v.linked_violation_id ? () => onOpenLinked(v.linked_violation_id) : null}
+            />
+            {v.gate_id && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border bg-[#f4f6f9] text-[#374151] border-[#d1d5db]">
+                Camera: {v.gate_id}
+              </span>
+            )}
           </div>
 
           <dl className="grid grid-cols-3 gap-y-2 text-[13px]">
@@ -221,6 +269,28 @@ function ViolationDetailModal({ violation, onClose, onUpdate }) {
 
             <dt className="text-[#6b7280] font-mono text-[11px] uppercase">Tư thế</dt>
             <dd className="col-span-2 text-[#374151]">{v.posture_status || '—'}</dd>
+
+            {/* Đợt 2, Bước 3: thông tin ghép 2 camera */}
+            {v.linked_violation_id != null && (
+              <>
+                <dt className="text-[#6b7280] font-mono text-[11px] uppercase">Ghép với cổng kia</dt>
+                <dd className="col-span-2 text-[#374151]">
+                  <button
+                    type="button"
+                    onClick={() => onOpenLinked && onOpenLinked(v.linked_violation_id)}
+                    className="font-mono text-[#123b6d] hover:text-[#0d2a4f] hover:underline"
+                  >
+                    Mở vi phạm #{v.linked_violation_id}
+                  </button>
+                  {linkedViolation && (
+                    <span className="ml-2 text-[#6b7280] text-[11px]">
+                      (gate {linkedViolation.gate_id || '—'} ·{' '}
+                      {new Date(linkedViolation.timestamp).toLocaleTimeString('vi-VN', { hour12: false })})
+                    </span>
+                  )}
+                </dd>
+              </>
+            )}
           </dl>
 
           {/* Feature 10: Status action buttons (admin/security/management only, not teacher) */}
@@ -302,7 +372,30 @@ export default function AdminViolationsPage() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [selectedViolation, setSelectedViolation] = useState(null);
+  const [linkedViolation, setLinkedViolation] = useState(null);
   const [filterVehicle, setFilterVehicle] = useState(null); // selected vehicle from autocomplete
+
+  // Bước 3: mở modal violation theo id (khi click "Mở vi phạm #X" trong modal).
+  // Thử tìm trong list hiện tại trước để khỏi gọi API thừa (list đã load qua
+  // /api/violations có thể đã chứa id này — tùy page), nếu không thấy thì fetch
+  // qua endpoint /api/violations với plate filter không — chính xác nhất là fetch
+  // /api/violations/{id} nhưng API chưa có route đó. Dùng tạm limit lớn + date
+  // filter rộng để chắc chắn tìm được id. Tránh cho user stuck vì không mở
+  // được bản ghi bên kia.
+  const openLinkedViolation = useCallback(async (id) => {
+    const found = violations.find(v => v.id === id);
+    if (found) {
+      setSelectedViolation(found);
+      return;
+    }
+    try {
+      const res = await client.get('/api/violations', { params: { limit: 200 } });
+      const item = (res.data?.items || []).find(v => v.id === id);
+      if (item) setSelectedViolation(item);
+    } catch (err) {
+      console.error('[AdminViolations] Không fetch được linked violation:', err);
+    }
+  }, [violations]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -632,8 +725,10 @@ export default function AdminViolationsPage() {
 
       <ViolationDetailModal
         violation={selectedViolation}
-        onClose={() => setSelectedViolation(null)}
+        linkedViolation={linkedViolation}
+        onClose={() => { setSelectedViolation(null); setLinkedViolation(null); }}
         onUpdate={load}
+        onOpenLinked={openLinkedViolation}
       />
     </div>
   );

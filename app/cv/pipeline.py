@@ -21,12 +21,17 @@ from app.config import (
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
+    CORRELATION_TIME_WINDOW_SEC, CORRELATION_MIN_SIMILARITY,
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
 from app.cv.ocr import read_plate_detailed, validate_plate_format
 from app.cv.plate_voter import PlateVoter
-from app.db import get_vehicle_by_plate, add_violation_event
+from app.cv.event_correlator import find_correlation_candidate
+from app.db import (
+    get_vehicle_by_plate, add_violation_event, find_correlation_candidates,
+    link_violation_events, mark_correlation_unmatched, get_connection,
+)
 
 
 # Màu vẽ bounding box
@@ -686,7 +691,13 @@ class VideoPipeline:
                             plate_confidence: float | None = None,
                             gate_id: str | None = None,
                             status: str = 'pending'):
-        """Lưu snapshot + ghi log vi phạm vào DB. Chạy trên _io_pool (thread nền)."""
+        """Lưu snapshot + ghi log vi phạm vào DB. Chạy trên _io_pool (thread nền).
+
+        Sau khi insert xong, submit try_correlate (cũng qua _io_pool — không
+        thêm thread mới) để ghép với event từ camera kia. Chuỗi: insert →
+        correlation → return. Correlation chạy nền độc lập với detect loop,
+        lỗi của correlation không ảnh hưởng pipeline chính.
+        """
         success = cv2.imwrite(snapshot_path, frame)
 
         # Feature 4: write video clip (reuse _io_pool, same thread as snapshot)
@@ -698,7 +709,7 @@ class VideoPipeline:
             clip_path = f"data/snapshots/{clip_filename}"
 
         try:
-            add_violation_event(
+            new_id = add_violation_event(
                 timestamp=datetime.datetime.now().isoformat(),
                 plate_read=plate_read,
                 plate_matched=plate_matched,
@@ -712,9 +723,61 @@ class VideoPipeline:
                 gate_id=gate_id,
                 status=status,
             )
-            print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}")
+            print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}, gate={gate_id}, id={new_id}")
+
+            # Bước 3: ghép với camera kia. Submit ngay trong _io_pool để không
+            # block detect loop — correlation chỉ là query+update nhẹ.
+            # Nếu chỉ có 1 gate (gate_id None), find_correlation_candidates trả [].
+            if gate_id:
+                new_event = {
+                    "id": new_id,
+                    "gate_id": gate_id,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "plate_read": plate_read,
+                    "plate_matched": plate_matched,
+                    "status": status,
+                }
+                self._io_pool.submit(self._try_correlate, new_event)
         except Exception as e:
             print(f"[Pipeline] Error logging violation: {e}")
+
+    def _try_correlate(self, new_event: dict):
+        """Ghép 1 lượt xe từ 2 camera (Bước 3). Chạy trên _io_pool sau khi insert.
+
+        Tách ra khỏi _persist_violation để:
+        - Bước 3 là điểm nhạy cảm nhất về correctness (ghép sai = cực tệ) —
+          tách hẳn ra để dễ log/trace lỗi mà không ảnh hưởng insert chính.
+        - Lỗi correlation KHÔNG được làm hỏng pipeline camera (exception isolation
+          đúng theo yêu cầu của Bước 4 về job nền — áp dụng sớm ở đây).
+        """
+        try:
+            candidates = find_correlation_candidates(
+                new_event, window_sec=CORRELATION_TIME_WINDOW_SEC,
+            )
+            if not candidates:
+                mark_correlation_unmatched(new_event["id"])
+                return
+
+            best, status = find_correlation_candidate(
+                new_event, candidates, min_similarity=CORRELATION_MIN_SIMILARITY,
+            )
+            if best is None:
+                if status == "needs_review":
+                    # Có ứng viên nhưng bên nào đó status='needs_review' (Bước 1)
+                    # hoặc không có biển số để so → đánh dấu để người kiểm tra
+                    mark_correlation_unmatched(new_event["id"])
+                else:
+                    mark_correlation_unmatched(new_event["id"])
+                return
+
+            ok = link_violation_events(new_event["id"], best["id"], status=status)
+            if ok:
+                print(f"[Pipeline] Correlated #{new_event['id']} <-> #{best['id']} ({status})")
+            else:
+                # Race: 1 trong 2 đã bị ghép trước đó → đánh dấu unmatched
+                mark_correlation_unmatched(new_event["id"])
+        except Exception as e:
+            print(f"[Pipeline] Correlation error for #{new_event.get('id')}: {e}")
 
     def _push_alert(self, violation_type: str, plate_read: str, plate_matched: str,
                      snapshot_filename: str | None = None, plate_format_valid: bool | None = None):

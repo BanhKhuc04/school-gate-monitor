@@ -137,6 +137,19 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        # Đợt 2, Bước 3: ghép 1 lượt xe từ 2 camera trước+sau
+        # linked_violation_id trỏ sang bản ghi vi phạm ở gate kia (NULL nếu chưa ghép)
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN linked_violation_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        # correlation_status: NULL = chưa thử ghép, 'unmatched' = đã thử không thấy,
+        # 'matched' = đã ghép, 'needs_review' = có ứng viên nhưng chưa đủ tự tin
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN correlation_status TEXT")
+        except sqlite3.OperationalError:
+            pass
+
         # Feature 9: giáo viên chủ nhiệm — homeroom_class (thêm sau vì bảng users đã tạo ở bước 1)
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN homeroom_class TEXT")
@@ -939,6 +952,118 @@ def clear_violation_snapshot_paths(older_than_days: int = 90) -> int:
             )
             conn.commit()
             return cursor.rowcount
+        finally:
+            conn.close()
+
+
+# ─── Đợt 2, Bước 3: Ghép 1 lượt xe từ 2 camera (trước + sau) ────────────────
+
+def find_correlation_candidates(new_event: dict, window_sec: float) -> list[dict]:
+    """
+    Tìm các violation_events ở gate khác, cùng cửa sổ thời gian ±window_sec,
+    chưa bị ghép với ai (linked_violation_id IS NULL), để event_correlator.py
+    chấm điểm chọn ứng viên tốt nhất.
+
+    Args:
+        new_event: dict tối thiểu có {'id', 'gate_id', 'timestamp', 'status'}.
+            'gate_id' có thể None (chỉ có 1 gate) → trả về list rỗng.
+        window_sec: cửa sổ ±giây quanh timestamp.
+
+    Returns:
+        List các dict row (id, gate_id, plate_read, plate_matched, status,
+        timestamp). Rỗng nếu new_event.gate_id None hoặc không có ứng viên.
+    """
+    if not new_event.get("gate_id"):
+        return []
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT id, gate_id, plate_read, plate_matched, status, timestamp
+               FROM violation_events
+               WHERE id != ?
+                 AND gate_id != ?
+                 AND linked_violation_id IS NULL
+                 AND datetime(timestamp) BETWEEN datetime(?, ?) AND datetime(?, ?)
+               ORDER BY timestamp ASC''',
+            (
+                new_event["id"],
+                new_event["gate_id"],
+                new_event["timestamp"], f"-{window_sec} seconds",
+                new_event["timestamp"], f"+{window_sec} seconds",
+            ),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def mark_correlation_unmatched(violation_id: int) -> None:
+    """
+    Đánh dấu 1 violation là đã thử ghép nhưng không tìm được ứng viên. Dùng
+    khi cần phân biệt 'chưa thử' (NULL) vs 'đã thử không có' (unmatched) — để
+    tránh poll correlation job chạy đè lặp đi lặp lại. Không bắt buộc cho
+    correctness (Bước 3 hiện tại chỉ chạy try_correlate 1 lần/insert), giữ
+    lại để sau này có thể làm batch retry mà không cần đổi API.
+    """
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE violation_events SET correlation_status = 'unmatched' "
+                "WHERE id = ? AND correlation_status IS NULL",
+                (violation_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def link_violation_events(id_a: int, id_b: int, status: str = 'matched') -> bool:
+    """
+    Ghép 2 bản ghi vi phạm thành 1 lượt xe từ 2 camera (trước + sau).
+    Cập nhật CẢ 2 record: linked_violation_id trỏ sang nhau, correlation_status
+    đặt theo tham số. Chặn bởi _write_lock để tránh race khi 2 gate cùng
+    insert event gần nhau và cả 2 cố ghép cùng lúc — chỉ 1 transaction thắng,
+    transaction còn lại sẽ thấy linked_violation_id IS NULL đã bị set, fail
+    UPDATE (rowcount=0) và trả False để caller biết đã có người ghép trước.
+
+    Args:
+        id_a, id_b: 2 ID violation_events cần ghép.
+        status: 'matched' (tự tin ghép) | 'needs_review' (có ứng viên nhưng chưa đủ tự tin).
+
+    Returns:
+        True nếu ghép thành công, False nếu 1 trong 2 record đã bị ghép trước đó.
+    """
+    if id_a == id_b:
+        return False
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            # Atomically claim both rows — chỉ update nếu cả 2 vẫn còn unlinked.
+            # WHERE linked_violation_id IS NULL đảm bảo không ghi đè lên ghép đã có.
+            cursor.execute(
+                '''UPDATE violation_events
+                   SET linked_violation_id = ?, correlation_status = ?
+                   WHERE id = ? AND linked_violation_id IS NULL''',
+                (id_b, status, id_a),
+            )
+            if cursor.rowcount == 0:
+                conn.rollback()
+                return False
+            cursor.execute(
+                '''UPDATE violation_events
+                   SET linked_violation_id = ?, correlation_status = ?
+                   WHERE id = ? AND linked_violation_id IS NULL''',
+                (id_a, status, id_b),
+            )
+            if cursor.rowcount == 0:
+                conn.rollback()
+                return False
+            conn.commit()
+            return True
         finally:
             conn.close()
 
