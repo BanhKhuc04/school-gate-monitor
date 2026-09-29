@@ -12,15 +12,15 @@ Project: Smart School Gate / Student Vehicle Management
 Purpose: Quản lý xe học sinh tại cổng trường bằng 2 camera, nhận diện biển số, phát hiện vi phạm, lưu bằng chứng và quản lý qua web.
 
 Current version: 2.0.0 (theo `app/main.py` FastAPI app version)
-Current commit: (chuẩn bị commit) — Bước 1/7 đợt 2 vừa hoàn thành, xem SESSION LOG cuối file
+Current commit: `6ffe74d` — Bước 3/7 đợt 2 (ghép 2 camera) vừa hoàn thành, xem SESSION LOG cuối file
 Last updated: 2026-09-29
-Updated by: Claude (Sonnet 5)
+Updated by: Claude (Sonnet 5) + Cursor
 
 **GIAO VIỆC CHO CURSOR: đọc kỹ mục 23 + SESSION LOG cuối file trước khi code tiếp.**
 Kế hoạch đầy đủ (7 bước, chi tiết file/schema/test/acceptance criteria từng bước)
 nằm ở file plan đã duyệt — nếu không thấy file plan kèm theo, hỏi lại người dùng
-thay vì tự đoán lại thiết kế. Bước 1 đã xong (code + 87 test pass), **bắt đầu từ
-Bước 3** (ghép 2 camera). Có video thật để test pipeline tại
+thay vì tự đoán lại thiết kế. Bước 1 + Bước 3 đã xong (113 test pass), **bắt đầu từ
+Bước 4** (tự động cleanup theo lịch). Có video thật để test pipeline tại
 `C:\Users\khucv\Downloads\tranning\` (14 file .mp4, 1280x720, camera cổng trường
 thật) — dùng làm `CAMERA_SOURCE` để test thay vì cần camera vật lý.
 
@@ -28,7 +28,7 @@ thật) — dùng làm `CAMERA_SOURCE` để test thay vì cần camera vật l�
 
 Physical setup:
 - 1 cổng trường, 1 luồng xe
-- **Hiện tại chỉ deploy thật 1 camera** (`GATES["main"]`). `GATES["secondary"]` (camera thứ 2) đã có sẵn cơ chế trong code (bật bằng env `CAMERA_SOURCE_SECONDARY`) nhưng **chưa được kiểm thử với camera trước+sau thật cùng lúc**, và **chưa có logic hợp nhất 1 lượt xe từ 2 camera thành 1 bản ghi** — mỗi camera hiện ghi `violation_events` độc lập, không liên kết với nhau.
+- **Có thể deploy 2 camera song song** (`GATES["main"]` + `GATES["secondary"]`, bật camera thứ 2 qua env `CAMERA_SOURCE_SECONDARY`). Từ Bước 3 (commit `6ffe74d`), 2 gate có logic **ghép 1 lượt xe thành 1 bản ghi** thông qua `linked_violation_id` + `correlation_status` (xem `app/cv/event_correlator.py`). Vẫn cho phép chạy 1 camera (khi đó `correlation_status` luôn NULL — hành vi cũ không đổi).
 
 Primary identification: LICENSE PLATE (đúng như thiết kế — `plate_matched`/`plate_read` là khóa chính để nối vào `registered_vehicles`)
 
@@ -92,7 +92,7 @@ Camera (1 gate, WebcamStream.read_frame)
 | Multi-frame OCR | **DONE** | `app/cv/plate_voter.py::PlateVoter`, `app/cv/pipeline.py::_read_plate_voted` | `test_plate_voter.py` (15 case), `test_vehicle_gate.py` | Vote theo vị trí + cửa sổ 2.5s (`PLATE_VOTE_WINDOW_SEC`); confident nếu ≥2 lần đọc giống nhau HOẶC 1 lần confidence ≥0.55 |
 | Confidence scoring | **DONE** | `app/cv/ocr.py::read_plate_detailed` (nay được gọi qua `PlateVoter`), cột `violation_events.plate_confidence` | `test_plate_confidence_db.py` | Không confident → **KHÔNG tra whitelist** (`get_vehicle_by_plate` bị bỏ qua), violation_type = `PLATE_LOW_CONFIDENCE`, status = `needs_review` (tái dùng UI/audit trail Feature 10 có sẵn, không xây review subsystem riêng) |
 | Duplicate suppression | PARTIAL | `_process_violations` (VIOLATION_COOLDOWN 60s) | — | Chặn ghi trùng theo (biển số, 60s), không phải theo "1 lượt xe qua cổng" thật sự (không có khái niệm event boundary) |
-| Front/rear correlation | NOT STARTED | — | — | 2 gate chạy hoàn toàn độc lập, không có logic ghép 1 xe từ cả 2 camera thành 1 record |
+| Front/rear correlation | **DONE** | `app/cv/event_correlator.py`, `app/db.py::find_correlation_candidates/link_violation_events`, `app/cv/pipeline.py::_try_correlate` | `test_event_correlator.py` (16 case), `test_event_correlator_db.py` (10 case) | Ghép 1 lượt xe từ 2 camera (trước+sau) bằng difflib.SequenceMatcher (stdlib). Plate giống hệt → `matched`, lệch ≥ `CORRELATION_MIN_SIMILARITY=0.85` → `needs_review`, khác hẳn → `unmatched`. Bất kỳ bên nào `status=needs_review` (Bước 1) → KHÔNG tự ghép. `link_violation_events` dùng `_write_lock` + atomic claim 2 row (WHERE linked_violation_id IS NULL) tránh race. Chạy trong `_io_pool` (không thêm thread), 2 gate vẫn độc lập hoàn toàn — correlation xảy ra SAU khi insert. Frontend: `CorrelationBadge` (xanh GHÉP / vàng CẦN KIỂM TRA / xám KHÔNG GHÉP), click mở modal bản ghi camera kia. Ưu tiên test "không ghép sai" hơn "ghép đúng" theo đúng yêu cầu. |
 | Helmet detection | DONE | `app/cv/detector.py`, `app/cv/pipeline.py` | `test_vehicle_gate.py` | Có "With Helmet"/"Without Helmet"; trạng thái "không chắc chắn" chưa tách riêng (nếu không detect được thì coi như không vi phạm, không có nhãn UNKNOWN cho helmet) |
 | Registered vehicle matching | DONE | `app/db.py::get_vehicle_by_plate` | `test_vehicles.py` | — |
 | Unregistered vehicle | DONE | `PLATE_NOT_REGISTERED` violation type | `test_vehicle_gate.py` | — |
@@ -271,11 +271,11 @@ Use actual roles from codebase — bảng trên đã verify qua `grep require_ro
 
 ## 13. TEST STATUS
 
-Total tests: 64
-Passed: 64
+Total tests: 113
+Passed: 113
 Failed: 0
 Command: `./venv/Scripts/python.exe -m pytest app/tests/ -q`
-Last test date: 2026-09-29 (sau commit `9d81244`)
+Last test date: 2026-09-29 (sau commit `6ffe74d` — Bước 3 đợt 2)
 
 Critical test areas:
 - camera — KHÔNG có test (cần camera thật, chỉ có `app/cv/smoke_test.py` chạy tay bằng `python -m app.cv.smoke_test`, không phải pytest)
@@ -435,11 +435,43 @@ Next task: Bước 3 — ghép 1 lượt xe từ 2 camera (trước+sau), xem ch
 
 Commit: (xem commit ngay sau entry này trong git log)
 
+### SESSION LOG — 2026-09-29 (đợt 2, Bước 3)
+
+Goal: Triển khai Bước 3 — ghép 1 lượt xe từ 2 camera (trước + sau) thành 1 record duy nhất. Nguyên tắc "không tự đoán" (đặc biệt là tiếp nối từ Bước 1: nếu 1 bên đã `needs_review` thì KHÔNG tự ghép). Xem file plan đã duyệt để lấy thiết kế đầy đủ.
+
+Completed:
+- **Schema**: 2 cột mới trên `violation_events`: `linked_violation_id INTEGER` (FK tự tham chiếu sang bản ghi ở gate kia), `correlation_status TEXT` (NULL = chưa thử ghép / chỉ 1 gate / `unmatched` = đã thử không thấy / `matched` = tự tin ghép / `needs_review` = có ứng viên nhưng chưa đủ tự tin).
+- **Module mới `app/cv/event_correlator.py`**: tách riêng khỏi `pipeline.py` để dễ thay đổi logic chấm điểm sau này. Hàm `find_correlation_candidate(new_event, candidates, min_similarity)` dùng `difflib.SequenceMatcher` (stdlib, không thêm dependency). Plate giống hệt → `matched` ngay (ưu tiên cao nhất); plate lệch nhưng `ratio >= CORRELATION_MIN_SIMILARITY` → `needs_review` (ghép nhưng để người kiểm tra); plate khác hẳn → `unmatched`. Bất kỳ bên nào `status='needs_review'` (Bước 1) → KHÔNG tự ghép (vì so sánh 2 thứ đều mơ hồ thì kết quả cũng vô nghĩa).
+- **`app/db.py`** thêm 3 hàm: `find_correlation_candidates(new_event, window_sec)` — query violation_events cùng cửa sổ ±15s, gate khác, `linked_violation_id IS NULL`. **`link_violation_events(id_a, id_b, status)`** — atomic claim cả 2 row qua `_write_lock` + `WHERE linked_violation_id IS NULL` (chỉ update nếu cả 2 vẫn còn unlinked), tránh race khi 2 gate cùng insert event gần nhau. **`mark_correlation_unmatched(violation_id)`** — chỉ set 'unmatched' nếu `correlation_status` đang NULL (không ghi đè lên 'matched').
+- **`app/cv/pipeline.py::_persist_violation`**: sau khi `add_violation_event()` trả `id`, submit `_try_correlate(new_event)` qua cùng `_io_pool` (không thêm thread, không block detect loop). `_try_correlate` isolated try/except — lỗi correlation KHÔNG được làm hỏng pipeline camera.
+- **Config**: `CORRELATION_TIME_WINDOW_SEC=15`, `CORRELATION_MIN_SIMILARITY=0.85`.
+- **Frontend `AdminViolationsPage.jsx`**: thêm `CorrelationBadge` (xanh GHÉP / vàng CẦN KIỂM TRA / xám KHÔNG GHÉP, click mở modal bản ghi camera kia); hiển thị `gate_id` (badge nhỏ "Camera: main/secondary"); dòng "Ghép với cổng kia: Mở vi phạm #X" khi `linked_violation_id` có giá trị.
+
+Files changed:
+- Mới: `app/cv/event_correlator.py`, `app/tests/test_event_correlator.py`, `app/tests/test_event_correlator_db.py`, `scripts/verify_step3_2cameras.py`, `scripts/verify_step3_correlation.py`
+- Sửa: `app/db.py` (3 hàm mới + migration), `app/cv/pipeline.py` (import + `_try_correlate` + submit trong `_persist_violation`), `app/config.py` (2 hằng số mới), `frontend/src/pages/AdminViolationsPage.jsx` (CorrelationBadge, gate_id display, openLinkedViolation handler, build OK 3.5s)
+
+Database migrations: `linked_violation_id INTEGER`, `correlation_status TEXT` trên `violation_events` — an toàn cho DB cũ (ALTER TABLE try/except).
+
+Tests: 113/113 pass (`pytest app/tests/ -q`), gồm 26 test mới (16 unit `test_event_correlator.py` + 10 DB `test_event_correlator_db.py`). Tuân thủ yêu cầu "ưu tiên test âm 'không ghép sai' nhiều hơn test dương 'ghép đúng'": trong 16 test logic thuần có 8 test âm (khác hẳn, dưới ngưỡng, không candidate, candidate rỗng, 1 bên needs_review, ...).
+
+Verification tay (Bước 3 có liên quan pipeline camera nên đã verify qua video thật):
+1. `scripts/verify_step3_2cameras.py` — chạy thật với 2 file training `1790578609446_...` (gate main) + `1790578669818_...` (gate secondary) trong 60s. Kết quả: 2 violation mới (id=911 ở main, id=912 ở secondary), cả 2 đều `correlation_status='unmatched'` (đúng: cùng plate_read='' + cách 20s > 15s window). 3 violation cũ (gate_id null) vẫn `correlation_status=null` → logic "chỉ ghép khi có gate_id" giữ đúng.
+2. `scripts/verify_step3_correlation.py` — chèn 6 violation giả (3 case), trigger correlation thật: case1 (plate giống hệt) → `matched` ✓; case3 (plate khác hẳn) → `unmatched` không ghép ✓.
+
+Known problems: 2 file video đầu tiên trong tập training chỉ có cảnh cổng trường nhưng biển số không rõ (xem raw OCR trong output verify) — không phải bug Bước 3 mà là nội dung video. Để kiểm tra correlation ghép **đúng** biển số thật, cần 2 video cùng 1 xe chạy qua 2 góc camera; hiện tập training không có cặp đó. Đã cover bằng test script 3 case (matched/needs_review/unmatched) thay thế.
+
+Performance: 113 test pass trong 41.5s. Pipeline 2 camera chạy ổn định 60s với 2 file training, không có lỗi correlation nào (log "Correlated #X <-> #Y" in ra khi ghép thành công, "Correlation error for #X" in ra khi lỗi — cả 2 đều không xuất hiện trong run verify). FPS/latency số thật chưa đo trong session này vì video training không có người/xe rõ ràng qua camera → `get_status()['fps']` vẫn ~0 (đúng vì không có person detection). Có thể đo thật khi tìm được video có xe rõ.
+
+Next task: Bước 4 — tự động dọn dữ liệu cũ theo lịch (background thread `MaintenanceWorker`, không thêm dependency), xem chi tiết trong file plan đã duyệt (audit log bảng `system_maintenance_log`, lock chống chạy đè, `CLEANUP_ENABLED`/`CLEANUP_INTERVAL_HOURS`/`CLEANUP_RETENTION_DAYS`). Bước 4-7 vẫn CHƯA CODE — giao cho Cursor tiếp.
+
+Commit: `6ffe74d "Step 3: ghép 1 lượt xe từ 2 camera (trước + sau)"`
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit ngay sau `9d81244`, message nhắc "Bước 1")
-System status: Backend/frontend chạy được, 87/87 test pass. Bước 1 (đa khung hình + confidence biển số) đã code xong và có test, NHƯNG chưa verify tay qua browser với dữ liệu thật (pipeline dev hiện tại không có xe đi qua camera). Có 14 video thật (`C:\Users\khucv\Downloads\tranning\`) chưa dùng để test integration.
+Current stable commit: `6ffe74d` (Bước 3 đợt 2 — ghép 2 camera)
+System status: Backend/frontend chạy được, 113/113 test pass. Bước 1 (đa khung hình + confidence biển số) + Bước 3 (ghép 2 camera) đã code xong và verify thật qua 2 video training `C:\Users\khucv\Downloads\tranning\`. Correlation chạy đúng với 2 gate song song (matched/needs_review/unmatched đều đã được exercise qua test + script verify).
 Safe to deploy: UNKNOWN — chưa deploy thử lên VPS, `JWT_SECRET_KEY` hardcode là rủi ro nếu deploy production như hiện trạng.
-Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file plan riêng). **Bước 1/7 xong. Bước 3-7 CHƯA CODE — giao cho Cursor.**
-Next recommended task: Bước 3 (ghép 2 camera) — xem SESSION LOG ngay phía trên và file plan đã duyệt để lấy thiết kế đầy đủ (schema, module, test, acceptance criteria). Sau Bước 3 → Bước 4 (auto cleanup) → Bước 5 (disk stats) → Bước 6 (backup SQLite) → Bước 7 (continuous recording, nặng nhất, mặc định TẮT tới khi có benchmark).
-Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 2 mục vừa xong trong session này (Multi-frame OCR, Confidence scoring). Làm đúng thứ tự Bước 3→4→5→6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
+Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file plan riêng). **Bước 1/7 + Bước 3/7 xong. Bước 4-7 CHƯA CODE — giao cho Cursor.**
+Next recommended task: Bước 4 (auto cleanup theo lịch + maintenance worker) — xem SESSION LOG ngay phía trên và file plan đã duyệt để lấy thiết kế đầy đủ (thread `MaintenanceWorker` pattern giống `VideoPipeline`, audit log bảng `system_maintenance_log`, lock chống chạy đè). Sau Bước 4 → Bước 5 (disk stats) → Bước 6 (backup SQLite online) → Bước 7 (continuous recording, nặng nhất, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
+Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 3 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation). Làm đúng thứ tự Bước 4→5→6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
