@@ -3,6 +3,7 @@ System health & maintenance API.
 
 GET  /api/system/health              — pipeline status + DB/storage stats (admin, management)
 POST /api/system/snapshots/cleanup   — delete old snapshots + null DB paths (admin only)
+GET  /api/system/maintenance-log     — xem lịch sử job tự động (cleanup/backup) — Bước 4
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from app.db import (
     get_violation_stats,
     get_old_violation_snapshot_paths,
     clear_violation_snapshot_paths,
+    list_maintenance_log,
     DB_PATH,
 )
 from app.config import SNAPSHOTS_DIR
@@ -192,3 +194,19 @@ def preview_snapshot_cleanup(
         "clip_count": len(clip_paths),
         "total_size_mb": round(total_size / (1024 * 1024), 2),
     }
+
+
+# ─── Đợt 2, Bước 4: Maintenance log (audit trail cho job tự động) ─────────────
+
+@router.get("/maintenance-log")
+def get_maintenance_log(
+    limit: int = Query(default=20, ge=1, le=200),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """
+    GET /api/system/maintenance-log — xem lịch sử chạy job tự động
+    (cleanup cũ, backup — Bước 6). Admin-only vì đây là thông tin vận hành
+    nội bộ, không liên quan tới phụ huynh/giáo viên.
+    Tái dùng pattern list đơn giản giống get_violation_audit_log.
+    """
+    return list_maintenance_log(limit=limit)

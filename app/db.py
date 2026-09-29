@@ -102,6 +102,25 @@ def init_db():
             ON violation_audit_log(violation_id)
         ''')
 
+        # Đợt 2, Bước 4: audit log cho tác vụ hệ thống (cleanup tự động, backup — Bước 6)
+        # Tách khỏi violation_audit_log vì bảng đó có FK bắt buộc tới violation_id,
+        # không hợp với job không gắn với 1 vi phạm cụ thể (cleanup xóa nhiều vi phạm
+        # cùng lúc, backup thậm chí không liên quan tới violation).
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_maintenance_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_name TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                success INTEGER NOT NULL DEFAULT 0,
+                detail_json TEXT
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_maintenance_log_started
+            ON system_maintenance_log(started_at)
+        ''')
+
         # ── 2. Migrations cho bảng đã tồn tại (ALTER TABLE — an toàn nếu cột đã có) ──
         # posture_status + plate_format_valid (từ trước)
         try:
@@ -778,6 +797,52 @@ def get_violation_audit_log(violation_id: int) -> list[dict]:
         cursor.execute(
             "SELECT * FROM violation_audit_log WHERE violation_id = ? ORDER BY created_at ASC",
             (violation_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+# ─── Đợt 2, Bước 4: System maintenance log ───────────────────────────────────
+
+def log_maintenance_run(job_name: str, started_at: str, finished_at: str,
+                        success: bool, detail: dict | None = None) -> int:
+    """
+    Ghi 1 lần chạy của maintenance job (cleanup tự động, backup — Bước 6) vào
+    system_maintenance_log. Tái dùng `_write_lock` như mọi hàm ghi khác — chạy
+    nền không cần chiếm lock lâu nhưng vẫn phải qua lock để khớp pattern.
+
+    Trả về id của row vừa insert (dùng cho test xác nhận ghi đúng).
+    """
+    import json
+    detail_json = json.dumps(detail) if detail is not None else None
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO system_maintenance_log "
+                "(job_name, started_at, finished_at, success, detail_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (job_name, started_at, finished_at, 1 if success else 0, detail_json),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+
+def list_maintenance_log(limit: int = 20) -> list[dict]:
+    """
+    Trả về các lần chạy maintenance gần nhất, mới nhất trước.
+    Dùng cho API GET /api/system/maintenance-log (admin).
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM system_maintenance_log ORDER BY id DESC LIMIT ?",
+            (limit,)
         )
         return [dict(row) for row in cursor.fetchall()]
     finally:

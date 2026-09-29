@@ -26,6 +26,16 @@ async def lifespan(app: FastAPI):
     # Startup
     print("[App] Initializing database...")
     init_db()
+    # Đợt 2, Bước 4: MaintenanceWorker không phụ thuộc CV libs — start ĐỘC LẬP
+    # với pipeline để DB-test env (không có ultralytics) vẫn chạy được worker,
+    # và để nếu CV import lỗi thì cleanup tự động vẫn chạy (chỉ mất camera).
+    try:
+        from app.background import start_maintenance_worker, stop_maintenance_worker
+        print("[App] Starting maintenance worker...")
+        start_maintenance_worker()
+    except ImportError as e:
+        print(f"[App] Maintenance worker unavailable: {e}")
+        stop_maintenance_worker = lambda: None  # noqa: E731 — shutdown no-op
     try:
         from app.cv.pipeline import start_all_pipelines, stop_all_pipelines
         print("[App] Starting all pipeline threads...")
@@ -34,12 +44,15 @@ async def lifespan(app: FastAPI):
     except ImportError as e:
         print(f"[App] CV libs not available, skipping pipeline start: {e}")
         yield
+        stop_maintenance_worker()
         return
     else:
         yield
         # Shutdown (only if pipelines were started)
         print("[App] Stopping all pipeline threads...")
         stop_all_pipelines()
+        print("[App] Stopping maintenance worker...")
+        stop_maintenance_worker()
         return
     yield  # fallback for when _pipeline_started is False (shouldn't reach here)
 

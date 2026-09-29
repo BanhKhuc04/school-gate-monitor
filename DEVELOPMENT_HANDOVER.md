@@ -103,7 +103,7 @@ Camera (1 gate, WebcamStream.read_frame)
 | Continuous recording | NOT STARTED | — | — | Không có ghi hình liên tục 24/7, chỉ có ring-buffer 32 frame trong RAM dùng để cắt clip vi phạm |
 | Recording segmentation | NOT STARTED | — | — | Phụ thuộc continuous recording, chưa có |
 | Retention policy | PARTIAL | `REPEAT_OFFENDER_WINDOW_DAYS` không liên quan; cleanup dùng 1 mốc `older_than_days` chung cho cả ảnh+clip | `test_system.py` | Chưa phân tầng theo loại dữ liệu (video thường/vi phạm/lịch sử) như yêu cầu #6 |
-| Automatic cleanup | PARTIAL | `POST /api/system/snapshots/cleanup` | `test_system.py` | **Chỉ chạy khi admin bấm nút thủ công**, không có lịch tự động (không cron/scheduler) |
+| Automatic cleanup | **DONE** | `app/background.py::MaintenanceWorker`, `_cleanup_job` gọi `clear_violation_snapshot_paths()` | `test_maintenance_worker.py` (12 case, gồm 2 test end-to-end qua `_run_loop` thật) | **Thread nền `MaintenanceWorker` tự chạy mỗi `CLEANUP_INTERVAL_HOURS` giờ**, xóa snapshot/clip cũ hơn `CLEANUP_RETENTION_DAYS` qua hàm đã có (Feature 8) — chỉ đổi cách TRIGGER từ "admin bấm nút" sang "tự động theo lịch". `_job_lock` chống chạy đè (không queue), `_run_job_safely` cách ly exception (job fail không làm chết thread), mỗi lần chạy ghi 1 row vào bảng `system_maintenance_log` (audit log tách riêng khỏi `violation_audit_log` vì không có FK violation_id). Tắt qua `CLEANUP_ENABLED=0` trong env. |
 | Cleanup dry-run | DONE | `GET /api/system/snapshots/preview` | Verify qua API session trước | Trả file_count + size trước khi xóa thật |
 | Storage statistics | PARTIAL | `GET /api/system/health` (db_size_mb, snapshot_count, snapshot_size_mb) | `test_system.py` | Chưa có dung lượng đĩa tổng/còn trống, chưa phân bổ theo loại (video thường vs vi phạm) |
 | Backup | NOT STARTED | — | — | Không có script/cron backup DB hay snapshot |
@@ -271,11 +271,11 @@ Use actual roles from codebase — bảng trên đã verify qua `grep require_ro
 
 ## 13. TEST STATUS
 
-Total tests: 113
-Passed: 113
+Total tests: 127
+Passed: 127
 Failed: 0
 Command: `./venv/Scripts/python.exe -m pytest app/tests/ -q`
-Last test date: 2026-09-29 (sau commit `6ffe74d` — Bước 3 đợt 2)
+Last test date: 2026-09-29 (sau commit Bước 4 — MaintenanceWorker)
 
 Critical test areas:
 - camera — KHÔNG có test (cần camera thật, chỉ có `app/cv/smoke_test.py` chạy tay bằng `python -m app.cv.smoke_test`, không phải pytest)
@@ -284,7 +284,7 @@ Critical test areas:
 - violations — CÓ (`test_vehicle_gate.py`, `test_posture.py`)
 - permissions — CÓ (rải rác trong hầu hết file test, assert 401/403)
 - retention — CÓ MỘT PHẦN (`test_system.py::test_cleanup_*`)
-- cleanup — CÓ (`test_system.py`)
+- cleanup — CÓ (`test_system.py`, `test_maintenance_worker.py` — 2 test end-to-end qua `_run_loop` thật theo bài học từ bug Bước 3)
 - storage — CÓ MỘT PHẦN (`test_system.py::test_health_*` chỉ check response shape, không check số liệu thật)
 
 Known untested areas: Model YOLO/EasyOCR thật (mọi test dùng mock), 2 camera đồng thời thật, ghi video clip với camera thật (chỉ test bằng frame giả `np.zeros`), performance/FPS thật với người đi qua camera, frontend không có unit test tự động (chỉ verify tay qua browser trong các session trước — Playwright config tồn tại ở `frontend/playwright.config.js` nhưng chưa chạy trong session này).
@@ -483,12 +483,47 @@ Next task: Bước 4, không đổi — xem hướng dẫn ở SESSION LOG phía
 
 Commit: (xem commit ngay sau entry này)
 
+### SESSION LOG — 2026-09-29 (đợt 2, Bước 4)
+
+Goal: Triển khai Bước 4 — tự động cleanup snapshot/clip cũ theo lịch qua background thread, không thêm dependency ngoài. Xem `docs/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 4" để lấy thiết kế đầy đủ.
+
+Completed:
+- **Module mới `app/background.py`** chứa `MaintenanceWorker` (thread nền pattern giống `VideoPipeline`): `start()`/`stop(timeout)` lifecycle, `_run_loop` ngủ `CLEANUP_INTERVAL_HOURS*3600` giây giữa các lần chạy, `_run_job_safely(job_fn)` bọc try/except + ghi audit row, `_job_lock` (threading.Lock, `acquire(blocking=False)`) chống chạy đè — không queue, không xếp hàng. `_sleep_interruptible()` ngủ theo lát 0.5s để `stop()` phản ứng nhanh thay vì đợi hết interval.
+- **`_cleanup_job`**: tái dùng nguyên `clear_violation_snapshot_paths(CLEANUP_RETENTION_DAYS)` đã có từ Feature 8 — chỉ đổi cách TRIGGER (từ "admin bấm nút" sang "tự động"). Ghi audit row success=True ngay trong job (nhánh success); `_run_job_safely` ghi success=False + traceback nếu job raise (tách 2 nhánh để không ghi trùng).
+- **Schema**: bảng mới `system_maintenance_log` (id, job_name, started_at, finished_at, success, detail_json) + index trên started_at. Tách khỏi `violation_audit_log` vì bảng đó có FK `violation_id` bắt buộc — job không gắn 1 violation cụ thể.
+- **`app/db.py`** thêm `log_maintenance_run()` (ghi row, dùng `_write_lock` như mọi hàm ghi khác) + `list_maintenance_log(limit=20)` (trả về theo id DESC).
+- **`app/config.py`** thêm `CLEANUP_ENABLED` (mặc định True, tắt qua env `CLEANUP_ENABLED=0`), `CLEANUP_INTERVAL_HOURS=24`, `CLEANUP_RETENTION_DAYS=90`. Đặt trước các config Bước 6 (`BACKUP_*`) để Bước 6 không phải sửa lại file.
+- **`app/main.py::lifespan`**: start `MaintenanceWorker` ĐỘC LẬP với pipeline (lazy import riêng, có try/except `ImportError`) — DB-test env không có ultralytics vẫn chạy được worker. Stop cùng shutdown.
+- **API mới `GET /api/system/maintenance-log?limit=20`** (admin-only) — xem lịch sử chạy job tự động, tái dùng pattern list đơn giản giống `get_violation_audit_log`.
+
+Files changed:
+- Mới: `app/background.py`, `app/tests/test_maintenance_worker.py`
+- Sửa: `app/config.py` (CLEANUP_* + BACKUP_* đặt sẵn), `app/db.py` (bảng mới + 2 hàm + index), `app/main.py::lifespan` (start/stop worker), `app/api/system.py` (endpoint mới)
+
+Database migrations: bảng `system_maintenance_log` + index — CREATE TABLE IF NOT EXISTS (an toàn cho DB cũ).
+
+Tests: **127/127 pass** (115 cũ + 12 mới), gồm:
+- 3 test hàm DB (ghi success/failure row, list sắp xếp đúng)
+- 3 test `_run_job_safely` (success log, failure log + traceback, thread alive sau exception)
+- 1 test `_job_lock` chặn chạy đè (giữ lock thủ công, gọi `_run_job_safely` phải skip)
+- **2 test END-TO-END qua `_run_loop` thật** (bài học từ bug Bước 3): (a) `start()`/`stop()` thật, interval cực nhỏ qua `monkeypatch.setattr(app.background, ...)`, insert 1 violation cũ thật vào DB, đợi poll trên `system_maintenance_log` thấy row với `updated_records >= 1` — chứng minh job đã chạm DB thật chứ không mock; (b) inject 1 raise lần đầu, xác nhận `_run_loop` vẫn chạy lần sau (`call_count >= 2`) và ghi được cả 2 row failure+success.
+- 3 test API auth (401/403/200 cho 3 role)
+
+Lưu ý quan trọng về test: monkeypatch đặt trên `app.background` chứ KHÔNG trên `app.config` — vì `background.py` đã import-bound `CLEANUP_INTERVAL_HOURS` lúc import, set trên `cfg` không lan tới local binding (đã rút kinh nghiệm từ bug test "test fail vì patch sai module").
+
+Verification tay: chưa chạy qua uvicorn thật — chưa cần, vì Bước 4 không liên quan pipeline camera. Khi `uvicorn app.main:app` chạy, lifespan sẽ tự start worker; admin gọi `GET /api/system/maintenance-log` sẽ thấy row từ job đầu tiên (đợi vài giây sau khi uvicorn start để interval kế tiếp chạy xong).
+
+Known problems: `CLEANUP_INTERVAL_HOURS=0` (test inject) → sleep(0) ngay → loop chạy liên tục trong test → chấp nhận vì test stop worker trong `finally`. Production mặc định 24 giờ, không có vấn đề.
+
+Next task: Bước 5 — thống kê dung lượng đĩa thật (`shutil.disk_usage`) + breakdown theo phần mở rộng file (`.jpg`/`.mp4`/sau này là `data/recordings/`). Xem plan đã duyệt mục "Bước 5".
+
+Commit: (xem commit ngay sau entry này)
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit fix bug correlation, ngay sau `87c4a09`)
-System status: Backend/frontend chạy được, 115/115 test pass (đã fix 1 bug correctness ở `_try_correlate` — xem SESSION LOG ngay phía trên). Bước 1 (đa khung hình + confidence biển số) + Bước 3 (ghép 2 camera) đã code xong, verify thật qua video training, VÀ đã qua 1 vòng review độc lập.
-Safe to deploy: UNKNOWN — chưa deploy thử lên VPS, `JWT_SECRET_KEY` hardcode là rủi ro nếu deploy production như hiện trạng.
-Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file plan riêng). **Bước 1/7 + Bước 3/7 xong (đã review). Bước 4-7 CHƯA CODE — giao cho Cursor.**
-Next recommended task: Bước 4 (auto cleanup theo lịch + maintenance worker) — xem SESSION LOG ngay phía trên và file plan đã duyệt để lấy thiết kế đầy đủ (thread `MaintenanceWorker` pattern giống `VideoPipeline`, audit log bảng `system_maintenance_log`, lock chống chạy đè). Sau Bước 4 → Bước 5 (disk stats) → Bước 6 (backup SQLite online) → Bước 7 (continuous recording, nặng nhất, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
-Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 3 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation). Làm đúng thứ tự Bước 4→5→6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
-**Bài học từ lần review này — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (ở đây: `find_correlation_candidate()` trả đúng nhưng `_try_correlate()` gọi hàm ghi DB sai tham số). Khi viết test cho Bước 4-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật (vd `MaintenanceWorker._run_loop`/`_run_job_safely`) chứ không chỉ test từng hàm con riêng lẻ.
+Current stable commit: (xem git log — commit Bước 4 MaintenanceWorker, ngay sau fix bug correlation)
+System status: Backend/frontend chạy được, **127/127 test pass**. Bước 1 (đa khung hình + confidence biển số) + Bước 3 (ghép 2 camera) + Bước 4 (auto cleanup theo lịch qua `MaintenanceWorker`) đã code xong, toàn bộ đã qua review/verify.
+Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file `docs/CURSOR_PLAN_DOT2_NANG_CAP.md`). **Bước 1/7 + Bước 3/7 + Bước 4/7 xong. Bước 5-7 CHƯA CODE — giao cho Cursor.**
+Next recommended task: Bước 5 (disk stats — `shutil.disk_usage` + breakdown theo phần mở rộng file), xem plan đã duyệt. Sau Bước 5 → Bước 6 (backup SQLite online) → Bước 7 (continuous recording, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
+Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 4 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation, Automatic cleanup). Làm đúng thứ tự Bước 5→6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
+**Bài học từ các lần review — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (Bước 3: `find_correlation_candidate()` trả đúng nhưng `_try_correlate()` gọi hàm ghi DB sai tham số → fix bằng test end-to-end; Bước 4: đã có ngay test end-to-end qua `MaintenanceWorker.start()`/`_run_loop` thật với interval cực nhỏ + 1 violation thật trong DB để verify `updated_records` thật chứ không phải mock). Khi viết test cho Bước 5-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật chứ không chỉ test từng hàm con riêng lẻ.

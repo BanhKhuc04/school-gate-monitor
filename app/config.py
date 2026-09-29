@@ -134,6 +134,20 @@ PLATE_MIN_CONFIDENCE_SINGLE = 0.55  # HOẶC 1 lần đọc confidence >= ngư�
 CORRELATION_TIME_WINDOW_SEC = 15    # tìm ứng viên trong ±15 giây quanh timestamp
 CORRELATION_MIN_SIMILARITY = 0.85  # SequenceMatcher.ratio() tối thiểu để coi là "cùng biển"
 
+# Đợt 2, Bước 4: tự động dọn snapshot/clip cũ theo lịch — xem app/background.py::MaintenanceWorker
+# Bật/tắt master switch — đặt CLEANUP_ENABLED=0 trong env để chỉ chạy cleanup khi admin bấm tay
+# (vd. trên môi trường test, khi benchmark, hoặc khi muốn tắt tạm thời không phải sửa code).
+CLEANUP_ENABLED = os.environ.get("CLEANUP_ENABLED", "1") == "1"
+CLEANUP_INTERVAL_HOURS = int(os.environ.get("CLEANUP_INTERVAL_HOURS", "24"))
+CLEANUP_RETENTION_DAYS = int(os.environ.get("CLEANUP_RETENTION_DAYS", "90"))
+
+# Đợt 2, Bước 6: backup SQLite (đặt trước để Bước 4 không phải sửa config lại khi gọi backup job)
+BACKUP_ENABLED = os.environ.get("BACKUP_ENABLED", "1") == "1"
+BACKUP_INTERVAL_HOURS = int(os.environ.get("BACKUP_INTERVAL_HOURS", "24"))
+BACKUP_KEEP_COUNT = int(os.environ.get("BACKUP_KEEP_COUNT", "14"))
+BACKUP_DIR = os.environ.get("BACKUP_DIR") or str(BASE_DIR / "data" / "backups")
+BACKUP_MEDIA_ENABLED = os.environ.get("BACKUP_MEDIA_ENABLED", "0") == "1"
+
 # JWT Authentication
 # secrets.token_hex(32) → hardcoded (không sinh lại mỗi lần khởi động)
 JWT_SECRET_KEY = "a3f8c1b9e2d47f0a5c6e8b3d9f1e2a4c7b5d9f3e1a8c6b4d2f0e7a3c5b9d"
