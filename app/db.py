@@ -849,6 +849,61 @@ def list_maintenance_log(limit: int = 20) -> list[dict]:
         conn.close()
 
 
+# ─── Đợt 2, Bước 6: Backup SQLite online (không copy file thô) ───────────────
+
+def backup_database(dest_path: str) -> None:
+    """
+    Backup an toàn app.db đang chạy, dùng SQLite online backup API
+    (`sqlite3.Connection.backup()`) — API chính thức SQLite team làm riêng cho
+    việc "backup DB đang chạy", từ Python 3.7+. Không copy file thô
+    (rủi ro đọc giữa lúc ghi dở dang → backup hỏng/thiếu transaction).
+
+    Chặn bởi `_write_lock` để tránh backup giữa lúc có transaction ghi đang mở
+    (an toàn kép — dù `.backup()` tự nó đã an toàn ở cấp SQLite).
+    Đảm bảo thư mục đích đã tồn tại (KHÔNG tự mkdir — caller quyết định policy).
+
+    Raises:
+        OSError: nếu không mở/ghi được file đích (do caller truyền path hợp lệ).
+    """
+    with _write_lock:
+        source = get_connection()
+        try:
+            dest = sqlite3.connect(dest_path)
+            try:
+                source.backup(dest)
+            finally:
+                dest.close()
+        finally:
+            source.close()
+
+
+def list_backup_files(backup_dir: str) -> list[dict]:
+    """
+    Liệt kê file backup trong `backup_dir`, mới nhất trước.
+    Mỗi entry: {filename, path, size_mb, mtime_iso}.
+
+    KHÔNG touch DB — chỉ list file vật lý. Dùng cho API GET /api/system/backup/list.
+    """
+    import glob as _glob
+    out: list[dict] = []
+    if not os.path.exists(backup_dir):
+        return out
+    for path in _glob.glob(os.path.join(backup_dir, "app_*.db")):
+        try:
+            stat = os.stat(path)
+            out.append({
+                "filename": os.path.basename(path),
+                "path": path,
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "mtime_iso": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            })
+        except OSError:
+            continue
+    # Mới nhất trước
+    out.sort(key=lambda r: r["mtime_iso"], reverse=True)
+    return out
+
+
 # ─── Feature 2 + 6: Repeat offender tracking ──────────────────────────────────
 
 def get_student_violation_summary(student_class: str = None) -> list[dict]:

@@ -13,13 +13,16 @@ end-to-end qua _run_loop / _run_job_safely, không chỉ test helper riêng lẻ
 import threading
 import time
 import traceback
+import os
 from datetime import datetime, timezone
 
 from app.config import (
     CLEANUP_ENABLED, CLEANUP_INTERVAL_HOURS, CLEANUP_RETENTION_DAYS,
+    BACKUP_ENABLED, BACKUP_INTERVAL_HOURS, BACKUP_KEEP_COUNT, BACKUP_DIR,
 )
 from app.db import (
     clear_violation_snapshot_paths, log_maintenance_run,
+    backup_database, list_backup_files,
 )
 
 
@@ -86,13 +89,23 @@ class MaintenanceWorker:
         Vòng lặp job. Ngủ CLEANUP_INTERVAL_HOURS giữa mỗi lần chạy (đổi từ giây
         sang giây cho test inject interval cực nhỏ — xem test_maintenance_worker).
 
-        Khi Bước 6 thêm backup job: chèn
-            self._run_job_safely(self._backup_job)
-        ngay sau cleanup. Hiện tại CHỈ có cleanup job để Bước 4 độc lập.
+        Chu kỳ:
+          - Cleanup chạy MỖI lần lặp (theo CLEANUP_INTERVAL_HOURS).
+          - Backup chạy MỖI `backup_every_n_loops` lần lặp, nơi N = BACKUP_INTERVAL_HOURS / CLEANUP_INTERVAL_HOURS
+            (làm tròn lên, tối thiểu 1 để backup chạy khi interval nhỏ hơn cleanup).
+            Ví dụ: cleanup=24h, backup=24h → N=1 (chạy mỗi lần).
+                    cleanup=24h, backup=48h → N=2 (chạy cách 1 lần).
+                    cleanup=1h, backup=24h  → N=24 (chạy 1 lần/ngày).
+            Pattern này tránh 2 sleep tách rời (phức tạp) mà vẫn tôn trọng interval riêng.
         """
+        backup_every_n_loops = max(1, -(-BACKUP_INTERVAL_HOURS // max(CLEANUP_INTERVAL_HOURS, 1)))
+        loop_count = 0
         while self._running:
             self._run_job_safely(self._cleanup_job)
-            # Bước 6: self._run_job_safely(self._backup_job)
+            loop_count += 1
+            if loop_count >= backup_every_n_loops:
+                loop_count = 0
+                self._run_job_safely(self._backup_job)
             self._sleep_interruptible(CLEANUP_INTERVAL_HOURS * 3600)
 
     def _sleep_interruptible(self, seconds: float) -> None:
@@ -179,6 +192,66 @@ class MaintenanceWorker:
             # Cách tách: job ghi success=True, _run_job_safely ghi success=False.
             raise
 
+    def _backup_job(self) -> None:
+        """
+        Backup SQLite online qua `sqlite3.Connection.backup()`.
+
+        Bước 6, đợt 2: chạy song song với cleanup, interval riêng (`BACKUP_INTERVAL_HOURS`).
+        Mỗi lần chạy:
+          1. Backup `app.db` → `data/backups/app_{timestamp}.db`.
+          2. Xóa các file backup cũ hơn N bản gần nhất (`BACKUP_KEEP_COUNT`).
+          3. Ghi audit log với danh sách file backup còn lại.
+
+        KHÔNG backup media (`SNAPSHOTS_DIR`) theo mặc định — `BACKUP_MEDIA_ENABLED=False`
+        vì dung lượng lớn, không phải ai cũng cần. Bật qua env khi cần.
+
+        Raises re-raise để `_run_job_safely` ghi log success=False khi fail.
+        """
+        from app.config import BACKUP_MEDIA_ENABLED, SNAPSHOTS_DIR, BASE_DIR
+
+        started_at = datetime.now(timezone.utc).isoformat()
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+
+        # 1. Backup DB
+        ts_filename = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        dest_db = os.path.join(BACKUP_DIR, f"app_{ts_filename}.db")
+        backup_database(dest_db)
+        db_size_mb = round(os.path.getsize(dest_db) / (1024 * 1024), 2)
+
+        # 2. (Optional) Backup media — tắt mặc định
+        media_backup_path = None
+        if BACKUP_MEDIA_ENABLED:
+            from shutil import copytree
+            media_dest = os.path.join(BACKUP_DIR, f"snapshots_{ts_filename}")
+            copytree(SNAPSHOTS_DIR, media_dest, dirs_exist_ok=True)
+            media_backup_path = media_dest
+
+        # 3. Dọn backup cũ — giữ BACKUP_KEEP_COUNT bản gần nhất (theo mtime)
+        existing = list_backup_files(BACKUP_DIR)
+        keep_files = existing[:BACKUP_KEEP_COUNT]
+        deleted = []
+        for old in existing[BACKUP_KEEP_COUNT:]:
+            try:
+                os.unlink(old["path"])
+                deleted.append(old["filename"])
+            except OSError:
+                pass
+
+        detail = {
+            "backup_file": os.path.basename(dest_db),
+            "db_size_mb": db_size_mb,
+            "media_backup": media_backup_path,
+            "kept_count": len(keep_files),
+            "deleted_old": deleted,
+        }
+        log_maintenance_run(
+            job_name="_backup_job",
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            success=True,
+            detail=detail,
+        )
+
 
 # ─── Module-level singleton (pattern giống _pipelines trong cv/pipeline.py) ───
 # FastAPI lifespan khởi động 1 instance duy nhất. Import đâu cũng được cùng
@@ -194,12 +267,14 @@ def get_worker() -> MaintenanceWorker | None:
 
 def start_maintenance_worker() -> MaintenanceWorker | None:
     """
-    Khởi động MaintenanceWorker (idempotent). Trả về None nếu CLEANUP_ENABLED=False
-    hoặc nếu CV lib không có (parallel với pipeline: nếu pipeline không start
-    được thì worker cũng không start — fail together)."""
+    Khởi động MaintenanceWorker (idempotent). Trả về None nếu cả CLEANUP_ENABLED
+    và BACKUP_ENABLED đều False (không có job nào để chạy — không cần thread).
+    Hoặc nếu CV lib không có (parallel với pipeline: nếu pipeline không start
+    được thì worker cũng không start — fail together).
+    """
     global _worker
-    if not CLEANUP_ENABLED:
-        print("[Maintenance] CLEANUP_ENABLED=False — skipping worker startup")
+    if not CLEANUP_ENABLED and not BACKUP_ENABLED:
+        print("[Maintenance] CLEANUP_ENABLED=False & BACKUP_ENABLED=False — skipping worker startup")
         return None
     if _worker is not None:
         return _worker

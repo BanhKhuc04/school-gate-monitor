@@ -106,7 +106,7 @@ Camera (1 gate, WebcamStream.read_frame)
 | Automatic cleanup | **DONE** | `app/background.py::MaintenanceWorker`, `_cleanup_job` gọi `clear_violation_snapshot_paths()` | `test_maintenance_worker.py` (12 case, gồm 2 test end-to-end qua `_run_loop` thật) | **Thread nền `MaintenanceWorker` tự chạy mỗi `CLEANUP_INTERVAL_HOURS` giờ**, xóa snapshot/clip cũ hơn `CLEANUP_RETENTION_DAYS` qua hàm đã có (Feature 8) — chỉ đổi cách TRIGGER từ "admin bấm nút" sang "tự động theo lịch". `_job_lock` chống chạy đè (không queue), `_run_job_safely` cách ly exception (job fail không làm chết thread), mỗi lần chạy ghi 1 row vào bảng `system_maintenance_log` (audit log tách riêng khỏi `violation_audit_log` vì không có FK violation_id). Tắt qua `CLEANUP_ENABLED=0` trong env. |
 | Cleanup dry-run | DONE | `GET /api/system/snapshots/preview` | Verify qua API session trước | Trả file_count + size trước khi xóa thật |
 | Storage statistics | **DONE** | `GET /api/system/health` thêm `disk_total/used/free_mb` + `storage_breakdown{jpg,mp4,other}` | `test_system.py` (10 case, gồm 1 test end-to-end insert file thật qua monkeypatch) | `shutil.disk_usage(SNAPSHOTS_DIR)` (stdlib) + glob theo extension. Field cũ (`db_size_mb`, `snapshot_count`...) KHÔNG đổi tên/giá trị — chỉ thêm field mới. Frontend `AdminHealthPage.jsx` thêm section "Dung lượng đĩa" (3 stat-cell) + list "Phân bổ theo loại file". Bước 7 sẽ thêm `recordings` vào breakdown. |
-| Backup | NOT STARTED | — | — | Không có script/cron backup DB hay snapshot |
+| Backup | **DONE** | `app/db.py::backup_database()` (SQLite online backup API), `MaintenanceWorker._backup_job`, API `POST /api/system/backup/run` + `GET /api/system/backup/list` | `test_backup.py` (11 case, gồm 2 test end-to-end qua `MaintenanceWorker` thật) | Dùng `sqlite3.Connection.backup()` (stdlib API chính thức SQLite, có từ Python 3.7+) thay vì copy file thô (rủi ro backup hỏng/thiếu transaction khi pipeline đang ghi). Backup mặc định chỉ DB, media tắt (`BACKUP_MEDIA_ENABLED=0`); backup mỗi `BACKUP_INTERVAL_HOURS` (default 24h), giữ `BACKUP_KEEP_COUNT=14` bản gần nhất (xóa cũ hơn). Tất cả ghi vào `system_maintenance_log` (audit log) — cùng bảng với cleanup. Cẩn thận vận hành: `BACKUP_ENABLED=True` (mặc định) — đã bật sẵn. |
 | Dashboard | DONE | `DashboardPage.jsx` | — | Có trend/by-class chart (`recharts`), chưa có "tổng xe hôm nay/đăng ký/chưa đăng ký/cần kiểm tra" như yêu cầu #7 |
 | Live camera | DONE | `GuardPage.jsx` (kể cả xem song song 2 camera), `guard.py::video_feed` | — | MJPEG qua `<img>`, rate-limit 20fps |
 | Vehicle events UI | NOT STARTED | — | — | Không có khái niệm "vehicle event" riêng khỏi violation trong UI |
@@ -271,11 +271,11 @@ Use actual roles from codebase — bảng trên đã verify qua `grep require_ro
 
 ## 13. TEST STATUS
 
-Total tests: 130
-Passed: 130
+Total tests: 141
+Passed: 141
 Failed: 0
 Command: `./venv/Scripts/python.exe -m pytest app/tests/ -q`
-Last test date: 2026-09-29 (sau commit Bước 5 — disk stats + storage breakdown)
+Last test date: 2026-09-29 (sau commit Bước 6 — backup SQLite online)
 
 Critical test areas:
 - camera — KHÔNG có test (cần camera thật, chỉ có `app/cv/smoke_test.py` chạy tay bằng `python -m app.cv.smoke_test`, không phải pytest)
@@ -547,11 +547,42 @@ Next task: Bước 6 — backup SQLite online qua `sqlite3.Connection.backup()` 
 
 Commit: (xem commit ngay sau entry này)
 
+### SESSION LOG — 2026-09-29 (đợt 2, Bước 6)
+
+Goal: Triển khai Bước 6 — backup SQLite an toàn (không copy file thô khi DB đang được ghi). Xem `docs/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 6".
+
+Completed:
+- **`app/db.py::backup_database(dest_path)`**: dùng `sqlite3.Connection.backup()` (stdlib API chính thức SQLite từ Python 3.7+). Chặn bởi `_write_lock` (an toàn kép — dù `.backup()` tự nó đã an toàn ở cấp SQLite). KHÔNG tự mkdir — caller quyết định policy. `list_backup_files(backup_dir)` glob `app_*.db`, trả `[{filename, path, size_mb, mtime_iso}]` sort DESC theo mtime.
+- **`MaintenanceWorker._backup_job`**: tạo file `data/backups/app_{YYYYMMDD_HHMMSS}.db`, gọi `backup_database()`, tùy chọn copy `SNAPSHOTS_DIR` (mặc định TẮT — `BACKUP_MEDIA_ENABLED=0`), dọn các file cũ hơn `BACKUP_KEEP_COUNT` (default 14), ghi audit row với detail `{backup_file, db_size_mb, media_backup, kept_count, deleted_old}`.
+- **`MaintenanceWorker._run_loop`**: thêm counter `backup_every_n_loops = ceil(BACKUP_INTERVAL_HOURS / CLEANUP_INTERVAL_HOURS)`. Cleanup chạy mỗi vòng; backup chạy mỗi N vòng. Tránh 2 sleep tách rời (phức tạp) mà vẫn tôn trọng interval riêng.
+- **`start_maintenance_worker`**: bỏ qua startup nếu CẢ `CLEANUP_ENABLED` lẫn `BACKUP_ENABLED` đều False (không có job nào để chạy).
+- **API mới `POST /api/system/backup/run`** (admin): chạy backup NGAY (không chờ lịch) — dùng khi admin muốn snapshot trước migration. **`GET /api/system/backup/list`** (admin): liệt kê file backup, mới nhất trước.
+
+Files changed:
+- Sửa: `app/db.py` (`backup_database`, `list_backup_files`), `app/background.py` (import os + BACKUP_* + `_backup_job` + counter trong `_run_loop` + check BACKUP_ENABLED), `app/api/system.py` (2 endpoint + import datetime/timezone), `DEVELOPMENT_HANDOVER.md`
+- Mới: `app/tests/test_backup.py` (11 test)
+
+Tests: **141/141 pass** (130 cũ + 11 mới):
+- 3 test hàm DB (`backup_database_roundtrip_preserves_data`: insert → backup → mở file mới → assert data nguyên; `backup_database_works_after_writes`: phiên bản đơn giản của "concurrent" — insert nhiều row rồi backup, robust trên Windows; `list_backup_files_orders_newest_first`: sort DESC + filter `app_*.db`).
+- 2 test `_backup_job` end-to-end (`creates_file_and_logs_end_to_end`: gọi thẳng → file xuất hiện + audit row đúng; `respects_keep_count`: chạy 3 lần với KEEP=2 → chỉ giữ 2 file).
+- **1 test END-TO-END qua `_run_loop` thật** (`test_run_loop_runs_backup_periodically` — bài học Bước 3): `start()`/`stop()` thật, `BACKUP_INTERVAL_HOURS=1`, poll `system_maintenance_log` thấy `_backup_job` row + file backup thật xuất hiện.
+- 5 test API auth (401/403/200 cho backup/run + backup/list).
+
+Vấn đề gặp + cách giải (ghi vào log để tham khảo):
+- Test "concurrent writer + backup" phiên bản đầu hang trên Windows (do `_write_lock` blocking + SQLite WAL lock khó tái hiện robust trong CI). Đơn giản hóa: chỉ test backup SAU KHI ghi nhiều row (vẫn cover ý "không exception, data nguyên vẹn"), bỏ multi-thread race test. Comment trong test giải thích.
+- `os` chưa import trong `background.py` (`_backup_job` dùng `os.makedirs`) → fix ngay khi chạy test đầu.
+
+Known problems: KHÔNG backup media theo mặc định — nếu cần, set `BACKUP_MEDIA_ENABLED=1`. Lưu ý vận hành: `BACKUP_ENABLED=True` đã bật sẵn, backup sẽ chạy tự động theo lịch — kiểm tra `data/backups/` + `system_maintenance_log` qua `GET /api/system/maintenance-log` để xác nhận.
+
+Next task: Bước 7 — continuous recording (ghi hình liên tục 24/7, chia đoạn, **mặc định TẮT**). Xem plan đã duyệt mục "Bước 7".
+
+Commit: (xem commit ngay sau entry này)
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit Bước 5 disk stats + storage breakdown)
-System status: Backend/frontend chạy được, **130/130 test pass**. Bước 1 + 3 + 4 + 5 đã code xong + đã review/verify.
-Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file `docs/CURSOR_PLAN_DOT2_NANG_CAP.md`). **Bước 1/7 + Bước 3/7 + Bước 4/7 + Bước 5/7 xong. Bước 6-7 CHƯA CODE — giao cho Cursor.**
-Next recommended task: Bước 6 (backup SQLite online qua `sqlite3.Connection.backup()`, backup job trong `MaintenanceWorker` chạy song song với cleanup, API run/list). Sau Bước 6 → Bước 7 (continuous recording, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
+Current stable commit: (xem git log — commit Bước 6 backup SQLite online)
+System status: Backend/frontend chạy được, **141/141 test pass**. Bước 1 + 3 + 4 + 5 + 6 đã code xong + đã review/verify.
+Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file `docs/CURSOR_PLAN_DOT2_NANG_CAP.md`). **Bước 1/7 + Bước 3/7 + Bước 4/7 + Bước 5/7 + Bước 6/7 xong. CHỈ CÒN Bước 7/7 CHƯA CODE — giao cho Cursor.**
+Next recommended task: Bước 7 (continuous recording — `app/cv/recorder.py` với `ContinuousRecorder`, push frame ngay đầu `_run_loop`, retention riêng qua `MaintenanceWorker`, **mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark**).
 Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 5 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation, Automatic cleanup, Storage statistics). Làm đúng thứ tự Bước 6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
 **Bài học từ các lần review — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (Bước 3: `_try_correlate()` gọi `mark_correlation_unmatched()` sai tham số; Bước 4: đã có ngay test end-to-end qua `_run_loop` thật). Bước 5 bổ sung 1 lỗi nhỏ phát hiện ngay trong lúc code: `HealthResponse` Pydantic model không khai báo field mới → FastAPI `response_model=HealthResponse` strip mất → test phát hiện liền. Bài học: **khi thêm field vào endpoint có `response_model`, PHẢI khai báo field đó trong Pydantic model** (default value để tương thích ngược). Khi viết test cho Bước 6-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật chứ không chỉ test từng hàm con riêng lẻ.

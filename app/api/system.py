@@ -10,6 +10,7 @@ from pydantic import BaseModel
 import os
 import glob
 import shutil
+from datetime import datetime, timezone
 
 from app.auth import get_current_user, require_role
 from app.db import (
@@ -17,9 +18,10 @@ from app.db import (
     get_old_violation_snapshot_paths,
     clear_violation_snapshot_paths,
     list_maintenance_log,
+    backup_database, list_backup_files,
     DB_PATH,
 )
-from app.config import SNAPSHOTS_DIR
+from app.config import SNAPSHOTS_DIR, BACKUP_DIR, BACKUP_KEEP_COUNT
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -295,3 +297,37 @@ def get_maintenance_log(
     Tái dùng pattern list đơn giản giống get_violation_audit_log.
     """
     return list_maintenance_log(limit=limit)
+
+
+# ─── Đợt 2, Bước 6: Backup SQLite online (admin) ─────────────────────────────
+
+class BackupRunResponse(BaseModel):
+    backup_file: str
+    db_size_mb: float
+
+
+@router.post("/backup/run", response_model=BackupRunResponse)
+def run_backup_now(
+    current_user: dict = Depends(require_role("admin")),
+):
+    """
+    POST /api/system/backup/run — chạy backup NGAY (không chờ lịch).
+    Dùng khi admin muốn snapshot DB trước khi thay đổi lớn (migration, sửa code...).
+    Tái dùng style route như cleanup preview/run đã có.
+    """
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(BACKUP_DIR, f"app_{ts}.db")
+    backup_database(dest)
+    size_mb = round(os.path.getsize(dest) / (1024 * 1024), 2)
+    return {"backup_file": os.path.basename(dest), "db_size_mb": size_mb}
+
+
+@router.get("/backup/list")
+def list_backups(
+    current_user: dict = Depends(require_role("admin")),
+):
+    """
+    GET /api/system/backup/list — liệt kê file backup, mới nhất trước.
+    """
+    return list_backup_files(BACKUP_DIR)
