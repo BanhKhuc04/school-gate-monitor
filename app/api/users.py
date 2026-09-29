@@ -25,11 +25,13 @@ class UserCreate(BaseModel):
     username: str
     password: str
     role: str
+    homeroom_class: str | None = None
 
 
 class UserUpdate(BaseModel):
     role: str | None = None
     password: str | None = None
+    homeroom_class: str | None = None
 
 
 @router.get("")
@@ -47,11 +49,13 @@ def create_user_json(
     POST /api/users — create a new user (admin only).
     Raises 409 if username already exists.
     """
-    if body.role not in ("admin", "security", "management"):
-        raise HTTPException(status_code=422, detail="role must be one of: admin, security, management")
+    if body.role not in ("admin", "security", "management", "teacher"):
+        raise HTTPException(status_code=422, detail="role must be one of: admin, security, management, teacher")
+    if body.role == "teacher" and not body.homeroom_class:
+        raise HTTPException(status_code=422, detail="homeroom_class is required for teacher role")
     try:
         pw_hash = hash_password(body.password)
-        user_id = db_create_user(body.username, pw_hash, body.role)
+        user_id = db_create_user(body.username, pw_hash, body.role, body.homeroom_class)
         return get_user_by_id(user_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -82,14 +86,21 @@ def update_user_json(
     # Build update kwargs
     kwargs = {}
     if body.role is not None:
-        if body.role not in ("admin", "security", "management"):
+        if body.role not in ("admin", "security", "management", "teacher"):
             raise HTTPException(
                 status_code=422,
-                detail="role must be one of: admin, security, management",
+                detail="role must be one of: admin, security, management, teacher",
+            )
+        if body.role == "teacher" and not body.homeroom_class:
+            raise HTTPException(
+                status_code=422,
+                detail="homeroom_class is required for teacher role",
             )
         kwargs["role"] = body.role
     if body.password:
         kwargs["password_hash"] = hash_password(body.password)
+    if body.homeroom_class is not None:
+        kwargs["homeroom_class"] = body.homeroom_class
 
     success = update_user(user_id, **kwargs)
     if not success:

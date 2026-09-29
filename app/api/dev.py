@@ -4,7 +4,6 @@ Must be secured or removed before production deployment.
 """
 from datetime import datetime
 from fastapi import APIRouter, Depends
-from app.cv.pipeline import get_pipeline
 from app.auth import require_role
 
 router = APIRouter(prefix="/api/dev", tags=["dev"])
@@ -26,6 +25,7 @@ def trigger_test_alert(
     the real camera last triggered an alert.
     """
     try:
+        from app.cv.pipeline import get_pipeline
         pipeline = get_pipeline()
         alert = {
             "type": "violation",

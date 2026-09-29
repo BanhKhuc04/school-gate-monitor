@@ -11,12 +11,25 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 
 
+class _SyncPool:
+    """Test stand-in for ThreadPoolExecutor — runs submitted work inline so
+    assertions right after _process_violations() see its effects deterministically."""
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+        return MagicMock()
+
+
 def _make_pipeline():
     from app.cv.pipeline import VideoPipeline
     pipeline = VideoPipeline.__new__(VideoPipeline)
     pipeline._last_log_time = {}
     pipeline._last_alert_time = 0.0
     pipeline._alert_queue = MagicMock()
+    pipeline._io_pool = _SyncPool()
+    pipeline._plate_ocr_cache = {}
+    pipeline._clip_buffer = []
+    pipeline._plate_attempts = 0
+    pipeline._plate_successes = 0
     return pipeline
 
 
@@ -49,14 +62,14 @@ def test_motorcycle_is_unaffected_by_gate():
          patch("app.cv.pipeline.cv2.imwrite", return_value=True), \
          patch("os.makedirs"):
         pipeline._process_violations(_frame(), helmet_dets=[], plate_dets=[], vehicle_type="motorcycle")
-    # No plate_dets at all → pre-existing behavior (unchanged by the gate) is PLATE_UNREADABLE.
+    # No plate_dets at all → NO_PLATE (Feature 1: split from PLATE_UNREADABLE).
     mock_add.assert_called_once()
-    assert mock_add.call_args.kwargs["violation_type"] == "PLATE_UNREADABLE"
+    assert mock_add.call_args.kwargs["violation_type"] == "NO_PLATE"
 
 
 def test_walking_bike_bare_head_is_not_no_helmet():
     """Dắt xe (đứng, posture 'standing'), đầu trần: không bắt buộc đội mũ khi không lái —
-    chỉ bắt PLATE_UNREADABLE (không có plate_dets), không được có NO_HELMET."""
+    chỉ bắt NO_PLATE (không có plate_dets), không được có NO_HELMET."""
     pipeline = _make_pipeline()
     helmet_dets = [MagicMock(class_name="Without Helmet")]
     with patch("app.cv.pipeline.add_violation_event", return_value=1) as mock_add, \
@@ -67,7 +80,7 @@ def test_walking_bike_bare_head_is_not_no_helmet():
             posture_status="standing", vehicle_type="motorcycle",
         )
     mock_add.assert_called_once()
-    assert mock_add.call_args.kwargs["violation_type"] == "PLATE_UNREADABLE"
+    assert mock_add.call_args.kwargs["violation_type"] == "NO_PLATE"
 
 
 def test_riding_bare_head_is_still_flagged():

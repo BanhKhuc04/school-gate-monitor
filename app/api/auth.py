@@ -41,12 +41,13 @@ def login(body: LoginRequest):
             detail="Invalid username or password"
         )
 
-    token = create_access_token(user["username"], user["role"])
+    token = create_access_token(user["username"], user["role"], user.get("homeroom_class"))
     return {
         "access_token": token,
         "token_type": "bearer",
         "username": user["username"],
         "role": user["role"],
+        "homeroom_class": user.get("homeroom_class"),
     }
 
 
@@ -56,4 +57,8 @@ def get_me(current_user: dict = Depends(get_current_user)):
     Return the currently authenticated user's info.
     Requires Authorization: Bearer <token> header.
     """
-    return {"username": current_user["username"], "role": current_user["role"]}
+    return {
+        "username": current_user["username"],
+        "role": current_user["role"],
+        "homeroom_class": current_user.get("homeroom_class"),
+    }

@@ -7,6 +7,7 @@ import AdminViolationsPage from './pages/AdminViolationsPage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import AdminHealthPage from './pages/AdminHealthPage';
 import DashboardPage from './pages/DashboardPage';
+import StudentViolationHistoryPage from './pages/StudentViolationHistoryPage';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
 
@@ -21,7 +22,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
-      {/* Authenticated routes wrapped in Layout + RequireRole */}
+      {/* Guard — security + admin */}
       <Route
         element={
           <RequireRole allow={['security', 'admin']}>
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="/guard" element={null} />
       </Route>
 
+      {/* Admin-only routes */}
       <Route
         element={
           <RequireRole allow={['admin']}>
@@ -94,6 +96,43 @@ function AppRoutes() {
         <Route path="/admin/health" element={null} />
       </Route>
 
+      {/* Feature 9: Teacher routes — reuse admin pages with server-side scope filtering */}
+      <Route
+        element={
+          <RequireRole allow={['teacher']}>
+            <Layout>
+              <AdminViolationsPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/teacher/violations" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['teacher']}>
+            <Layout>
+              <AdminVehiclesPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/teacher/vehicles" element={null} />
+      </Route>
+
+      {/* Feature 2+6: Student violation history */}
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <StudentViolationHistoryPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/students/:vehicleId/violations" element={null} />
+      </Route>
 
       {/* Default redirect */}
       <Route

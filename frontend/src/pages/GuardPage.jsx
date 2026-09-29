@@ -11,12 +11,14 @@ export default function GuardPage() {
   const [health, setHealth] = useState(null);
   const [alertLog, setAlertLog] = useState([]);
   const [activeGate, setActiveGate] = useState('main');
+  const [viewMode, setViewMode] = useState('single'); // 'single' | 'split'
   const idCounter = useRef(0);
 
   // gates from API; null = chưa load (hoặc health = null); array = đã load
   const gates = health?.gates ?? null;
   const showGateSelector = gates !== null && gates.length > 1;
   const activeGateName = gates?.find(g => g.id === activeGate)?.name ?? 'Cổng Chính';
+  const isSplit = showGateSelector && viewMode === 'split';
 
   // Độ trễ khung hình hiển thị trên video panel — cùng API health mà trang admin dùng.
   useEffect(() => {
@@ -47,7 +49,7 @@ export default function GuardPage() {
         {/* Video panel */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-            {showGateSelector ? (
+            {showGateSelector && !isSplit ? (
               <select
                 value={activeGate}
                 onChange={e => setActiveGate(e.target.value)}
@@ -58,29 +60,73 @@ export default function GuardPage() {
                 ))}
               </select>
             ) : (
-              <h1 className="text-lg font-bold">{activeGateName}</h1>
+              <h1 className="text-lg font-bold">{isSplit ? 'Tất cả camera' : activeGateName}</h1>
             )}
-            <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
-              CAM_01
-            </span>
-          </div>
-          <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[11px] font-bold">
-              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              LIVE
-            </div>
-            {health?.pipeline?.last_frame_age_sec != null && (
-              <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">
-                Độ trễ khung hình: {health.pipeline.last_frame_age_sec.toFixed(1)}s
+            {!isSplit && (
+              <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
+                CAM_01
+              </span>
+            )}
+            {showGateSelector && (
+              <div className="ml-auto flex items-center rounded-lg border border-white/30 overflow-hidden text-[11px] font-mono">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('single')}
+                  className={`px-2.5 py-1 ${viewMode === 'single' ? 'bg-primary-container text-on-primary-container' : 'text-inverse-on-surface/70'}`}
+                >
+                  1 cổng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('split')}
+                  className={`px-2.5 py-1 ${viewMode === 'split' ? 'bg-primary-container text-on-primary-container' : 'text-inverse-on-surface/70'}`}
+                >
+                  Song song
+                </button>
               </div>
             )}
-            <img
-              src={`${API_BASE_URL}/guard/video_feed?token=${token}&gate=${activeGate}`}
-              alt="Live camera feed"
-              className="w-full h-auto block"
-              style={{ maxHeight: 'calc(100vh - 220px)', objectFit: 'contain' }}
-            />
           </div>
+
+          {isSplit ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {gates.map(g => (
+                <div key={g.id} className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
+                  <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[10px] font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    LIVE
+                  </div>
+                  <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[10px]">
+                    {g.name}
+                    {g.pipeline?.last_frame_age_sec != null && ` · ${g.pipeline.last_frame_age_sec.toFixed(1)}s`}
+                  </div>
+                  <img
+                    src={`${API_BASE_URL}/guard/video_feed?token=${token}&gate=${g.id}`}
+                    alt={`Live camera feed — ${g.name}`}
+                    className="w-full h-auto block"
+                    style={{ maxHeight: 'calc(100vh - 260px)', objectFit: 'contain' }}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
+              <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[11px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                LIVE
+              </div>
+              {health?.pipeline?.last_frame_age_sec != null && (
+                <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">
+                  Độ trễ khung hình: {health.pipeline.last_frame_age_sec.toFixed(1)}s
+                </div>
+              )}
+              <img
+                src={`${API_BASE_URL}/guard/video_feed?token=${token}&gate=${activeGate}`}
+                alt="Live camera feed"
+                className="w-full h-auto block"
+                style={{ maxHeight: 'calc(100vh - 220px)', objectFit: 'contain' }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Alert log panel */}

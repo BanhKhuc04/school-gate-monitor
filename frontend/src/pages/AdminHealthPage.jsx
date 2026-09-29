@@ -11,12 +11,29 @@ function StatusDot({ ok, label }) {
   );
 }
 
+function StatCell({ label, value, unit, color = 'text-[#374151]' }) {
+  return (
+    <div className="bg-[#f4f6f9] rounded-xl p-4 text-center">
+      <div className={`text-2xl font-bold font-mono ${color}`}>{value ?? '—'}</div>
+      <div className="text-[10px] font-mono text-[#6b7280] mt-1">{label}</div>
+      {unit && <div className="text-[10px] font-mono text-[#9ca3af]">{unit}</div>}
+    </div>
+  );
+}
+
 export default function AdminHealthPage() {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [cleanupMsg, setCleanupMsg] = useState('');
   const [cleaning, setCleaning] = useState(false);
+  const [previewDays, setPreviewDays] = useState('');
+  const [previewData, setPreviewData] = useState(null);
+
+  // Legacy top-level alias (backend still sends health.pipeline = main gate's status)
+  // used for the header dot + stale-camera banner, which summarize across all gates.
+  const p = health?.pipeline || {};
+  const cameraStale = p.last_frame_age_sec != null && p.last_frame_age_sec > 5;
 
   async function loadHealth() {
     try {
@@ -37,9 +54,9 @@ export default function AdminHealthPage() {
   }, []);
 
   async function handleCleanup(days) {
-    if (!confirm(`Xóa ảnh vi phạm cũ hơn ${days} ngày?`)) return;
     setCleaning(true);
     setCleanupMsg('');
+    setPreviewData(null);
     try {
       const res = await client.post(`/api/system/snapshots/cleanup?older_than_days=${days}`);
       setCleanupMsg(`Đã xóa ${res.data.deleted_files} file, cập nhật ${res.data.updated_records} record.`);
@@ -48,6 +65,17 @@ export default function AdminHealthPage() {
       setCleanupMsg('Lỗi: ' + (err.response?.data?.detail || err.message));
     } finally {
       setCleaning(false);
+    }
+  }
+
+  async function handlePreview() {
+    const days = parseInt(previewDays, 10);
+    if (!days || days < 1 || days > 3650) return;
+    try {
+      const res = await client.get(`/api/system/snapshots/preview?older_than_days=${days}`);
+      setPreviewData(res.data);
+    } catch (err) {
+      setPreviewData({ error: err.response?.data?.detail || err.message });
     }
   }
 
@@ -61,9 +89,6 @@ export default function AdminHealthPage() {
       </div>
     );
   }
-
-  const p = health?.pipeline || {};
-  const cameraStale = p.last_frame_age_sec !== null && p.last_frame_age_sec > 5;
 
   return (
     <div className="min-h-screen bg-[#ffffff] p-6">
@@ -91,39 +116,54 @@ export default function AdminHealthPage() {
         )}
 
         {/* Pipeline Status */}
-        <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider flex items-center gap-2">
-              <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
-                <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              Pipeline
-            </h2>
-            <span className="font-mono text-[10px] text-[#6b7280]">CAM_01 · CỔNG CHÍNH</span>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <StatusDot ok={p.running} label={`Pipeline: ${p.running ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`} />
-            <StatusDot ok={p.thread_alive} label={`Thread: ${p.thread_alive ? 'Alive' : 'Dead'}`} />
-            <StatusDot ok={p.camera_open} label={`Camera: ${p.camera_open ? 'Mở' : 'Đóng'}`} />
-            <StatusDot ok={p.last_frame_age_sec !== null && !cameraStale}
-              label={`Frame: ${p.last_frame_age_sec !== null ? `${p.last_frame_age_sec}s` : 'N/A'}`} />
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] font-mono text-[#6b7280]">
-                Detect: {p.last_detection_age_sec !== null ? `${p.last_detection_age_sec}s` : 'N/A'}
-              </span>
+        {health?.gates?.map((gate) => {
+          const gp = gate.pipeline || {};
+          const cameraStale = gp.last_frame_age_sec !== null && gp.last_frame_age_sec > 5;
+          return (
+            <div key={gate.id} className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider flex items-center gap-2">
+                  <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
+                    <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Pipeline · {gate.name}
+                </h2>
+                <span className="font-mono text-[10px] text-[#6b7280]">{gate.id.toUpperCase()}</span>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                <StatCell label="FPS" value={gp.fps != null ? gp.fps.toFixed(1) : '—'} unit="fps" />
+                <StatCell label="Độ trễ xử lý" value={gp.avg_process_latency_ms != null ? gp.avg_process_latency_ms : '—'} unit="ms" color="text-[#f59e0b]" />
+                <StatCell
+                  label="Tỉ lệ đọc biển số"
+                  value={gp.plate_read_success_rate != null ? (gp.plate_read_success_rate * 100).toFixed(0) : '—'}
+                  unit={gp.plate_read_success_rate != null ? '%' : 'chưa có dữ liệu'}
+                  color="text-[#10b981]"
+                />
+                <div className="bg-[#f4f6f9] rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold font-mono text-[#374151]">{gp.frame_count ?? 0}</div>
+                  <div className="text-[10px] font-mono text-[#6b7280] mt-1">Tổng frames</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <StatusDot ok={gp.running} label={`Pipeline: ${gp.running ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`} />
+                <StatusDot ok={gp.thread_alive} label={`Thread: ${gp.thread_alive ? 'Alive' : 'Dead'}`} />
+                <StatusDot ok={gp.camera_open} label={`Camera: ${gp.camera_open ? 'Mở' : 'Đóng'}`} />
+                <StatusDot ok={gp.last_frame_age_sec !== null && !cameraStale}
+                  label={`Frame: ${gp.last_frame_age_sec !== null ? `${gp.last_frame_age_sec}s` : 'N/A'}`} />
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-mono text-[#6b7280]">
+                    Detect: {gp.last_detection_age_sec !== null ? `${gp.last_detection_age_sec}s` : 'N/A'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-mono text-[#6b7280]">
+                    Uptime: {gp.uptime_sec !== null ? `${Math.round(gp.uptime_sec / 60)} phút` : 'N/A'}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] font-mono text-[#6b7280]">
-                Frames: {p.frame_count ?? 0}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] font-mono text-[#6b7280]">
-                Uptime: {p.uptime_sec !== null ? `${Math.round(p.uptime_sec / 60)} phút` : 'N/A'}
-              </span>
-            </div>
-          </div>
-        </div>
+          );
+        })}
 
         {/* Storage Stats */}
         <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
@@ -159,17 +199,58 @@ export default function AdminHealthPage() {
             Dọn ảnh cũ
           </h2>
           <p className="text-[12px] text-[#6b7280] mb-4">
-            Xóa file ảnh vi phạm cũ để giải phóng dung lượng. Record vi phạm vẫn giữ lại, chỉ null đường dẫn ảnh.
+            Xóa file ảnh/video vi phạm cũ để giải phóng dung lượng. Record vi phạm vẫn giữ lại, chỉ null đường dẫn ảnh/video.
           </p>
+
+          {/* Preview input */}
+          <div className="flex items-center gap-3 mb-4">
+            <input
+              type="number"
+              min="1"
+              max="3650"
+              placeholder="Số ngày tùy chỉnh"
+              className="w-40 bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] font-mono text-[#374151] border-0 outline-none"
+              value={previewDays}
+              onChange={e => setPreviewDays(e.target.value)}
+            />
+            <button
+              onClick={handlePreview}
+              className="flex items-center gap-1.5 bg-[#123b6d] hover:bg-[#0d2a4f] text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
+            >
+              Xem trước
+            </button>
+          </div>
+
+          {/* Preview result */}
+          {previewData && !previewData.error && (
+            <div className="bg-[#fef3c7] border border-[#fcd34d] rounded-lg p-4 mb-4">
+              <p className="text-[12px] font-mono text-[#92400e]">
+                Ảnh: <strong>{previewData.snapshot_count}</strong> file ({previewData.snapshot_count * 0.1 > 1 ? `${(previewData.snapshot_count * 0.1).toFixed(1)}` : '&lt;1'} MB est.)
+                · Clip video: <strong>{previewData.clip_count}</strong> file
+              </p>
+              <p className="text-[12px] font-mono text-[#92400e] mt-1">
+                Tổng cộng: <strong>{previewData.file_count}</strong> file · <strong>{previewData.total_size_mb}</strong> MB
+              </p>
+              <button
+                onClick={() => { handleCleanup(parseInt(previewDays, 10)); setPreviewData(null); }}
+                disabled={cleaning}
+                className="mt-2 bg-[#c92035] hover:bg-[#a0172b] disabled:opacity-50 text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
+              >
+                {cleaning ? 'Đang xóa...' : 'Xác nhận xóa'}
+              </button>
+            </div>
+          )}
+          {previewData?.error && (
+            <p className="text-[12px] font-mono text-[#c92035] mb-4">{previewData.error}</p>
+          )}
+
+          {/* Preset buttons */}
           <div className="flex flex-wrap gap-3">
             <button
               onClick={() => handleCleanup(30)}
               disabled={cleaning}
               className="flex items-center gap-1.5 bg-[#f4f6f9] hover:bg-[#eceff3] text-[#374151] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
             >
-              <svg className="w-4 h-4 text-[#c92035]" viewBox="0 0 24 24" fill="none">
-                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
               &gt;30 ngày
             </button>
             <button
@@ -177,9 +258,6 @@ export default function AdminHealthPage() {
               disabled={cleaning}
               className="flex items-center gap-1.5 bg-[#fde68a] hover:bg-[#f59e0b] hover:text-white text-[#92400e] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
               &gt;90 ngày
             </button>
             <button
@@ -187,9 +265,6 @@ export default function AdminHealthPage() {
               disabled={cleaning}
               className="flex items-center gap-1.5 bg-[#f8d7dc] hover:bg-[#c92035] hover:text-white text-[#7a1422] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
               &gt;180 ngày
             </button>
           </div>

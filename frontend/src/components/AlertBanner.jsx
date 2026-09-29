@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
+import { speakVietnamese, warmUpVoices } from '../utils/speak';
+import { getAlertPriority } from '../utils/alertPriority';
 
 /**
  * AlertBanner — connects to /guard/ws WebSocket and shows a red banner
@@ -17,8 +19,11 @@ import { API_BASE_URL } from '../api/client';
 const ALERT_SOUNDS = {
   NO_HELMET: { freq: 600, beeps: 1, beepDuration: 0.3, gap: 0.1 },
   PLATE_NOT_REGISTERED: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
+  NO_PLATE: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },       // medium priority
+  PLATE_OBSCURED: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },  // medium priority
   PLATE_UNREADABLE: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
   RIDING_THROUGH_GATE: { freq: 500, beeps: 3, beepDuration: 0.15, gap: 0.1 },
+  TOO_MANY_RIDERS: { freq: 450, beeps: 4, beepDuration: 0.12, gap: 0.08 },
   MULTIPLE: { freq: 700, beeps: 2, beepDuration: 0.2, gap: 0.1 },
   default: { freq: 800, beeps: 1, beepDuration: 0.2, gap: 0.1 },
 };
@@ -31,10 +36,16 @@ function buildSpeechText(data) {
       return `Cảnh báo: ${plateText} chưa đội mũ bảo hiểm`;
     case 'PLATE_NOT_REGISTERED':
       return `Cảnh báo: ${plateText} chưa đăng ký`;
+    case 'NO_PLATE':
+      return `Cảnh báo: phát hiện xe không có biển số`;
+    case 'PLATE_OBSCURED':
+      return `Cảnh báo: biển số xe bị che hoặc mờ, không đọc được`;
     case 'PLATE_UNREADABLE':
       return 'Cảnh báo: không đọc được biển số xe';
     case 'RIDING_THROUGH_GATE':
       return `Cảnh báo: ${plateText} đang chạy xe qua cổng, vui lòng dắt xe`;
+    case 'TOO_MANY_RIDERS':
+      return `Cảnh báo: ${plateText} chở quá số người quy định`;
     case 'MULTIPLE':
       return `Cảnh báo: ${plateText} vi phạm nhiều lỗi`;
     default:
@@ -46,15 +57,14 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [snapshotUrl, setSnapshotUrl] = useState(null);
+  const [bannerBg, setBannerBg] = useState('#c92035');
   const timeoutRef = useRef(null);
   const wsRef = useRef(null);
   const onAlertRef = useRef(onAlert);
   onAlertRef.current = onAlert;
 
   useEffect(() => {
-    // Chrome nạp danh sách giọng đọc bất đồng bộ — gọi sớm 1 lần để giọng nữ
-    // tiếng Việt kịp có mặt trước khi cảnh báo đầu tiên cần đọc.
-    window.speechSynthesis?.getVoices();
+    warmUpVoices();
   }, []);
 
   useEffect(() => {
@@ -89,43 +99,23 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
       return Math.round((sound.beeps * (sound.beepDuration + sound.gap)) * 1000);
     }
 
-    // Tên giọng nữ tiếng Việt phổ biến theo hệ điều hành/trình duyệt (Windows,
-    // Google, Edge). Không có tên khớp nào → tự động rơi về giọng vi-VN đầu tiên
-    // (tốt hơn để trình duyệt tự chọn, vì không phải giọng nào cũng khai tên).
-    const FEMALE_VOICE_HINTS = ['hoaimy', 'nữ', 'female', 'linh', 'mai', 'huyền'];
-
-    function pickVietnameseFemaleVoice() {
-      const voices = window.speechSynthesis.getVoices();
-      const viVoices = voices.filter((v) => v.lang?.toLowerCase().startsWith('vi'));
-      const female = viVoices.find((v) =>
-        FEMALE_VOICE_HINTS.some((hint) => v.name.toLowerCase().includes(hint))
-      );
-      return female || viVoices[0] || null;
-    }
-
-    function speak(text) {
-      try {
-        if (!window.speechSynthesis) return;
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'vi-VN';
-        const voice = pickVietnameseFemaleVoice();
-        if (voice) utterance.voice = voice;
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        console.warn('[AlertBanner] TTS blocked:', e.message);
-      }
-    }
-
     function handleAlert(data) {
+      const priority = getAlertPriority(data.violation_type);
       setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
       setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
+      // Feature 3: banner color based on priority
+      setBannerBg(priority === 'high' ? '#c92035' : '#f59e0b');
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => setVisible(false), 3000);
 
       // Beep trước để bảo vệ chú ý ngay, TTS đọc nội dung ngay sau đó.
       const beepDurationMs = playAlertSound(data.violation_type || 'default');
-      setTimeout(() => speak(buildSpeechText(data)), beepDurationMs + 50);
+      // Feature 3: priority-based TTS rate/pitch
+      const ttsOptions = priority === 'high'
+        ? { rate: 1.15, pitch: 1.1 }
+        : {};
+      setTimeout(() => speakVietnamese(buildSpeechText(data), ttsOptions), beepDurationMs + 50);
 
       onAlertRef.current?.(data);
     }
@@ -174,7 +164,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
       style={{
         position: 'fixed',
         top: 0, left: 0, right: 0,
-        backgroundColor: '#c92035',
+        backgroundColor: bannerBg,
         color: 'white',
         padding: '15px 20px',
         textAlign: 'center',

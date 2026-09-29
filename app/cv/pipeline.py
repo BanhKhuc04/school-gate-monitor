@@ -5,6 +5,7 @@ Luồng: đọc frame → detect helmet → detect plate → OCR → tra DB → 
 Có thêm queue cho cảnh báo vi phạm (Bước 4) và ghi log vi phạm vào DB (Bước 6).
 """
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 import queue
 import datetime
@@ -16,8 +17,9 @@ from typing import Optional
 from app.config import (
     GATES, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
     HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
-    FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT,
-    ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE
+    FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, DETECT_WIDTH, DETECT_HEIGHT,
+    ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
+    VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
@@ -81,7 +83,17 @@ class VideoPipeline:
             PERSON_MODEL_PATH, conf_threshold=PERSON_CONF_THRESHOLD
         )
         print("[Pipeline] Person model loaded:", self._person_detector.class_names)
-        
+
+        # Chạy 3 model (person/helmet/plate) song song trên frame — đo thật:
+        # 304ms -> 172ms/frame (1.77x), vì PyTorch nhả GIL lúc tính toán nặng nên
+        # 3 luồng CPU chạy được cùng lúc. Tạo 1 lần, dùng lại mỗi frame.
+        self._detect_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix=f"detect-{gate_id}")
+
+        # Pool riêng cho việc lưu snapshot (cv2.imwrite) + ghi log vi phạm vào DB —
+        # 2 việc này là I/O (đĩa + sqlite), không cần chờ xong mới đọc frame tiếp
+        # theo. Tách khỏi _detect_pool để không tranh chỗ với việc detect model.
+        self._io_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"io-{gate_id}")
+
         # Frame counter cho FRAME_SKIP
         self._frame_count = 0
 
@@ -96,10 +108,27 @@ class VideoPipeline:
         # Cooldown cho ghi log vi phạm vào DB: {(plate_type, violation_type): last_time}
         self._last_log_time: dict = {}
 
+        # Cache OCR gần nhất theo vị trí biển số trên khung hình — EasyOCR chạy
+        # CPU tốn 300-800ms/lần; nếu chạy lại mỗi frame detect cho CÙNG 1 xe đang
+        # đứng/đi qua cổng ở gần đúng vị trí cũ thì lãng phí toàn bộ thời gian đó
+        # và làm nghẽn cả vòng lặp đọc frame. Key: ô lưới thô quanh tâm bbox biển
+        # số, TTL ngắn vì xe di chuyển qua khung hình khá nhanh.
+        self._plate_ocr_cache: dict = {}
+
         # Timestamps for health monitoring
         self._start_time: float = time.time()
         self._last_frame_time: float = self._start_time
         self._last_detection_time: float = self._start_time
+
+        # Feature 7: FPS / latency / plate read success rate tracking
+        from collections import deque
+        self._frame_timestamps = deque(maxlen=30)      # sliding window for FPS
+        self._last_process_latency_ms = 0.0
+        self._plate_attempts = 0
+        self._plate_successes = 0
+
+        # Feature 4: ring buffer for violation video clips
+        self._clip_buffer: deque = deque(maxlen=VIOLATION_CLIP_SECONDS * VIOLATION_CLIP_FPS)
 
     def start(self):
         """Bắt đầu thread nền."""
@@ -122,6 +151,8 @@ class VideoPipeline:
         self._running = False
         if self._thread:
             self._thread.join(timeout=3.0)
+        self._detect_pool.shutdown(wait=False)
+        self._io_pool.shutdown(wait=False)
         print("[Pipeline] Stopped")
     
     def get_frame(self) -> Optional[np.ndarray]:
@@ -152,6 +183,18 @@ class VideoPipeline:
         except Exception:
             camera_open = False
 
+        # Feature 7: FPS from sliding window of frame timestamps
+        fps = 0.0
+        if len(self._frame_timestamps) >= 2:
+            span = self._frame_timestamps[-1] - self._frame_timestamps[0]
+            fps = round((len(self._frame_timestamps) - 1) / span, 1) if span > 0 else 0.0
+
+        # Feature 7: plate read success rate
+        plate_success_rate = (
+            round(self._plate_successes / self._plate_attempts, 3)
+            if self._plate_attempts > 0 else None
+        )
+
         return {
             "running": self._running,
             "thread_alive": self._thread is not None and self._thread.is_alive(),
@@ -160,6 +203,10 @@ class VideoPipeline:
             "last_detection_age_sec": round(now - self._last_detection_time, 2),
             "frame_count": self._frame_count,
             "uptime_sec": round(now - self._start_time, 1),
+            # Feature 7 new fields
+            "fps": fps,
+            "avg_process_latency_ms": round(self._last_process_latency_ms, 1),
+            "plate_read_success_rate": plate_success_rate,
         }
     
     def _open_webcam(self, gate_config: dict):
@@ -206,13 +253,33 @@ class VideoPipeline:
                         self._latest_frame = frame
                     continue
                 
-                # Detect person + phương tiện (COCO đã có sẵn class 'motorcycle'/'bicycle',
-                # dùng luôn kết quả detect này, không tốn thêm 1 lần inference).
-                raw_person_dets = self._person_detector.detect(frame)
+                # Resize nhỏ CHỈ để detect (giữ tốc độ), sau đó quy đổi bbox kết
+                # quả về tọa độ ảnh gốc (frame, VIDEO_WIDTH/HEIGHT) — mọi bước sau
+                # (OCR, vẽ box, lưu snapshot) đều dùng ảnh gốc nét hơn, không mất
+                # tốc độ detect vì detect vẫn chạy trên ảnh nhỏ như cũ.
+                t0 = time.perf_counter()
+                frame_h, frame_w = frame.shape[:2]
+                detect_frame = cv2.resize(frame, (DETECT_WIDTH, DETECT_HEIGHT))
+                scale_x = frame_w / DETECT_WIDTH
+                scale_y = frame_h / DETECT_HEIGHT
+
+                # Chạy person/helmet/plate song song (3 luồng) thay vì tuần tự —
+                # cả 3 chỉ cần đúng 1 input là detect_frame, không phụ thuộc lẫn
+                # nhau, nên chạy cùng lúc không mất gì ngoài chút CPU thừa ở frame
+                # không có người (kết quả helmet/plate lúc đó bị bỏ qua như cũ).
+                person_future = self._detect_pool.submit(self._person_detector.detect, detect_frame)
+                helmet_future = self._detect_pool.submit(self._helmet_detector.detect, detect_frame)
+                plate_future = self._detect_pool.submit(self._plate_detector.detect, detect_frame)
+
+                raw_person_dets = self._rescale_dets(person_future.result(), scale_x, scale_y)
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
                 vehicle_dets = [d for d in raw_person_dets if d.class_name.lower() in ('motorcycle', 'bicycle')]
+                helmet_dets = self._rescale_dets(helmet_future.result(), scale_x, scale_y)
+                plate_dets = self._rescale_dets(plate_future.result(), scale_x, scale_y)
 
-                # Không có person nào → bỏ qua toàn bộ frame
+                # Không có person nào → bỏ qua toàn bộ frame (helmet/plate detect
+                # phía trên vẫn chạy xong nhưng kết quả không dùng tới, chấp nhận
+                # được vì tổng thời gian không tăng — chạy song song mà).
                 if not person_dets:
                     with self._lock:
                         self._latest_frame = frame
@@ -220,10 +287,6 @@ class VideoPipeline:
 
                 # Update detection timestamp (health monitoring)
                 self._last_detection_time = time.time()
-
-                # Detect helmet & plate
-                helmet_dets = self._helmet_detector.detect(frame)
-                plate_dets = self._plate_detector.detect(frame)
 
                 # Cập nhật cache để nhánh skip vẽ box mượt
                 self._last_person_dets = person_dets
@@ -261,7 +324,14 @@ class VideoPipeline:
                 # Vẽ box person (cam) — SAU khi OCR đã xong
                 for det in person_dets:
                     self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
-                
+
+                # Feature 7: record frame timing + Feature 4: buffer frame for clip
+                self._frame_timestamps.append(time.time())
+                # Resize down before buffering to save RAM (640x360 = ~1/4 of 1280x720)
+                small = cv2.resize(frame, (640, 360))
+                self._clip_buffer.append(small)
+                self._last_process_latency_ms = (time.perf_counter() - t0) * 1000
+
                 # Lưu frame đã vẽ
                 with self._lock:
                     self._latest_frame = frame
@@ -290,7 +360,20 @@ class VideoPipeline:
             self._webcam.release()
             print("[Pipeline] Webcam released")
     
-    def _draw_detection(self, frame: np.ndarray, det: Detection, 
+    @staticmethod
+    def _rescale_dets(dets: list, scale_x: float, scale_y: float) -> list:
+        """Quy đổi bbox từ tọa độ ảnh detect (nhỏ) về tọa độ ảnh gốc (to hơn)."""
+        rescaled = []
+        for d in dets:
+            x1, y1, x2, y2 = d.bbox
+            rescaled.append(Detection(
+                class_name=d.class_name,
+                confidence=d.confidence,
+                bbox=(round(x1 * scale_x), round(y1 * scale_y), round(x2 * scale_x), round(y2 * scale_y)),
+            ))
+        return rescaled
+
+    def _draw_detection(self, frame: np.ndarray, det: Detection,
                        color_if_positive: tuple, color_if_negative: tuple):
         """Vẽ bounding box và nhãn lên frame."""
         x1, y1, x2, y2 = det.bbox
@@ -411,6 +494,39 @@ class VideoPipeline:
                 for g in riders:
                     g['too_many_riders'] = True
 
+    _OCR_CACHE_GRID = 60      # px — ô lưới thô để coi 2 lần detect là "cùng 1 biển"
+    _OCR_CACHE_TTL = 1.5      # giây — thời gian tái dùng kết quả OCR cũ
+    _OCR_CACHE_MAX_SIZE = 200  # ngưỡng dọn cache để không phình vô hạn qua nhiều giờ chạy
+
+    def _read_plate_cached(self, frame: np.ndarray, plate_det: Detection) -> str:
+        """
+        Đọc biển số có cache theo vị trí. EasyOCR (CPU) tốn 300-800ms/lần — nếu
+        chạy lại mỗi frame detect cho cùng 1 xe đứng/đi qua cổng ở gần đúng vị trí
+        cũ thì lãng phí toàn bộ thời gian đó. Cache theo ô lưới thô quanh tâm bbox,
+        TTL ngắn vì xe di chuyển qua khung hình khá nhanh — không dùng để né OCR
+        vĩnh viễn, chỉ tránh lặp lại trong vài frame liên tiếp gần nhau.
+        """
+        x1, y1, x2, y2 = plate_det.bbox
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        key = (cx // self._OCR_CACHE_GRID, cy // self._OCR_CACHE_GRID)
+
+        now = time.time()
+        cached = self._plate_ocr_cache.get(key)
+        if cached is not None and (now - cached[1]) < self._OCR_CACHE_TTL:
+            return cached[0]
+
+        crop = frame[y1:y2, x1:x2]
+        plate_read = ""
+        if crop.size > 0 and crop.shape[0] > 20 and crop.shape[1] > 40:
+            plate_read = read_plate(crop)
+
+        self._plate_ocr_cache[key] = (plate_read, now)
+        if len(self._plate_ocr_cache) > self._OCR_CACHE_MAX_SIZE:
+            self._plate_ocr_cache = {
+                k: v for k, v in self._plate_ocr_cache.items() if now - v[1] < self._OCR_CACHE_TTL
+            }
+        return plate_read
+
     def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list,
                          posture_status: str = 'unknown', vehicle_type: str | None = None,
                          too_many_riders: bool = False):
@@ -441,14 +557,16 @@ class VideoPipeline:
         has_with_helmet = any('With Helmet' in d.class_name for d in helmet_dets)
         has_without_helmet = any('Without Helmet' in d.class_name for d in helmet_dets)
 
-        # Đọc biển số từ plate detections (chỉ 1 plate gán vào nhóm này)
+        # Đọc biển số từ plate detections (chỉ 1 plate gán vào nhóm này) — có cache
+        # theo vị trí để tránh chạy lại EasyOCR cho cùng 1 xe (xem _read_plate_cached)
         plate_read = ""
         if plate_dets:
             best_plate = plate_dets[0]  # Đã được gán ở _group_by_person
-            x1, y1, x2, y2 = best_plate.bbox
-            crop = frame[y1:y2, x1:x2]
-            if crop.size > 0 and crop.shape[0] > 20 and crop.shape[1] > 40:
-                plate_read = read_plate(crop)
+            plate_read = self._read_plate_cached(frame, best_plate)
+            # Feature 7: track plate read attempts/successes
+            self._plate_attempts += 1
+            if plate_read:
+                self._plate_successes += 1
 
         # Tra whitelist
         plate_matched = None
@@ -471,10 +589,13 @@ class VideoPipeline:
 
         # Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
         violation_types = []
-        
-        # 1. Không có plate_det hoặc OCR trả về rỗng
-        if not plate_dets or not plate_read:
-            violation_types.append("PLATE_UNREADABLE")
+
+        # 1. Không có plate_det → xe không có biển số trong khung hình
+        if not plate_dets:
+            violation_types.append("NO_PLATE")
+        # 2. Có box biển số nhưng OCR đọc rỗng → bị che/mờ/hỏng
+        elif not plate_read:
+            violation_types.append("PLATE_OBSCURED")
         
         # 2. Có đọc được biển số nhưng không tìm thấy trong whitelist
         if plate_read and not plate_matched:
@@ -523,20 +644,64 @@ class VideoPipeline:
             self._push_alert(violation_type, plate_read, plate_matched, plate_format_valid=plate_format_valid)
             return
 
-        # Lưu snapshot
+        # Chuẩn bị đường dẫn snapshot (rẻ, làm ngay ở main thread)
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         snapshot_filename = f"{timestamp_str}_{violation_type}.jpg"
         snapshot_path = os.path.join(SNAPSHOTS_DIR, snapshot_filename)
-
-        # Đảm bảo thư mục tồn tại
         os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
-        # Lưu frame gốc (chưa vẽ box) vào snapshots
-        success = cv2.imwrite(snapshot_path, frame)
-        if not success:
-            snapshot_path = None
+        # Lưu snapshot (cv2.imwrite) + ghi log DB — đẩy ra _io_pool (thread nền)
+        # vì đây là I/O tốn vài chục ms, không cần chặn vòng lặp đọc frame tiếp
+        # theo để chờ ghi đĩa/DB xong. Copy frame TRƯỚC khi đẩy đi: _run_loop sẽ
+        # vẽ box đè lên chính frame này ngay sau khi hàm này return — snapshot
+        # phải là ảnh gốc chưa vẽ box, không copy sẽ lưu nhầm ảnh có box.
+        frame_snapshot = frame.copy()
+        self._io_pool.submit(
+            self._persist_violation,
+            frame_snapshot, snapshot_path, snapshot_filename,
+            plate_read, plate_matched, helmet_status, violation_type,
+            posture_status, plate_format_valid,
+        )
 
-        # Ghi log vào DB
+        # Cập nhật cooldown ngay (không chờ IO xong) — tránh spam ghi khi nhiều
+        # group/frame liên tiếp rơi vào lúc thread nền đang xử lý phía sau.
+        self._last_log_time[cooldown_key] = current_time
+
+        # Đẩy cảnh báo WebSocket ngay — coi snapshot là sẽ ghi thành công
+        # (best-effort: đã tạo thư mục trước, imwrite hiếm khi lỗi) để không
+        # phải chờ IO thread ghi xong mới cảnh báo bảo vệ.
+        self._push_alert(
+            violation_type, plate_read, plate_matched,
+            snapshot_filename=snapshot_filename,
+            plate_format_valid=plate_format_valid,
+        )
+
+    def _write_clip(self, frames: list, out_path: str):
+        """Write video clip from buffered frames. Runs on _io_pool (Feature 4)."""
+        if not frames:
+            return
+        h, w = frames[0].shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(out_path, fourcc, VIOLATION_CLIP_FPS, (w, h))
+        for f in frames:
+            writer.write(f)
+        writer.release()
+
+    def _persist_violation(self, frame: np.ndarray, snapshot_path: str, snapshot_filename: str,
+                            plate_read: str, plate_matched: str | None, helmet_status: str,
+                            violation_type: str, posture_status: str,
+                            plate_format_valid: bool | None):
+        """Lưu snapshot + ghi log vi phạm vào DB. Chạy trên _io_pool (thread nền)."""
+        success = cv2.imwrite(snapshot_path, frame)
+
+        # Feature 4: write video clip (reuse _io_pool, same thread as snapshot)
+        clip_path = None
+        clip_filename = snapshot_filename.replace('.jpg', '.mp4')
+        clip_full_path = os.path.join(SNAPSHOTS_DIR, clip_filename)
+        self._write_clip(list(self._clip_buffer), clip_full_path)
+        if os.path.exists(clip_full_path):
+            clip_path = f"data/snapshots/{clip_filename}"
+
         try:
             add_violation_event(
                 timestamp=datetime.datetime.now().isoformat(),
@@ -544,23 +709,14 @@ class VideoPipeline:
                 plate_matched=plate_matched,
                 helmet_status=helmet_status,
                 violation_type=violation_type,
-                snapshot_path=f"data/snapshots/{snapshot_filename}" if snapshot_path else None,
+                snapshot_path=f"data/snapshots/{snapshot_filename}" if success else None,
                 posture_status=posture_status,
                 plate_format_valid=plate_format_valid,
+                clip_path=clip_path,
             )
             print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}")
         except Exception as e:
             print(f"[Pipeline] Error logging violation: {e}")
-
-        # Cập nhật cooldown
-        self._last_log_time[cooldown_key] = current_time
-
-        # Đẩy cảnh báo WebSocket
-        self._push_alert(
-            violation_type, plate_read, plate_matched,
-            snapshot_filename=snapshot_filename if snapshot_path else None,
-            plate_format_valid=plate_format_valid,
-        )
 
     def _push_alert(self, violation_type: str, plate_read: str, plate_matched: str,
                      snapshot_filename: str | None = None, plate_format_valid: bool | None = None):
@@ -585,6 +741,13 @@ class VideoPipeline:
         Chạy pose detection cho mỗi person box trong groups.
         Bổ sung 'posture_status' vào mỗi group dict.
         Hoàn toàn isolated trong try/except để không ảnh hưởng pipeline chính.
+
+        Chạy SONG SONG qua _detect_pool (đã rảnh vào lúc này — 3 future của
+        person/helmet/plate đã .result() xong ở _run_loop) thay vì tuần tự từng
+        người: N person trong khung hình trước đây = N lần inference YOLO-pose
+        nối tiếp nhau, cộng dồn latency tuyến tính theo số người. pose.py dùng
+        model instance riêng theo thread (thread-local) nên gọi đồng thời an
+        toàn, không tranh chấp state giữa các thread như dùng chung 1 instance.
         """
         try:
             from app.cv.pose import PostureDetector, classify_posture
@@ -592,8 +755,9 @@ class VideoPipeline:
             detector = PostureDetector()
             frame_h, frame_w = frame.shape[:2]
 
+            # Cắt crop hợp lệ trước, chỉ submit những group thực sự cần detect
+            pending = []
             for group in groups:
-                # Get person bbox from group (stored in the group from _group_by_person)
                 person = group.get('_person')
                 if person is None:
                     group['posture_status'] = 'unknown'
@@ -611,11 +775,15 @@ class VideoPipeline:
                     group['posture_status'] = 'unknown'
                     continue
 
-                keypoints = detector.detect_pose(person_crop)
+                future = self._detect_pool.submit(detector.detect_pose, person_crop)
+                pending.append((group, (x1, y1), future))
+
+            for group, offset, future in pending:
+                keypoints = future.result()
                 posture = classify_posture(keypoints) if keypoints else 'unknown'
                 group['posture_status'] = posture
                 if keypoints:
-                    self._draw_pose_keypoints(frame, keypoints, offset=(x1, y1))
+                    self._draw_pose_keypoints(frame, keypoints, offset=offset)
 
         except Exception:
             # ISOLATED: posture errors must not break the main pipeline

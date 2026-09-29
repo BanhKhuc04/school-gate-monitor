@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
+import StudentAutocomplete from '../components/StudentAutocomplete';
+import { useAuth } from '../auth/AuthContext';
 
 export default function AdminVehiclesPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -9,6 +15,28 @@ export default function AdminVehiclesPage() {
   const [plate, setPlate] = useState('');
   const [studentName, setStudentName] = useState('');
   const [studentClass, setStudentClass] = useState('');
+  const [exporting, setExporting] = useState(false);
+  // Feature 11: CSV dry-run preview
+  const [csvPreview, setCsvPreview] = useState(null); // { dry_run_results, filename, file }
+  // Feature 2+6: Repeat offender summary for badge display
+  const [summaryMap, setSummaryMap] = useState({}); // vehicleId -> summary entry
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const res = await client.get('/api/vehicles/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `xe_dang_ky_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Không xuất được file');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function loadVehicles() {
     setLoading(true);
@@ -22,7 +50,19 @@ export default function AdminVehiclesPage() {
     }
   }
 
-  useEffect(() => { loadVehicles(); }, []);
+  // Feature 2+6: Load violations summary for repeat offender badges
+  async function loadSummary() {
+    try {
+      const res = await client.get('/api/vehicles/violations-summary');
+      const map = {};
+      for (const entry of res.data || []) {
+        map[entry.vehicle_id] = entry;
+      }
+      setSummaryMap(map);
+    } catch { /* ignore — badges just won't show */ }
+  }
+
+  useEffect(() => { loadVehicles(); loadSummary(); }, []);
 
   function resetForm() {
     setPlate('');
@@ -75,9 +115,22 @@ export default function AdminVehiclesPage() {
       <div className="max-w-5xl mx-auto">
 
         {/* Header */}
-        <div className="flex items-center gap-2 mb-6">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] animate-pulse" />
-          <h1 className="text-xl font-bold text-[#374151]">Phương tiện Đăng ký</h1>
+        <div className="flex items-center justify-between gap-2 mb-6">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] animate-pulse" />
+            <h1 className="text-xl font-bold text-[#374151]">Phương tiện Đăng ký</h1>
+          </div>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-1.5 bg-[#123b6d] hover:bg-[#0d2a4f] disabled:opacity-50 text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            {exporting ? 'Đang xuất...' : 'Xuất Excel'}
+          </button>
         </div>
 
         {/* Stats */}
@@ -108,7 +161,9 @@ export default function AdminVehiclesPage() {
           </div>
         </div>
 
-        {/* Add/Edit Form */}
+        {/* Add/Edit Form + CSV Import — admin only: teacher is read-only (server also enforces 403) */}
+        {isAdmin && (
+        <>
         <div className="bg-white rounded-xl p-5 mb-5 shadow-sm border border-[#d1d5db]">
           <h2 className="text-[13px] font-bold text-[#374151] uppercase tracking-wider mb-4 flex items-center gap-2">
             <svg className="w-5 h-5 text-[#10b981]" viewBox="0 0 24 24" fill="none">
@@ -142,13 +197,15 @@ export default function AdminVehiclesPage() {
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
                   Tên học sinh
                 </label>
-                <input
-                  type="text"
-                  className="w-full bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] text-[#374151] border-0 outline-none focus:ring-2 focus:ring-[#c92035]"
+                <StudentAutocomplete
                   value={studentName}
-                  onChange={e => setStudentName(e.target.value)}
+                  onChange={setStudentName}
+                  onSelect={(v) => {
+                    setStudentName(v.student_name || '');
+                    setPlate(v.plate_number || '');
+                    setStudentClass(v.student_class || '');
+                  }}
                   placeholder="Nguyễn Văn A"
-                  required
                 />
               </div>
               <div>
@@ -212,19 +269,22 @@ export default function AdminVehiclesPage() {
                 onChange={async (e) => {
                   const file = e.target.files[0];
                   if (!file) return;
-                  const formData = new FormData();
-                  formData.append('file', file);
                   setError('');
                   try {
-                    const res = await client.post('/api/vehicles/import', formData, {
-                      headers: { 'Content-Type': 'multipart/form-data' },
-                    });
-                    const d = res.data;
-                    alert(`Đã nhập: ${d.created} mới, ${d.skipped} trùng, ${d.errors?.length || 0} lỗi`);
-                    if (d.errors?.length) alert('Lỗi: ' + d.errors.slice(0, 5).join('\n'));
-                    loadVehicles();
+                    // Step 1: dry-run
+                    const dryRes = await client.post(
+                      '/api/vehicles/import?dry_run=true',
+                      (() => { const fd = new FormData(); fd.append('file', file); return fd; })(),
+                      { headers: { 'Content-Type': 'multipart/form-data' } }
+                    );
+                    if (dryRes.data.errors?.length === 0 && dryRes.data.created === 0) {
+                      // Empty file or only invalid rows
+                      alert('File CSV không có dòng hợp lệ nào để nhập.');
+                      return;
+                    }
+                    setCsvPreview({ dry_run_results: dryRes.data, filename: file.name, file });
                   } catch (err) {
-                    setError(err.response?.data?.detail || 'Lỗi khi nhập CSV');
+                    setError(err.response?.data?.detail || 'Lỗi khi đọc file CSV');
                   }
                   e.target.value = '';
                 }}
@@ -251,6 +311,8 @@ export default function AdminVehiclesPage() {
             </button>
           </div>
         </div>
+        </>
+        )}
 
         {/* Vehicles Table */}
         {loading ? (
@@ -278,37 +340,65 @@ export default function AdminVehiclesPage() {
                     <th className="py-3 px-4 font-semibold">Biển số</th>
                     <th className="py-3 px-3 font-semibold">Học sinh</th>
                     <th className="py-3 px-3 font-semibold">Lớp</th>
+                    <th className="py-3 px-3 font-semibold">Vi phạm 30 ngày</th>
                     <th className="py-3 px-4 text-right font-semibold">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f4f6f9] text-[12px] text-[#374151]">
-                  {vehicles.map((v) => (
-                    <tr key={v.id} className={`hover:bg-[#ffffff] transition-colors ${editingId === v.id ? 'bg-[#f4f6f9]' : ''}`}>
-                      <td className="py-3 px-4">
-                        <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-[#f4f6f9] text-[#374151] border border-[#d1d5db]">
-                          {v.plate_number}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 font-medium">{v.student_name || '—'}</td>
-                      <td className="py-3 px-3 font-mono text-[11px] text-[#6b7280]">{v.student_class || '—'}</td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => startEdit(v)}
-                            className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
-                          >
-                            Sửa
-                          </button>
-                          <button
-                            onClick={() => handleDelete(v.id)}
-                            className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
-                          >
-                            Xóa
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {vehicles.map((v) => {
+                    const summ = summaryMap[v.id];
+                    const recentCount = summ?.recent_count || 0;
+                    const isRepeat = summ?.is_repeat_offender;
+                    return (
+                      <tr key={v.id} className={`hover:bg-[#ffffff] transition-colors ${editingId === v.id ? 'bg-[#f4f6f9]' : ''}`}>
+                        <td className="py-3 px-4">
+                          <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-[#f4f6f9] text-[#374151] border border-[#d1d5db]">
+                            {v.plate_number}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 font-medium">{v.student_name || '—'}</td>
+                        <td className="py-3 px-3 font-mono text-[11px] text-[#6b7280]">{v.student_class || '—'}</td>
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`font-mono font-bold text-[12px] ${recentCount > 0 ? 'text-[#c92035]' : 'text-[#10b981]'}`}>
+                              {recentCount}
+                            </span>
+                            {isRepeat && (
+                              <span className="px-1.5 py-0.5 bg-[#fee2e2] text-[#991b1b] rounded text-[10px] font-semibold font-mono border border-[#fca5a5]">
+                                TÁI PHẠM
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => navigate(`/admin/students/${v.id}/violations`)}
+                              className="px-3 py-1 rounded text-[11px] font-semibold text-[#3b82f6] hover:bg-[#dbeafe] transition-colors"
+                            >
+                              Lịch sử
+                            </button>
+                            {isAdmin && (
+                              <>
+                                <button
+                                  onClick={() => startEdit(v)}
+                                  className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
+                                >
+                                  Sửa
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(v.id)}
+                                  className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
+                                >
+                                  Xóa
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -316,6 +406,104 @@ export default function AdminVehiclesPage() {
               <span className="font-mono text-[11px] text-[#6b7280]">
                 Tổng: <span className="font-bold text-[#374151]">{vehicles.length}</span> xe
               </span>
+            </div>
+          </div>
+        )}
+
+        {/* Feature 11: CSV Dry-run Preview Modal */}
+        {csvPreview && (
+          <div
+            className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+            onClick={() => setCsvPreview(null)}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-4 border-b border-[#d1d5db]">
+                <h2 className="text-base font-bold text-[#374151]">
+                  Xem trước CSV — {csvPreview.filename}
+                </h2>
+                <button
+                  onClick={() => setCsvPreview(null)}
+                  className="text-[#6b7280] hover:text-[#374151] text-xl leading-none px-2"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="p-5">
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="bg-[#d1fae5] rounded-lg p-3 text-center border border-[#6ee7b7]">
+                    <p className="text-2xl font-bold font-mono text-[#065f46]">
+                      {csvPreview.dry_run_results.created}
+                    </p>
+                    <p className="text-[11px] font-mono text-[#065f46]">Sẽ thêm mới</p>
+                  </div>
+                  <div className="bg-[#fef3c7] rounded-lg p-3 text-center border border-[#fcd34d]">
+                    <p className="text-2xl font-bold font-mono text-[#92400e]">
+                      {csvPreview.dry_run_results.skipped}
+                    </p>
+                    <p className="text-[11px] font-mono text-[#92400e]">Bị bỏ qua (trùng)</p>
+                  </div>
+                  <div className="bg-[#fee2e2] rounded-lg p-3 text-center border border-[#fca5a5]">
+                    <p className="text-2xl font-bold font-mono text-[#991b1b]">
+                      {csvPreview.dry_run_results.errors?.length || 0}
+                    </p>
+                    <p className="text-[11px] font-mono text-[#991b1b]">Lỗi</p>
+                  </div>
+                </div>
+
+                {csvPreview.dry_run_results.errors?.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-[11px] font-mono font-semibold text-[#991b1b] uppercase mb-2">
+                      Lỗi ({csvPreview.dry_run_results.errors.length})
+                    </p>
+                    <div className="bg-[#fef2f2] border border-[#fca5a5] rounded-lg p-3 max-h-32 overflow-y-auto">
+                      {csvPreview.dry_run_results.errors.map((err, i) => (
+                        <p key={i} className="text-[11px] font-mono text-[#991b1b]">
+                          Dòng {err.row}: {err.message}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCsvPreview(null)}
+                    className="flex-1 bg-[#6b7280] hover:bg-[#4b5563] text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const file = csvPreview.file;
+                      try {
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        const res = await client.post('/api/vehicles/import', fd, {
+                          headers: { 'Content-Type': 'multipart/form-data' },
+                        });
+                        const d = res.data;
+                        alert(`Đã nhập: ${d.created} mới, ${d.skipped} trùng, ${d.errors?.length || 0} lỗi`);
+                        if (d.errors?.length) {
+                          alert('Lỗi: ' + d.errors.slice(0, 5).map(e => `Dòng ${e.row}: ${e.message}`).join('\n'));
+                        }
+                        setCsvPreview(null);
+                        loadVehicles();
+                        loadSummary();
+                      } catch (err) {
+                        alert('Lỗi khi nhập: ' + (err.response?.data?.detail || err.message));
+                      }
+                    }}
+                    className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Xác nhận nhập ({csvPreview.dry_run_results.created} mới)
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

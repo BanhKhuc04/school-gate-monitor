@@ -9,7 +9,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 from app.config import DB_PATH, SNAPSHOTS_DIR
-from app.cv.ocr import normalize_plate
+
+
+def normalize_plate(plate: str) -> str | None:
+    """Standalone plate normalization — no easyocr dependency (mirrors app/cv/ocr.py)."""
+    if not plate:
+        return None
+    import re
+    plate = plate.upper()
+    plate = re.sub(r'[^A-Z0-9]', '', plate)
+    return plate if len(plate) >= 4 else None
 
 
 # Lock bảo vệ thao tác ghi
@@ -35,8 +44,8 @@ def init_db():
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
-        # Bảng xe đăng ký
+
+        # ── 1. Tạo tất cả bảng mới (CREATE IF NOT EXISTS — an toàn chạy lại nhiều lần) ──
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS registered_vehicles (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,8 +55,7 @@ def init_db():
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
             )
         ''')
-        
-        # Bảng sự kiện vi phạm
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS violation_events (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,40 +65,111 @@ def init_db():
                 helmet_status  TEXT NOT NULL,
                 violation_type TEXT NOT NULL,
                 snapshot_path  TEXT,
-                posture_status TEXT,  -- 'standing' | 'riding' | 'unknown' | None
+                posture_status TEXT,
                 created_at     TEXT NOT NULL DEFAULT (datetime('now'))
             )
         ''')
 
-        # Index cho timestamp
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_violation_events_timestamp
             ON violation_events(timestamp)
         ''')
 
-        # Migration: add posture_status column if it doesn't exist (for existing DBs)
-        try:
-            cursor.execute("ALTER TABLE violation_events ADD COLUMN posture_status TEXT")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-
-        # Migration: add plate_format_valid column (NULL = không có plate_read để kiểm tra)
-        try:
-            cursor.execute("ALTER TABLE violation_events ADD COLUMN plate_format_valid INTEGER")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-        
-        # Bảng người dùng
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 username      TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 role          TEXT NOT NULL CHECK (role IN ('admin', 'security', 'management')),
+                homeroom_class TEXT,
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
             )
         ''')
-        
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS violation_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                violation_id INTEGER NOT NULL,
+                actor_username TEXT NOT NULL,
+                action TEXT NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (violation_id) REFERENCES violation_events(id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_audit_log_violation
+            ON violation_audit_log(violation_id)
+        ''')
+
+        # ── 2. Migrations cho bảng đã tồn tại (ALTER TABLE — an toàn nếu cột đã có) ──
+        # posture_status + plate_format_valid (từ trước)
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN posture_status TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN plate_format_valid INTEGER")
+        except sqlite3.OperationalError:
+            pass
+
+        # Feature 10: audit trail — trạng thái xử lý vi phạm
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+        except sqlite3.OperationalError:
+            pass
+
+        # Feature 4: video clip ngắn kèm ảnh
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN clip_path TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+        # Feature 9: giáo viên chủ nhiệm — homeroom_class (thêm sau vì bảng users đã tạo ở bước 1)
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN homeroom_class TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+        # ── 3. Rebuild bảng users nếu CHECK constraint cũ chặn role='teacher' ──
+        # Chỉ rebuild khi bảng đã tồn tại VÀ CHECK chưa có 'teacher'.
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
+        row = cursor.fetchone()
+        users_table_sql = row["sql"] if row else ""
+        if row is not None and "'teacher'" not in users_table_sql.lower():
+            print("[DB] Rebuilding users table to support 'teacher' role...")
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK (role IN ('admin', 'security', 'management', 'teacher')),
+                    homeroom_class TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            ''')
+            cursor.execute('''
+                INSERT INTO users_new (id, username, password_hash, role, homeroom_class, created_at)
+                SELECT id, username, password_hash, role,
+                       NULLIF(homeroom_class, '') AS homeroom_class, created_at
+                FROM users
+            ''')
+            cursor.execute("DROP TABLE users")
+            cursor.execute("ALTER TABLE users_new RENAME TO users")
+            print("[DB] Users table rebuilt with 'teacher' role support.")
+
+            # Verify: thử insert dummy teacher để chắc CHECK mới hoạt động
+            try:
+                cursor.execute(
+                    "INSERT INTO users (username, password_hash, role, homeroom_class) "
+                    "VALUES ('__teacher_check__', 'dummy', 'teacher', 'test')"
+                )
+                cursor.execute("DELETE FROM users WHERE username = '__teacher_check__'")
+                print("[DB] CHECK constraint for 'teacher' role verified OK.")
+            except sqlite3.IntegrityError as e:
+                print(f"[DB] WARNING: 'teacher' role CHECK still blocked after rebuild: {e}")
+
         conn.commit()
         print("[DB] Database initialized")
     finally:
@@ -167,12 +246,18 @@ def get_vehicle_by_plate(plate_number: str) -> Optional[dict]:
         conn.close()
 
 
-def list_vehicles() -> List[dict]:
-    """Liệt kê tất cả xe đã đăng ký."""
+def list_vehicles(student_class: str = None) -> List[dict]:
+    """Liệt kê tất cả xe đã đăng ký. Feature 9: teacher scope filter."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM registered_vehicles ORDER BY created_at DESC')
+        if student_class:
+            cursor.execute(
+                'SELECT * FROM registered_vehicles WHERE student_class = ? ORDER BY created_at DESC',
+                (student_class,)
+            )
+        else:
+            cursor.execute('SELECT * FROM registered_vehicles ORDER BY created_at DESC')
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
@@ -254,7 +339,8 @@ def add_violation_event(timestamp: str, plate_read: str = None,
                        plate_matched: str = None, helmet_status: str = None,
                        violation_type: str = None, snapshot_path: str = None,
                        posture_status: str = None,
-                       plate_format_valid: Optional[bool] = None) -> int:
+                       plate_format_valid: Optional[bool] = None,
+                       clip_path: str = None) -> int:
     """
     Thêm sự kiện vi phạm.
 
@@ -267,6 +353,7 @@ def add_violation_event(timestamp: str, plate_read: str = None,
         snapshot_path: Đường dẫn ảnh chụp
         posture_status: 'standing' | 'riding' | 'unknown' | None
         plate_format_valid: biển đọc được có khớp định dạng VN không (None nếu không có plate_read)
+        clip_path: Đường dẫn video clip ngắn (Feature 4)
 
     Returns:
         ID của sự kiện mới
@@ -277,10 +364,10 @@ def add_violation_event(timestamp: str, plate_read: str = None,
             cursor = conn.cursor()
             cursor.execute(
                 '''INSERT INTO violation_events
-                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status,
-                 None if plate_format_valid is None else int(plate_format_valid))
+                 None if plate_format_valid is None else int(plate_format_valid), clip_path)
             )
             conn.commit()
             return cursor.lastrowid
@@ -295,6 +382,7 @@ def list_violations(
     date_to: Optional[str] = None,
     violation_type: Optional[str] = None,
     plate: Optional[str] = None,
+    student_class: Optional[str] = None,  # Feature 9: teacher scope filter
 ) -> List[dict]:
     """
     Liệt kê các sự kiện vi phạm với phân trang và lọc.
@@ -306,16 +394,16 @@ def list_violations(
         date_to: ISO timestamp kết thúc (inclusive)
         violation_type: Lọc theo loại vi phạm (e.g. 'NO_HELMET')
         plate: Lọc theo biển số (tìm chứa, không phải khớp tuyệt đối)
+        student_class: Lọc theo lớp học sinh (Feature 9 — teacher scope)
 
     Returns:
-        List of violation records
+        {"total": int, "limit": int, "offset": int, "items": [dict]}
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
 
-        # Build WHERE clause dynamically — columns aliased to `ve.` up front since
-        # the query below joins registered_vehicles (`rv.`) for student name/class.
+        # Build WHERE clause dynamically
         conditions = []
         params: List = []
 
@@ -332,16 +420,17 @@ def list_violations(
             conditions.append('(ve.plate_read LIKE ? OR ve.plate_matched LIKE ?)')
             like_val = f'%{plate}%'
             params.extend([like_val, like_val])
+        if student_class:
+            conditions.append('rv.student_class = ?')
+            params.append(student_class)
 
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
 
         # Total count (ignoring LIMIT/OFFSET)
-        cursor.execute(f'SELECT COUNT(*) FROM violation_events ve WHERE {where_clause}', params)
+        cursor.execute(f'SELECT COUNT(*) FROM violation_events ve LEFT JOIN registered_vehicles rv ON rv.plate_number = ve.plate_matched WHERE {where_clause}', params)
         total = cursor.fetchone()[0]
 
         # Paginated results — LEFT JOIN registered_vehicles để lấy tên/lớp học sinh
-        # theo plate_matched (trước đây thiếu JOIN này nên student_name/student_class
-        # luôn None, cột "Lớp"/"Học sinh" trên trang admin luôn hiện "—").
         query = f'''
             SELECT ve.*, rv.student_name, rv.student_class
             FROM violation_events ve
@@ -363,18 +452,19 @@ def list_violations(
         conn.close()
 
 
-def create_user(username: str, password_hash: str, role: str) -> int:
+def create_user(username: str, password_hash: str, role: str, homeroom_class: str | None = None) -> int:
     """
     Tạo user mới.
-    
+
     Args:
         username: Tên đăng nhập (UNIQUE)
         password_hash: bcrypt hash
-        role: 'admin' | 'security' | 'management'
-        
+        role: 'admin' | 'security' | 'management' | 'teacher'
+        homeroom_class: Lớp chủ nhiệm (bắt buộc khi role='teacher')
+
     Returns:
         ID của user mới
-        
+
     Raises:
         ValueError: Nếu username đã tồn tại
     """
@@ -383,8 +473,8 @@ def create_user(username: str, password_hash: str, role: str) -> int:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
-                (username, password_hash, role)
+                'INSERT INTO users (username, password_hash, role, homeroom_class) VALUES (?, ?, ?, ?)',
+                (username, password_hash, role, homeroom_class)
             )
             conn.commit()
             return cursor.lastrowid
@@ -418,7 +508,7 @@ def list_users() -> List[dict]:
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at ASC')
+        cursor.execute('SELECT id, username, role, homeroom_class, created_at FROM users ORDER BY created_at ASC')
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
@@ -429,7 +519,7 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, username, role, created_at FROM users WHERE id = ?', (user_id,))
+        cursor.execute('SELECT id, username, role, homeroom_class, created_at FROM users WHERE id = ?', (user_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
     finally:
@@ -447,7 +537,8 @@ def count_admins() -> int:
         conn.close()
 
 
-def update_user(user_id: int, role: str = None, password_hash: str = None) -> bool:
+def update_user(user_id: int, role: str = None, password_hash: str = None,
+                homeroom_class: str | None = None) -> bool:
     """
     Cập nhật user.
 
@@ -455,6 +546,7 @@ def update_user(user_id: int, role: str = None, password_hash: str = None) -> bo
         user_id: ID user cần sửa
         role: role mới (hoặc None để không đổi)
         password_hash: bcrypt hash mới (hoặc None để không đổi)
+        homeroom_class: lớp chủ nhiệm (None = không đổi)
 
     Returns:
         True nếu thành công, False nếu không tìm thấy
@@ -471,6 +563,9 @@ def update_user(user_id: int, role: str = None, password_hash: str = None) -> bo
             if password_hash is not None:
                 updates.append('password_hash = ?')
                 params.append(password_hash)
+            if homeroom_class is not None:
+                updates.append('homeroom_class = ?')
+                params.append(homeroom_class)
             if not updates:
                 return False
             params.append(user_id)
@@ -513,8 +608,12 @@ def get_violation_stats() -> Dict[str, Any]:
             "by_type": {                -- đếm theo loại vi phạm
                 "NO_HELMET": int,
                 "PLATE_NOT_REGISTERED": int,
+                "NO_PLATE": int,
+                "PLATE_OBSCURED": int,
                 "PLATE_UNREADABLE": int,
                 "MULTIPLE": int,
+                "RIDING_THROUGH_GATE": int,
+                "TOO_MANY_RIDERS": int,
             },
             "trend": [{"date": "YYYY-MM-DD", "count": int}, ...],  -- 14 ngày gần nhất, đủ ngày kể cả count=0
             "by_class": [{"class_name": str, "count": int}, ...],  -- "Không xác định" cho vi phạm không khớp biển số đăng ký
@@ -538,6 +637,8 @@ def get_violation_stats() -> Dict[str, Any]:
         by_type: Dict[str, int] = {
             "NO_HELMET": 0,
             "PLATE_NOT_REGISTERED": 0,
+            "NO_PLATE": 0,
+            "PLATE_OBSCURED": 0,
             "PLATE_UNREADABLE": 0,
             "MULTIPLE": 0,
             "RIDING_THROUGH_GATE": 0,
@@ -590,52 +691,226 @@ def get_violation_stats() -> Dict[str, Any]:
         conn.close()
 
 
+# ─── Feature 10: Violation audit trail ────────────────────────────────────────────
+
+def update_violation_status(violation_id: int, status: str, actor_username: str, note: str = None) -> bool:
+    """
+    Cập nhật trạng thái vi phạm và ghi audit log.
+    Feature 10.
+
+    Args:
+        violation_id: ID vi phạm
+        status: 'reviewed' | 'resolved' | 'reopened'
+        actor_username: username người thực hiện
+        note: ghi chú tùy ý
+
+    Returns:
+        True nếu cập nhật thành công, False nếu violation_id không tồn tại
+    """
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            # Check violation exists
+            cursor.execute("SELECT id FROM violation_events WHERE id = ?", (violation_id,))
+            if cursor.fetchone() is None:
+                return False
+            # Update status
+            cursor.execute(
+                "UPDATE violation_events SET status = ? WHERE id = ?",
+                (status, violation_id)
+            )
+            # Insert audit log (append-only, never overwrites)
+            cursor.execute(
+                "INSERT INTO violation_audit_log (violation_id, actor_username, action, note) VALUES (?, ?, ?, ?)",
+                (violation_id, actor_username, status, note)
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+def get_violation_audit_log(violation_id: int) -> list[dict]:
+    """
+    Lấy lịch sử audit log của một vi phạm.
+    Feature 10.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM violation_audit_log WHERE violation_id = ? ORDER BY created_at ASC",
+            (violation_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+# ─── Feature 2 + 6: Repeat offender tracking ──────────────────────────────────
+
+def get_student_violation_summary(student_class: str = None) -> list[dict]:
+    """
+    Group violation_events theo plate_matched, JOIN registered_vehicles.
+    Feature 2 + 6.
+
+    Trả về mỗi xe đã đăng ký: {vehicle_id, plate_number, student_name, student_class,
+                                total_violations, violations_in_window, is_repeat_offender, last_violation_at}
+    is_repeat_offender = violations_in_window >= REPEAT_OFFENDER_THRESHOLD
+    Nếu student_class truyền vào, filter theo đúng lớp đó (dùng cho Feature 9).
+    Xe chưa từng vi phạm vẫn xuất hiện với count=0 (LEFT JOIN từ registered_vehicles).
+    """
+    from app.config import REPEAT_OFFENDER_WINDOW_DAYS, REPEAT_OFFENDER_THRESHOLD
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        # Lấy tổng vi phạm + vi phạm trong window cho mỗi xe
+        cursor.execute('''
+            SELECT
+                rv.id AS vehicle_id,
+                rv.plate_number,
+                rv.student_name,
+                rv.student_class,
+                COUNT(ve.id) AS total_violations,
+                SUM(CASE
+                    WHEN ve.timestamp >= datetime('now', ?)
+                    THEN 1 ELSE 0
+                END) AS violations_in_window,
+                MAX(ve.timestamp) AS last_violation_at
+            FROM registered_vehicles rv
+            LEFT JOIN violation_events ve ON ve.plate_matched = rv.plate_number
+            WHERE (? IS NULL OR rv.student_class = ?)
+            GROUP BY rv.id
+            ORDER BY violations_in_window DESC, total_violations DESC
+        ''', (f"-{REPEAT_OFFENDER_WINDOW_DAYS} days", student_class, student_class))
+
+        rows = []
+        for row in cursor.fetchall():
+            violations_in_window = row["violations_in_window"] or 0
+            rows.append({
+                "vehicle_id": row["vehicle_id"],
+                "plate_number": row["plate_number"],
+                "student_name": row["student_name"],
+                "student_class": row["student_class"],
+                "total_violations": row["total_violations"] or 0,
+                "violations_in_window": violations_in_window,
+                "is_repeat_offender": violations_in_window >= REPEAT_OFFENDER_THRESHOLD,
+                "last_violation_at": row["last_violation_at"],
+            })
+        return rows
+    finally:
+        conn.close()
+
+
+def get_violations_by_vehicle(vehicle_id: int, limit: int = 100) -> list[dict]:
+    """
+    Toàn bộ lịch sử vi phạm của 1 xe/học sinh, sắp theo timestamp DESC.
+    Feature 6 — dùng cho trang timeline.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT ve.*, rv.student_name, rv.student_class
+            FROM violation_events ve
+            LEFT JOIN registered_vehicles rv ON rv.plate_number = ve.plate_matched
+            WHERE ve.plate_matched = (
+                SELECT plate_number FROM registered_vehicles WHERE id = ?
+            )
+            ORDER BY ve.timestamp DESC
+            LIMIT ?
+        ''', (vehicle_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_vehicle_by_id(vehicle_id: int) -> Optional[dict]:
+    """Tìm xe theo ID. Feature 6."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM registered_vehicles WHERE id = ?", (vehicle_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_old_violation_media_paths(older_than_days: int = 90) -> tuple[List[str], List[str]]:
+    """
+    Trả về (snapshot_paths, clip_paths) cần xóa (cũ hơn older_than_days ngày).
+    Chỉ trả về paths, không xóa gì cả.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cutoff = f"-{older_than_days} days"
+        cursor.execute(
+            "SELECT snapshot_path, clip_path FROM violation_events "
+            "WHERE (snapshot_path IS NOT NULL OR clip_path IS NOT NULL) "
+            "AND timestamp < datetime('now', ?)",
+            (cutoff,)
+        )
+        snapshot_paths = []
+        clip_paths = []
+        for row in cursor.fetchall():
+            if row["snapshot_path"]:
+                snapshot_paths.append(row["snapshot_path"])
+            if row["clip_path"]:
+                clip_paths.append(row["clip_path"])
+        return snapshot_paths, clip_paths
+    finally:
+        conn.close()
+
+
 def get_old_violation_snapshot_paths(older_than_days: int = 90) -> List[str]:
     """
     Trả về danh sách snapshot_path cần xóa (cũ hơn older_than_days ngày).
     Chỉ trả về path, không xóa gì cả.
     """
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        # date('now', '-N days') = date N days ago
-        cutoff = f"-{older_than_days} days"
-        cursor.execute(
-            "SELECT snapshot_path FROM violation_events "
-            "WHERE snapshot_path IS NOT NULL "
-            "AND timestamp < datetime('now', ?)",
-            (cutoff,)
-        )
-        return [row["snapshot_path"] for row in cursor.fetchall()]
-    finally:
-        conn.close()
+    snapshot_paths, _ = get_old_violation_media_paths(older_than_days)
+    return snapshot_paths
 
 
 def clear_violation_snapshot_paths(older_than_days: int = 90) -> int:
     """
-    Xóa file snapshot cũ và set snapshot_path = NULL trong DB.
-    Giữ nguyên record vi phạm, chỉ null đường dẫn ảnh.
+    Xóa file snapshot + clip cũ và set snapshot_path/clip_path = NULL trong DB.
+    Giữ nguyên record vi phạm, chỉ null đường dẫn ảnh/video.
     Trả về số record đã null.
     """
-    paths = get_old_violation_snapshot_paths(older_than_days)
-    count = 0
-    for path in paths:
-        full_path = path if os.path.isabs(path) else os.path.join(SNAPSHOTS_DIR, os.path.basename(path))
-        try:
-            if os.path.exists(full_path):
-                os.unlink(full_path)
-        except OSError:
-            pass  # file already gone, that's fine
-        count += 1
-
     with _write_lock:
         conn = get_connection()
         try:
             cursor = conn.cursor()
             cutoff = f"-{older_than_days} days"
+
+            # Lấy cả snapshot_path và clip_path cần xóa
             cursor.execute(
-                "UPDATE violation_events SET snapshot_path = NULL "
-                "WHERE snapshot_path IS NOT NULL "
+                "SELECT snapshot_path, clip_path FROM violation_events "
+                "WHERE (snapshot_path IS NOT NULL OR clip_path IS NOT NULL) "
+                "AND timestamp < datetime('now', ?)",
+                (cutoff,)
+            )
+            rows = cursor.fetchall()
+
+            for row in rows:
+                for path in (row['snapshot_path'], row['clip_path']):
+                    if path:
+                        full_path = path if os.path.isabs(path) else os.path.join(SNAPSHOTS_DIR, os.path.basename(path))
+                        try:
+                            if os.path.exists(full_path):
+                                os.unlink(full_path)
+                        except OSError:
+                            pass
+
+            # Null cả snapshot_path VÀ clip_path
+            cursor.execute(
+                "UPDATE violation_events "
+                "SET snapshot_path = NULL, clip_path = NULL "
+                "WHERE (snapshot_path IS NOT NULL OR clip_path IS NOT NULL) "
                 "AND timestamp < datetime('now', ?)",
                 (cutoff,)
             )

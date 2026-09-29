@@ -40,8 +40,18 @@ export default function Sidebar() {
     links.push({ to: '/admin/health', label: 'Sức khỏe & Lưu trữ', icon: 'shield' });
     links.push({ to: '/admin/users', label: 'Quản lý tài khoản', icon: 'users' });
   }
+  // Feature 9: teacher — scoped views for homeroom class
+  if (user.role === 'teacher') {
+    links.push({ to: '/teacher/violations', label: 'Vi phạm lớp tôi', icon: 'alert' });
+    links.push({ to: '/teacher/vehicles', label: 'Danh sách xe lớp tôi', icon: 'truck' });
+  }
 
-  const roleLabel = { admin: 'Quản trị viên', security: 'Bảo vệ ca sáng', management: 'Ban giám hiệu' }[user.role] || user.role;
+  const roleLabel = {
+    admin: 'Quản trị viên',
+    security: 'Bảo vệ ca sáng',
+    management: 'Ban giám hiệu',
+    teacher: 'Giáo viên chủ nhiệm',
+  }[user.role] || user.role;
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-primary text-inverse-on-surface flex flex-col shrink-0">

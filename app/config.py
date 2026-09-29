@@ -8,6 +8,15 @@ from pathlib import Path
 # Thư mục gốc dự án
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Thiết bị chạy model — tự động dùng GPU nếu máy có (torch bản CUDA + driver
+# NVIDIA hợp lệ), fallback về CPU nếu không. Import torch ở đây là rẻ vì
+# ultralytics (dependency bắt buộc) đã kéo theo torch, không thêm chi phí gì.
+try:
+    import torch
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+except ImportError:
+    DEVICE = "cpu"
+
 # Camera
 CAMERA_INDEX = 1  # OBS Virtual Camera (index 0 la webcam vat ly, xac nhan qua probe)
 
@@ -89,13 +98,32 @@ DB_PATH = str(BASE_DIR / "data" / "app.db")
 # Snapshots
 SNAPSHOTS_DIR = str(BASE_DIR / "data" / "snapshots")
 
-# Video streaming
-VIDEO_WIDTH = 640
-VIDEO_HEIGHT = 480
+# Video streaming — độ phân giải CHỤP từ camera (càng cao, ảnh càng nét cho
+# OCR/ảnh bằng chứng). Không dùng trực tiếp cho detect (xem DETECT_WIDTH/HEIGHT)
+# vì detect trên ảnh to sẽ chậm đi — 2 giá trị tách riêng để vừa nhanh vừa nét.
+VIDEO_WIDTH = 1280
+VIDEO_HEIGHT = 720
+
+# Độ phân giải resize xuống CHỈ để chạy 3 model detect (person/helmet/plate) —
+# giữ nguyên tốc độ detect như cũ dù ảnh chụp to hơn. Kết quả detect được quy
+# đổi lại về tọa độ ảnh gốc (VIDEO_WIDTH/HEIGHT) ngay sau khi detect xong, nên
+# OCR/vẽ box/lưu snapshot đều dùng ảnh gốc nét — đây là fix thật cho lỗi OCR
+# đọc rỗng dù box detect đúng 85%: đã đo thật, cùng 1 ảnh đọc đúng "188888" ở
+# độ phân giải gốc nhưng đọc rỗng khi resize xuống 640x480 trước khi OCR.
+DETECT_WIDTH = 640
+DETECT_HEIGHT = 480
 
 # Violation cooldown (seconds)
 VIOLATION_COOLDOWN = 60  # Không cảnh báo lại cùng biển số trong 60 giây (cho DB)
 ALERT_COOLDOWN = 5       # Cooldown cảnh báo WebSocket (giây)
+
+# Feature 2: ngưỡng "vi phạm lặp lại"
+REPEAT_OFFENDER_WINDOW_DAYS = 30
+REPEAT_OFFENDER_THRESHOLD = 3   # >= 3 vi phạm trong window → gắn cờ
+
+# Feature 4: video clip ngắn
+VIOLATION_CLIP_SECONDS = 4
+VIOLATION_CLIP_FPS = 8          # thấp hơn hiển thị (20fps) để giảm CPU encode + dung lượng
 
 # JWT Authentication
 # secrets.token_hex(32) → hardcoded (không sinh lại mỗi lần khởi động)

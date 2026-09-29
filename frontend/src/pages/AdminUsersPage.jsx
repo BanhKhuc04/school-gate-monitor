@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
 import client from '../api/client';
 
-const ROLES = ['admin', 'security', 'management'];
-const ROLE_LABELS = { admin: 'Admin', security: 'Bảo vệ', management: 'Quản lý' };
+const ROLES = ['admin', 'security', 'management', 'teacher'];
+const ROLE_LABELS = {
+  admin: 'Admin',
+  security: 'Bảo vệ',
+  management: 'Quản lý',
+  teacher: 'Giáo viên',
+};
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState([]);
@@ -12,6 +17,7 @@ export default function AdminUsersPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('security');
+  const [homeroomClass, setHomeroomClass] = useState('');
   const [editingId, setEditingId] = useState(null);
 
   async function loadUsers() {
@@ -43,6 +49,7 @@ export default function AdminUsersPage() {
     setUsername('');
     setPassword('');
     setRole('security');
+    setHomeroomClass('');
     setEditingId(null);
     setError('');
   }
@@ -51,13 +58,15 @@ export default function AdminUsersPage() {
     e.preventDefault();
     setError('');
     try {
+      const body = { role };
+      if (password) body.password = password;
+      if (role === 'teacher' && homeroomClass.trim()) body.homeroom_class = homeroomClass.trim().toUpperCase();
       if (editingId) {
-        const body = { role };
-        if (password) body.password = password;
         await client.put(`/api/users/${editingId}`, body);
       } else {
         if (!username || !password) return;
-        await client.post('/api/users', { username: username.trim(), password, role });
+        body.username = username.trim();
+        await client.post('/api/users', body);
       }
       resetForm();
       loadUsers();
@@ -71,6 +80,7 @@ export default function AdminUsersPage() {
     setUsername(user.username);
     setPassword('');
     setRole(user.role);
+    setHomeroomClass(user.homeroom_class || '');
     setError('');
   }
 
@@ -90,6 +100,7 @@ export default function AdminUsersPage() {
     admin: { bg: 'bg-[#dbe3ee]', text: 'text-[#dbe3ee]', dot: 'bg-[#f8d7dc]' },
     security: { bg: 'bg-[#f4f6f9]', text: 'text-[#c92035]', dot: 'bg-[#c92035]' },
     management: { bg: 'bg-[#e8f5e9]', text: 'text-[#2e7d32]', dot: 'bg-[#10b981]' },
+    teacher: { bg: 'bg-[#fef3c7]', text: 'text-[#92400e]', dot: 'bg-[#f59e0b]' },
   };
 
   return (
@@ -107,7 +118,7 @@ export default function AdminUsersPage() {
         <p className="text-sm text-[#6b7280] mb-6">Phân quyền truy cập hệ thống camera AI theo 3 vai trò.</p>
 
         {/* Role count cards — số thật từ danh sách user, không bịa lịch sử đăng nhập/thiết bị */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
           {ROLES.map((r) => (
             <div key={r} className="bg-white rounded-xl p-4 shadow-sm border border-[#d1d5db]">
               <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">
@@ -136,7 +147,7 @@ export default function AdminUsersPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
                   Username
@@ -172,7 +183,10 @@ export default function AdminUsersPage() {
                   <select
                     className="w-full bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] font-mono text-[#374151] border-0 outline-none appearance-none cursor-pointer pr-8"
                     value={role}
-                    onChange={e => setRole(e.target.value)}
+                    onChange={e => {
+                      setRole(e.target.value);
+                      if (e.target.value !== 'teacher') setHomeroomClass('');
+                    }}
                   >
                     {ROLES.map(r => (
                       <option key={r} value={r}>{ROLE_LABELS[r]}</option>
@@ -183,6 +197,25 @@ export default function AdminUsersPage() {
                   </svg>
                 </div>
               </div>
+              {/* Feature 9: homeroom_class — shown only when role === 'teacher' */}
+              {role === 'teacher' && (
+              <div>
+                <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
+                  Lớp chủ nhiệm
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-[#fef3c7] rounded-lg px-3 py-2 text-[12px] font-mono text-[#92400e] border-0 outline-none focus:ring-2 focus:ring-[#f59e0b]"
+                  value={homeroomClass}
+                  onChange={e => setHomeroomClass(e.target.value.toUpperCase())}
+                  placeholder="10A1"
+                  maxLength={10}
+                />
+                {!homeroomClass && (
+                  <p className="text-[10px] font-mono text-[#c92035] mt-0.5">Bắt buộc cho giáo viên</p>
+                )}
+              </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button
@@ -228,6 +261,7 @@ export default function AdminUsersPage() {
                   <tr className="bg-[#f4f6f9] text-[#6b7280] font-mono text-[11px] uppercase tracking-wider">
                     <th className="py-3 px-4 font-semibold">Username</th>
                     <th className="py-3 px-3 font-semibold">Vai trò</th>
+                    <th className="py-3 px-3 font-semibold">Lớp chủ nhiệm</th>
                     <th className="py-3 px-3 font-semibold">Ngày tạo</th>
                     <th className="py-3 px-4 text-right font-semibold">Thao tác</th>
                   </tr>
@@ -245,6 +279,16 @@ export default function AdminUsersPage() {
                           </span>
                           {currentUser?.username === u.username && (
                             <span className="ml-1.5 font-mono text-[10px] text-[#9ca3af]">(bạn)</span>
+                          )}
+                        </td>
+                        {/* Feature 9: show homeroom_class */}
+                        <td className="py-3 px-3 font-mono text-[11px]">
+                          {u.homeroom_class ? (
+                            <span className="px-2 py-0.5 bg-[#fef3c7] text-[#92400e] rounded text-[10px] font-semibold">
+                              {u.homeroom_class}
+                            </span>
+                          ) : (
+                            <span className="text-[#9ca3af]">—</span>
                           )}
                         </td>
                         <td className="py-3 px-3 font-mono text-[11px] text-[#6b7280] whitespace-nowrap">

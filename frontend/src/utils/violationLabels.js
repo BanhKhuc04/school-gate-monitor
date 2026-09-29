@@ -3,6 +3,8 @@
 export const VIOLATION_LABELS = {
   NO_HELMET: 'Không đội mũ',
   PLATE_NOT_REGISTERED: 'Biển số lạ',
+  NO_PLATE: 'Không có biển số',
+  PLATE_OBSCURED: 'Biển số bị che/mờ',
   PLATE_UNREADABLE: 'Không đọc được biển số',
   MULTIPLE: 'Nhiều vi phạm',
   RIDING_THROUGH_GATE: 'Xe chạy qua cổng',

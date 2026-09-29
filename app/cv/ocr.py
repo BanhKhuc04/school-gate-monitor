@@ -9,6 +9,8 @@ import re
 import numpy as np
 import easyocr
 
+from app.config import DEVICE
+
 
 # Lazy initialization của EasyOCR Reader
 _reader = None
@@ -18,9 +20,10 @@ def _get_reader():
     """Lazy init EasyOCR Reader (tải trọng số lần đầu)."""
     global _reader
     if _reader is None:
-        print("[OCR] Đang khởi tạo EasyOCR Reader (lần đầu tải trọng số)...")
+        use_gpu = DEVICE == "cuda"
+        print(f"[OCR] Đang khởi tạo EasyOCR Reader (lần đầu tải trọng số, gpu={use_gpu})...")
         # 'en' cho ký tự Latin, có thể thêm 'vi' nếu cần
-        _reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+        _reader = easyocr.Reader(['en'], gpu=use_gpu, verbose=False)
         print("[OCR] EasyOCR Reader đã sẵn sàng.")
     return _reader
 

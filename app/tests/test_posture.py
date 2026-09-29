@@ -19,7 +19,9 @@ class TestRunPostureDetectionGroupDict:
     def test_uses_person_bbox_from_group_dict(self):
         from app.cv.pipeline import VideoPipeline
 
+        from concurrent.futures import ThreadPoolExecutor
         pipeline = VideoPipeline.__new__(VideoPipeline)  # skip __init__ (no camera/models)
+        pipeline._detect_pool = ThreadPoolExecutor(max_workers=1)
         frame = np.zeros((200, 200, 3), dtype=np.uint8)
         person = Detection(class_name="person", confidence=0.9, bbox=(10, 10, 100, 190))
         groups = [{"_person": person, "helmet_dets": [], "plate_dets": []}]

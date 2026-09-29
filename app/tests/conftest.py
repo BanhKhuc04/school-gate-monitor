@@ -60,10 +60,11 @@ def test_app(request, tmp_path_factory):
             if cur.fetchone()[0] == 0:
                 now = int(time.time())
                 cur.executemany(
-                    "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-                    [("admin", test_hash, "admin", now),
-                     ("security", test_hash, "security", now),
-                     ("management", test_hash, "management", now)],
+                    "INSERT INTO users (username, password_hash, role, homeroom_class, created_at) VALUES (?, ?, ?, ?, ?)",
+                    [("admin", test_hash, "admin", None, now),
+                     ("security", test_hash, "security", None, now),
+                     ("management", test_hash, "management", None, now),
+                     ("teacher", test_hash, "teacher", "10A1", now)],
                 )
                 conn.commit()
         finally:

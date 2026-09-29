@@ -19,6 +19,7 @@ export default function RequireRole({ allow = [], children }) {
       admin: '/admin/vehicles',
       security: '/guard',
       management: '/dashboard',
+      teacher: '/teacher/violations',
     };
     return <Navigate to={defaults[user.role] || '/login'} replace />;
   }

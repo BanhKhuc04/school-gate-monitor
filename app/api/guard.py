@@ -5,12 +5,12 @@ Guard API routes.
 """
 import asyncio
 import json
+import time
 import jwt as _jwt
 import threading
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.cv.pipeline import get_pipeline
 from app.auth import decode_access_token
 
 router = APIRouter(prefix="/guard", tags=["guard"])
@@ -41,26 +41,34 @@ async def video_feed(
         raise HTTPException(status_code=401, detail="Insufficient permissions")
 
     import cv2
+    from app.cv.pipeline import get_pipeline
 
     def generate():
         pipeline = get_pipeline(gate_id=gate)
 
+        # Giới hạn tốc độ xuất MJPEG — TRƯỚC ĐÂY vòng lặp này không có sleep,
+        # chạy hết tốc lực: liên tục copy frame (có lock, ~2.7MB/lần ở 1280x720)
+        # + cv2.imencode hàng trăm-hàng nghìn lần/giây, chiếm trọn 1 CPU core và
+        # tranh giành CPU trực tiếp với các luồng YOLO detect trong pipeline nền
+        # — đây là nguyên nhân chính khiến hệ thống lag dù pipeline detect vẫn
+        # chạy bình thường. 20 FPS là đủ mượt cho giám sát qua trình duyệt.
+        target_interval = 1.0 / 20
+
         while True:
+            loop_start = time.monotonic()
             frame = pipeline.get_frame()
 
-            if frame is None:
-                continue
+            if frame is not None:
+                ret, jpeg = cv2.imencode('.jpg', frame)
+                if ret:
+                    # MJPEG multipart format
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' +
+                           jpeg.tobytes() +
+                           b'\r\n')
 
-            # Encode JPEG
-            ret, jpeg = cv2.imencode('.jpg', frame)
-            if not ret:
-                continue
-
-            # MJPEG multipart format
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' +
-                   jpeg.tobytes() +
-                   b'\r\n')
+            elapsed = time.monotonic() - loop_start
+            time.sleep(max(target_interval - elapsed, 0.01))
 
     return StreamingResponse(
         generate(),
@@ -93,6 +101,7 @@ async def websocket_alerts(websocket: WebSocket, gate: str = "main"):
 
     try:
         while True:
+            from app.cv.pipeline import get_pipeline
             pipeline = get_pipeline(gate_id=gate)
             alert = pipeline.get_alert()
 

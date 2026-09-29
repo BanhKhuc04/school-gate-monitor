@@ -23,7 +23,7 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
-def create_access_token(username: str, role: str) -> str:
+def create_access_token(username: str, role: str, homeroom_class: str | None = None) -> str:
     """Create a JWT access token."""
     expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS)
     payload = {
@@ -31,6 +31,8 @@ def create_access_token(username: str, role: str) -> str:
         "role": role,
         "exp": expire,
     }
+    if homeroom_class is not None:
+        payload["homeroom_class"] = homeroom_class
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
@@ -60,7 +62,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     """
     try:
         payload = decode_access_token(token)
-        return {"username": payload["sub"], "role": payload["role"]}
+        user = {"username": payload["sub"], "role": payload["role"]}
+        if "homeroom_class" in payload:
+            user["homeroom_class"] = payload["homeroom_class"]
+        return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

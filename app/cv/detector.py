@@ -4,6 +4,8 @@ from typing import List
 import numpy as np
 from ultralytics import YOLO
 
+from app.config import DEVICE
+
 
 @dataclass
 class Detection:
@@ -25,6 +27,8 @@ class HelmetPlateDetector:
             conf_threshold: Ngưỡng confidence tối thiểu (0.0 - 1.0)
         """
         self.model = YOLO(model_path)
+        self.model.to(DEVICE)
+        print(f"[Detector] {model_path} on device={DEVICE}")
         self.conf_threshold = conf_threshold
         self._class_names = None
     

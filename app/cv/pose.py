@@ -2,7 +2,8 @@
 Posture detection using YOLOv8-pose (yolov8n-pose.pt).
 
 Automatically downloads the model on first run (requires internet).
-Uses ultralytics + onnxruntime CPU — no GPU needed.
+Runs on GPU (CUDA) when torch detects one, falls back to CPU otherwise —
+see app.config.DEVICE.
 
 Keypoints used for posture classification:
   - 11: left_hip
@@ -26,9 +27,13 @@ from typing import Optional, List, Tuple
 
 import numpy as np
 
-# Global model instance (loaded once, shared)
-_pose_model: Optional["YOLO"] = None
-_pose_lock = threading.Lock()
+# Model instance theo từng thread (thread-local), KHÔNG dùng 1 instance dùng
+# chung nữa — pose detection giờ chạy song song cho nhiều person trong cùng 1
+# frame (xem VideoPipeline._run_posture_detection), và ultralytics YOLO không
+# đảm bảo thread-safe khi nhiều thread gọi CÙNG 1 instance đồng thời (internal
+# predictor state có thể bị race). Mỗi worker thread tự load model riêng (nhẹ,
+# ~6MB, chỉ load 1 lần/thread) để chạy đồng thời an toàn.
+_pose_local = threading.local()
 
 # Keypoint indices (COCO 17-keypoint format used by YOLOv8-pose)
 KP_LEFT_HIP, KP_RIGHT_HIP = 11, 12
@@ -37,15 +42,18 @@ KP_LEFT_ANKLE, KP_RIGHT_ANKLE = 15, 16
 
 
 def _get_pose_model() -> "YOLO":
-    """Get or initialize the global YOLO pose model."""
-    global _pose_model
-    if _pose_model is None:
+    """Get or initialize the YOLO pose model for the CURRENT thread."""
+    model = getattr(_pose_local, "model", None)
+    if model is None:
         from ultralytics import YOLO
-        print("[Pose] Loading yolov8n-pose.pt...")
+        from app.config import DEVICE
+        print(f"[Pose] Loading yolov8n-pose.pt on thread {threading.current_thread().name} (device={DEVICE})...")
         # Download + cache automatically (first run ~6MB)
-        _pose_model = YOLO("yolov8n-pose.pt")
+        model = YOLO("yolov8n-pose.pt")
+        model.to(DEVICE)
+        _pose_local.model = model
         print("[Pose] Pose model loaded")
-    return _pose_model
+    return model
 
 
 def angle_between_vectors(v1: Tuple[float, float], v2: Tuple[float, float]) -> float:
@@ -120,16 +128,18 @@ class PostureDetector:
         detector = PostureDetector()
         keypoints = detector.detect_pose(person_crop)  # returns list of keypoints dicts
         posture = classify_posture(keypoints)
-    """
 
-    def __init__(self):
-        self._model = None  # lazy load
+    Một instance CÓ THỂ được dùng đồng thời từ nhiều thread (pipeline submit
+    detector.detect_pose() cho nhiều person song song qua ThreadPoolExecutor).
+    Vì vậy KHÔNG cache model vào self ở đây — self là state DÙNG CHUNG giữa các
+    thread, cache vào đó sẽ làm thread thứ 2 trở đi vô tình dùng lại model của
+    thread đầu tiên thay vì model thread-local của chính nó. `model` luôn gọi
+    thẳng `_get_pose_model()`, nơi cache thật sự nằm ở threading.local().
+    """
 
     @property
     def model(self):
-        if self._model is None:
-            self._model = _get_pose_model()
-        return self._model
+        return _get_pose_model()
 
     def detect_pose(self, person_crop: np.ndarray) -> List[dict]:
         """

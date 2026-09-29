@@ -14,24 +14,34 @@ from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.dev import router as dev_router
 from app.api.system import router as system_router
-from app.cv.pipeline import start_all_pipelines, stop_all_pipelines
 from app.db import init_db
+
+_pipeline_started = False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan - start/stop all pipeline threads."""
+    """FastAPI lifespan - start/stop all pipeline threads (lazy import avoids blocking on missing CV libs)."""
+    global _pipeline_started
     # Startup
     print("[App] Initializing database...")
     init_db()
-    print("[App] Starting all pipeline threads...")
-    start_all_pipelines()
-
-    yield
-
-    # Shutdown
-    print("[App] Stopping all pipeline threads...")
-    stop_all_pipelines()
+    try:
+        from app.cv.pipeline import start_all_pipelines, stop_all_pipelines
+        print("[App] Starting all pipeline threads...")
+        start_all_pipelines()
+        _pipeline_started = True
+    except ImportError as e:
+        print(f"[App] CV libs not available, skipping pipeline start: {e}")
+        yield
+        return
+    else:
+        yield
+        # Shutdown (only if pipelines were started)
+        print("[App] Stopping all pipeline threads...")
+        stop_all_pipelines()
+        return
+    yield  # fallback for when _pipeline_started is False (shouldn't reach here)
 
 
 def create_app() -> FastAPI:

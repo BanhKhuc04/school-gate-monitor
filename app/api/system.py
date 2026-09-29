@@ -4,7 +4,7 @@ System health & maintenance API.
 GET  /api/system/health              — pipeline status + DB/storage stats (admin, management)
 POST /api/system/snapshots/cleanup   — delete old snapshots + null DB paths (admin only)
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 import os
 import glob
@@ -93,7 +93,10 @@ def get_health(
     and not sensitive, so no separate slim endpoint is worth building for them).
     """
     from app.config import GATES
-    from app.cv.pipeline import get_pipeline
+    try:
+        from app.cv.pipeline import get_pipeline
+    except Exception:
+        pass  # pipeline unavailable (no ultralytics in test env) — skip per-gate status
 
     stats = get_violation_stats()
     snapshot_count, snapshot_size = _snapshots_size_mb()
@@ -136,9 +139,12 @@ def cleanup_old_snapshots(
     if older_than_days < 1 or older_than_days > 3650:
         raise HTTPException(status_code=422, detail="older_than_days must be 1-3650")
 
-    paths = get_old_violation_snapshot_paths(older_than_days)
+    from app.db import get_old_violation_media_paths
+    snapshot_paths, clip_paths = get_old_violation_media_paths(older_than_days)
+    all_paths = snapshot_paths + clip_paths
+
     deleted_files = 0
-    for path in paths:
+    for path in all_paths:
         full_path = path if os.path.isabs(path) else os.path.join(SNAPSHOTS_DIR, os.path.basename(path))
         try:
             if os.path.exists(full_path):
@@ -152,4 +158,37 @@ def cleanup_old_snapshots(
     return {
         "deleted_files": deleted_files,
         "updated_records": updated_records,
+    }
+
+
+# ─── Feature 8 (backend): Preview snapshot cleanup ───────────────────────────────
+
+@router.get("/snapshots/preview")
+def preview_snapshot_cleanup(
+    older_than_days: int = Query(default=90, ge=1, le=3650),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """
+    GET /api/system/snapshots/preview — xem trước số file + dung lượng trước khi dọn.
+    Feature 8.
+    """
+    if older_than_days < 1 or older_than_days > 3650:
+        raise HTTPException(status_code=422, detail="older_than_days must be 1-3650")
+
+    from app.db import get_old_violation_media_paths
+    snapshot_paths, clip_paths = get_old_violation_media_paths(older_than_days)
+    total_size = 0
+    for paths in [snapshot_paths, clip_paths]:
+        for path in paths:
+            full = path if os.path.isabs(path) else os.path.join(SNAPSHOTS_DIR, os.path.basename(path))
+            try:
+                if os.path.exists(full):
+                    total_size += os.path.getsize(full)
+            except OSError:
+                pass
+    return {
+        "file_count": len(snapshot_paths) + len(clip_paths),
+        "snapshot_count": len(snapshot_paths),
+        "clip_count": len(clip_paths),
+        "total_size_mb": round(total_size / (1024 * 1024), 2),
     }
