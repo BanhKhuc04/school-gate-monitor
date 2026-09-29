@@ -998,22 +998,30 @@ def find_correlation_candidates(new_event: dict, window_sec: float) -> list[dict
         conn.close()
 
 
-def mark_correlation_unmatched(violation_id: int) -> None:
+def mark_correlation_unmatched(violation_id: int, status: str = 'unmatched') -> None:
     """
-    Đánh dấu 1 violation là đã thử ghép nhưng không tìm được ứng viên. Dùng
-    khi cần phân biệt 'chưa thử' (NULL) vs 'đã thử không có' (unmatched) — để
-    tránh poll correlation job chạy đè lặp đi lặp lại. Không bắt buộc cho
-    correctness (Bước 3 hiện tại chỉ chạy try_correlate 1 lần/insert), giữ
-    lại để sau này có thể làm batch retry mà không cần đổi API.
+    Đánh dấu 1 violation là đã thử ghép nhưng KHÔNG tự ghép được (không có
+    ứng viên phù hợp, hoặc có ứng viên nhưng không đủ tin cậy để tự ghép).
+
+    status mặc định 'unmatched' (không tìm được ứng viên nào — chỉ 1 camera
+    thấy xe này, bình thường). Truyền status='needs_review' khi
+    event_correlator.find_correlation_candidate() trả về (None, 'needs_review')
+    — tức CÓ ứng viên nhưng 1 trong 2 bên đã không chắc biển số từ Bước 1,
+    hoặc bên mình không đọc được biển — bug đã gặp: nếu luôn hardcode
+    'unmatched' ở đây, tín hiệu "cần người kiểm tra" từ event_correlator.py bị
+    mất, người xem không biết đây là case mơ hồ cần chú ý.
+
+    Dùng để phân biệt 'chưa thử' (NULL) vs 'đã thử không có' — tránh poll
+    correlation job chạy đè lặp đi lặp lại.
     """
     with _write_lock:
         conn = get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE violation_events SET correlation_status = 'unmatched' "
+                "UPDATE violation_events SET correlation_status = ? "
                 "WHERE id = ? AND correlation_status IS NULL",
-                (violation_id,),
+                (status, violation_id),
             )
             conn.commit()
         finally:

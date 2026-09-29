@@ -758,21 +758,20 @@ class VideoPipeline:
                 mark_correlation_unmatched(new_event["id"])
                 return
 
-            best, status = find_correlation_candidate(
+            best, corr_status = find_correlation_candidate(
                 new_event, candidates, min_similarity=CORRELATION_MIN_SIMILARITY,
             )
             if best is None:
-                if status == "needs_review":
-                    # Có ứng viên nhưng bên nào đó status='needs_review' (Bước 1)
-                    # hoặc không có biển số để so → đánh dấu để người kiểm tra
-                    mark_correlation_unmatched(new_event["id"])
-                else:
-                    mark_correlation_unmatched(new_event["id"])
+                # BUG đã gặp: trước đây luôn ghi 'unmatched' bất kể corr_status
+                # là gì, làm mất tín hiệu 'needs_review' (có ứng viên nhưng 1
+                # trong 2 bên không chắc biển số từ Bước 1, hoặc bên mình không
+                # đọc được biển) — giờ truyền đúng corr_status xuống DB.
+                mark_correlation_unmatched(new_event["id"], status=corr_status)
                 return
 
-            ok = link_violation_events(new_event["id"], best["id"], status=status)
+            ok = link_violation_events(new_event["id"], best["id"], status=corr_status)
             if ok:
-                print(f"[Pipeline] Correlated #{new_event['id']} <-> #{best['id']} ({status})")
+                print(f"[Pipeline] Correlated #{new_event['id']} <-> #{best['id']} ({corr_status})")
             else:
                 # Race: 1 trong 2 đã bị ghép trước đó → đánh dấu unmatched
                 mark_correlation_unmatched(new_event["id"])

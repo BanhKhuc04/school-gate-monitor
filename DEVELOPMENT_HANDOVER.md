@@ -467,11 +467,28 @@ Next task: Bước 4 — tự động dọn dữ liệu cũ theo lịch (backgro
 
 Commit: `6ffe74d "Step 3: ghép 1 lượt xe từ 2 camera (trước + sau)"`
 
+### SESSION LOG — 2026-09-29 (đợt 2, review Bước 3 — bug fix)
+
+Goal: Rà soát độc lập báo cáo "Bước 3 xong" của Cursor trước khi cho phép sang Bước 4 (không tin báo cáo "test pass" suông — đọc thẳng code).
+
+Completed: Phát hiện + fix 1 bug correctness thật trong `_try_correlate()` (`app/cv/pipeline.py`): khi `find_correlation_candidate()` trả về `(None, "needs_review")` (có ứng viên cùng cửa sổ thời gian nhưng 1 trong 2 bên `status='needs_review'` từ Bước 1, hoặc bên mình không đọc được biển để so), code cũ gọi `mark_correlation_unmatched(new_event["id"])` — hàm này HARDCODE ghi `correlation_status='unmatched'` bất kể input, làm **mất hoàn toàn tín hiệu "cần người kiểm tra"** mà `event_correlator.py` đã tính đúng. Đây đúng là điểm plan đã cảnh báo trước ("ưu tiên correctness hơn dòng code ngắn") — 113/113 test vẫn pass vì không có test nào exercise `_try_correlate` end-to-end với case này, chỉ test `find_correlation_candidate` (pure function, đúng) và `link_violation_events` (đúng) riêng lẻ — khoảng trống ở đúng chỗ nối 2 hàm với nhau.
+
+Fix: `mark_correlation_unmatched(violation_id, status='unmatched')` nhận thêm param `status`; `_try_correlate` truyền đúng `corr_status` xuống thay vì hardcode.
+
+Files changed: `app/db.py`, `app/cv/pipeline.py`, `app/tests/test_event_correlator_db.py` (+2 test: 1 test hàm DB nhận đúng status, 1 test end-to-end `_try_correlate` với `VideoPipeline.__new__` + DB thật qua fixture `client`).
+
+Tests: 115/115 pass (113 cũ + 2 test hồi quy mới cho đúng bug này).
+
+Next task: Bước 4, không đổi — xem hướng dẫn ở SESSION LOG phía trên.
+
+Commit: (xem commit ngay sau entry này)
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: `6ffe74d` (Bước 3 đợt 2 — ghép 2 camera)
-System status: Backend/frontend chạy được, 113/113 test pass. Bước 1 (đa khung hình + confidence biển số) + Bước 3 (ghép 2 camera) đã code xong và verify thật qua 2 video training `C:\Users\khucv\Downloads\tranning\`. Correlation chạy đúng với 2 gate song song (matched/needs_review/unmatched đều đã được exercise qua test + script verify).
+Current stable commit: (xem git log — commit fix bug correlation, ngay sau `87c4a09`)
+System status: Backend/frontend chạy được, 115/115 test pass (đã fix 1 bug correctness ở `_try_correlate` — xem SESSION LOG ngay phía trên). Bước 1 (đa khung hình + confidence biển số) + Bước 3 (ghép 2 camera) đã code xong, verify thật qua video training, VÀ đã qua 1 vòng review độc lập.
 Safe to deploy: UNKNOWN — chưa deploy thử lên VPS, `JWT_SECRET_KEY` hardcode là rủi ro nếu deploy production như hiện trạng.
-Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file plan riêng). **Bước 1/7 + Bước 3/7 xong. Bước 4-7 CHƯA CODE — giao cho Cursor.**
+Current development phase: Đang triển khai đợt nâng cấp lớn theo kế hoạch 7 bước đã duyệt (file plan riêng). **Bước 1/7 + Bước 3/7 xong (đã review). Bước 4-7 CHƯA CODE — giao cho Cursor.**
 Next recommended task: Bước 4 (auto cleanup theo lịch + maintenance worker) — xem SESSION LOG ngay phía trên và file plan đã duyệt để lấy thiết kế đầy đủ (thread `MaintenanceWorker` pattern giống `VideoPipeline`, audit log bảng `system_maintenance_log`, lock chống chạy đè). Sau Bước 4 → Bước 5 (disk stats) → Bước 6 (backup SQLite online) → Bước 7 (continuous recording, nặng nhất, mặc định `CONTINUOUS_RECORDING_ENABLED=False` tới khi có benchmark).
 Critical warning for next developer (Cursor): **Không viết lại từ đầu bất kỳ phần nào đã DONE ở mục 5** — đặc biệt các mục đã có từ trước (Registered vehicle matching, Student/vehicle profile, Role permissions, Audit trail) VÀ 3 mục vừa xong trong các session gần nhất (Multi-frame OCR, Confidence scoring, Front/rear correlation). Làm đúng thứ tự Bước 4→5→6→7, mỗi bước: code → `pytest app/tests/ -v` (phải pass hết) → verify tay (dùng video training nếu liên quan tới pipeline camera) → **commit riêng từng bước** → cập nhật file này (mục 5, thêm SESSION LOG mới, mục 24) → mới sang bước kế. Bước 7 (continuous recording) mặc định `CONTINUOUS_RECORDING_ENABLED=False` — PHẢI benchmark FPS/latency trước khi đề xuất đổi mặc định, không tự ý đổi scope sang "chỉ ghi khi có người" nếu benchmark xấu — báo lại số liệu trước.
+**Bài học từ lần review này — áp dụng cho mọi bước sau:** "test pass 100%" không đồng nghĩa "logic đúng" nếu test không exercise đúng điểm nối giữa các hàm (ở đây: `find_correlation_candidate()` trả đúng nhưng `_try_correlate()` gọi hàm ghi DB sai tham số). Khi viết test cho Bước 4-7, ưu tiên ít nhất 1 test end-to-end qua đúng entry point thật (vd `MaintenanceWorker._run_loop`/`_run_job_safely`) chứ không chỉ test từng hàm con riêng lẻ.

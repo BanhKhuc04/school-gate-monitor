@@ -185,6 +185,57 @@ def test_mark_correlation_unmatched_sets_unmatched_for_null(client):
     assert row["correlation_status"] == "unmatched"
 
 
+def test_mark_correlation_unmatched_accepts_needs_review_status(client):
+    """Regression: mark_correlation_unmatched() từng HARDCODE 'unmatched' bất kể
+    tham số truyền vào — bug này làm mất tín hiệu 'cần kiểm tra' khi
+    _try_correlate() gọi nó cho case (None, 'needs_review') trả về từ
+    find_correlation_candidate() (1 trong 2 bên status='needs_review' từ Bước 1,
+    hoặc không đọc được biển để so). Giờ phải ghi đúng status truyền vào."""
+    a = _add(client, "29A12345", gate_id="main")
+    from app.db import mark_correlation_unmatched, get_connection
+    mark_correlation_unmatched(a, status="needs_review")
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT correlation_status FROM violation_events WHERE id = ?", (a,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["correlation_status"] == "needs_review"
+
+
+def test_try_correlate_persists_needs_review_not_unmatched_when_step1_uncertain(client):
+    """Regression end-to-end: VideoPipeline._try_correlate() với 1 event Bước 1 đã
+    gắn status='needs_review' (biển đọc không chắc) + có ứng viên cùng cửa sổ thời
+    gian ở gate khác → correlation_status LƯU VÀO DB phải là 'needs_review', KHÔNG
+    được là 'unmatched' (bug thật đã xảy ra: _try_correlate cũ hardcode gọi
+    mark_correlation_unmatched() không truyền status, luôn ghi 'unmatched' dù
+    find_correlation_candidate() đã trả đúng ('needs_review')."""
+    from app.cv.pipeline import VideoPipeline
+    from app.db import get_connection
+
+    new_id = _add(client, "29A12341", plate_matched=None, gate_id="main",
+                  status="needs_review")
+    _add(client, "29A12341", plate_matched=None, gate_id="secondary")  # ứng viên hợp lệ
+
+    pipeline = VideoPipeline.__new__(VideoPipeline)
+    new_event = {
+        "id": new_id, "gate_id": "main",
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
+        "plate_read": "29A12341", "plate_matched": None, "status": "needs_review",
+    }
+    pipeline._try_correlate(new_event)
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT correlation_status FROM violation_events WHERE id = ?", (new_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["correlation_status"] == "needs_review"
+
+
 # ─── Schema migrations đã chạy ────────────────────────────────────────────────
 
 def test_correlation_columns_exist(client):
