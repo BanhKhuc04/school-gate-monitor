@@ -24,16 +24,18 @@ from app.config import (
     CORRELATION_TIME_WINDOW_SEC, CORRELATION_MIN_SIMILARITY,
     CONTINUOUS_RECORDING_ENABLED, CONTINUOUS_RECORDING_SEGMENT_MINUTES,
     CONTINUOUS_RECORDING_FPS, CONTINUOUS_RECORDING_WIDTH, CONTINUOUS_RECORDING_HEIGHT,
-    CONTINUOUS_RECORDING_DIR,
+    CONTINUOUS_RECORDING_DIR, FRAME_EDGE_MARGIN_RATIO,
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
 from app.cv.ocr import read_plate_detailed, validate_plate_format
 from app.cv.plate_voter import PlateVoter
 from app.cv.event_correlator import find_correlation_candidate
+from app.cv.roi import to_pixel_polygon, filter_by_roi
 from app.db import (
     get_vehicle_by_plate, add_violation_event, find_correlation_candidates,
     link_violation_events, mark_correlation_unmatched, get_connection,
+    get_gate_roi, set_gate_roi, get_gate_camera_source,
 )
 
 
@@ -141,8 +143,31 @@ class VideoPipeline:
         self._plate_attempts = 0
         self._plate_successes = 0
 
+        # Đếm người đi bộ / người đi xe — cộng dồn từ lúc pipeline start, dùng để
+        # quan sát tỉ lệ khớp person↔vehicle qua thời gian (không có cách nào biết
+        # được ngoài xem video thủ công trước đây). Đếm theo LƯỢT xuất hiện mỗi
+        # frame, không phải người duy nhất (1 người ở lại nhiều frame bị đếm nhiều
+        # lần) — chỉ mang tính tương đối để phát hiện bất thường, không phải số liệu
+        # chính xác tuyệt đối.
+        self._pedestrian_count = 0
+        self._rider_count = 0
+
         # Feature 4: ring buffer for violation video clips
         self._clip_buffer: deque = deque(maxlen=VIOLATION_CLIP_SECONDS * VIOLATION_CLIP_FPS)
+
+        # Cache khớp xương (pose keypoints) của lần detect gần nhất — dùng để vẽ lại
+        # ở nhánh frame bị SKIP (giống _last_helmet_dets/_last_plate_dets/_last_person_dets).
+        # Thiếu cache này trước đây làm khớp xương CHỚP TẮT theo đúng chu kỳ FRAME_SKIP
+        # (chỉ vẽ ở frame có detect thật, biến mất ở frame skip) — bug phát hiện qua
+        # quan sát video thật.
+        self._last_pose_data: list[tuple[list, tuple]] = []
+
+        # Vùng nhận diện (ROI) — polygon tỉ lệ % lưu trong DB, tính sẵn sang
+        # pixel 1 lần ở đây. None = không giới hạn vùng (mặc định, không đổi
+        # hành vi cũ). set_roi() cập nhật sống khi admin lưu vùng mới, không
+        # cần restart pipeline.
+        self._roi_points = get_gate_roi(gate_id)
+        self._roi_polygon_px = to_pixel_polygon(self._roi_points, VIDEO_WIDTH, VIDEO_HEIGHT)
 
         # Đợt 2, Bước 7: continuous recorder — None nếu TẮT (mặc định).
         # Đặt SAU clip_buffer để 2 cơ chế ghi hình độc lập nhau không xung đột.
@@ -199,6 +224,13 @@ class VideoPipeline:
         with self._lock:
             return self._latest_frame.copy() if self._latest_frame is not None else None
     
+    def set_roi(self, points: list | None) -> None:
+        """Cập nhật vùng ROI sống (không restart pipeline). `points=None hoặc []`
+        tắt ROI. Lưu DB trước rồi mới gán vào pipeline đang chạy."""
+        set_gate_roi(self.gate_id, points or [])
+        self._roi_points = points or None
+        self._roi_polygon_px = to_pixel_polygon(self._roi_points, VIDEO_WIDTH, VIDEO_HEIGHT)
+
     def get_alert(self) -> Optional[dict]:
         """Lấy cảnh báo từ queue, trả None nếu không có."""
         try:
@@ -243,6 +275,8 @@ class VideoPipeline:
             "fps": fps,
             "avg_process_latency_ms": round(self._last_process_latency_ms, 1),
             "plate_read_success_rate": plate_success_rate,
+            "pedestrian_count": self._pedestrian_count,
+            "rider_count": self._rider_count,
         }
     
     def _open_webcam(self, gate_config: dict):
@@ -293,6 +327,9 @@ class VideoPipeline:
                         self._draw_detection(frame, det, COLOR_PLATE, COLOR_PLATE)
                     for det in self._last_person_dets:
                         self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
+                    for keypoints, offset in self._last_pose_data:
+                        self._draw_pose_keypoints(frame, keypoints, offset=offset)
+                    self._draw_roi(frame)
                     with self._lock:
                         self._latest_frame = frame
                     continue
@@ -321,10 +358,21 @@ class VideoPipeline:
                 helmet_dets = self._rescale_dets(helmet_future.result(), scale_x, scale_y)
                 plate_dets = self._rescale_dets(plate_future.result(), scale_x, scale_y)
 
+                # Vùng nhận diện (ROI): loại bỏ mọi detection có tâm ngoài vùng đã
+                # cấu hình — lọc CẢ helmet/plate (không chỉ person/vehicle), nếu
+                # không chúng vẫn được vẽ lên frame ngoài vùng dù không gán được
+                # vào person nào (gây cảm giác "vẫn nhận diện ngoài vùng").
+                if self._roi_polygon_px is not None:
+                    person_dets = filter_by_roi(person_dets, self._roi_polygon_px)
+                    vehicle_dets = filter_by_roi(vehicle_dets, self._roi_polygon_px)
+                    helmet_dets = filter_by_roi(helmet_dets, self._roi_polygon_px)
+                    plate_dets = filter_by_roi(plate_dets, self._roi_polygon_px)
+
                 # Không có person nào → bỏ qua toàn bộ frame (helmet/plate detect
                 # phía trên vẫn chạy xong nhưng kết quả không dùng tới, chấp nhận
                 # được vì tổng thời gian không tăng — chạy song song mà).
                 if not person_dets:
+                    self._draw_roi(frame)
                     with self._lock:
                         self._latest_frame = frame
                     continue
@@ -340,14 +388,28 @@ class VideoPipeline:
                 # Gom helmet + plate + loại phương tiện vào từng nhóm theo person
                 groups = self._group_by_person(person_dets, helmet_dets, plate_dets, vehicle_dets)
 
+                # Quan sát tỉ lệ người đi bộ / người đi xe (xem comment ở __init__)
+                for group in groups:
+                    if group.get('vehicle_type') is None:
+                        self._pedestrian_count += 1
+                    else:
+                        self._rider_count += 1
+
                 # Đếm số người/xe — đánh dấu chở quá số người quy định
                 self._count_riders_per_vehicle(groups)
 
                 # Phát hiện tư thế cho mỗi person box — ISOLATED try/except
                 groups = self._run_posture_detection(frame, groups)
 
-                # Xử lý vi phạm cho TỪNG nhóm riêng biệt
+                # Xử lý vi phạm cho TỪNG nhóm riêng biệt — bỏ qua nhóm mà xe (hoặc
+                # người, nếu không có xe khớp) còn chạm mép khung hình, tức có thể
+                # chưa vào/đang ra hết khung → chưa đủ căn cứ kết luận (đặc biệt
+                # NO_PLATE/PLATE_OBSCURED: biển số có thể chỉ chưa kịp lọt vào khung).
                 for group in groups:
+                    edge_ref = group.get('_vehicle') or group.get('_person')
+                    if edge_ref is not None and self._is_touching_frame_edge(edge_ref.bbox, frame_w, frame_h):
+                        continue
+
                     self._process_violations(
                         frame,
                         group['helmet_dets'],
@@ -368,6 +430,8 @@ class VideoPipeline:
                 # Vẽ box person (cam) — SAU khi OCR đã xong
                 for det in person_dets:
                     self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
+
+                self._draw_roi(frame)
 
                 # Feature 7: record frame timing + Feature 4: buffer frame for clip
                 self._frame_timestamps.append(time.time())
@@ -450,6 +514,27 @@ class VideoPipeline:
         # Text
         cv2.putText(frame, text, (x1, y1 - 2), FONT, 0.5, (255, 255, 255), 1)
 
+    def _draw_roi(self, frame: np.ndarray):
+        """Vẽ viền vùng ROI đang áp dụng (nếu có cấu hình) — không tô nền,
+        chỉ để bảo vệ/admin thấy trực quan vùng đang lọc detect."""
+        if self._roi_polygon_px is None:
+            return
+        cv2.polylines(frame, [self._roi_polygon_px], isClosed=True, color=(0, 200, 255), thickness=2)
+
+    @staticmethod
+    def _vertical_overlap(box_a: tuple, box_b: tuple) -> bool:
+        """True nếu 2 bbox có chồng lấp trục Y (không nhất thiết chồng X).
+
+        Dùng để lọc bớt trường hợp gán nhầm người đi bộ đứng/đi ngang qua thành
+        "người đang ngồi trên xe" chỉ vì tình cờ gần nhau theo trục X — người
+        thật sự ngồi trên xe luôn có box chồng lấp trục Y đáng kể với xe (phần
+        chân/thân ở khoảng cùng độ cao với xe), khác với người đi bộ ở xa hơn/gần
+        hơn camera (khác "độ sâu" nên khác dải Y dù trùng X do phối cảnh).
+        """
+        _, ay1, _, ay2 = box_a
+        _, by1, _, by2 = box_b
+        return max(ay1, by1) <= min(ay2, by2)
+
     def _group_by_person(self, person_dets: list, helmet_dets: list,
                          plate_dets: list, vehicle_dets: list = ()) -> list[dict]:
         """
@@ -458,10 +543,14 @@ class VideoPipeline:
         Logic:
         - helmet/no-helmet → gán vào person mà tâm điểm helmet nằm trong box person.
         - plate → gán vào person có x-center gần nhất, trong phạm vi chiều rộng box person.
-        - vehicle (motorcycle/bicycle, COCO) → cùng cách gán như plate; dùng để loại trừ
-          người đi bộ và người đi xe đạp thường khỏi việc bắt buộc đội mũ (chỉ xe máy và
-          xe đạp điện mới bắt buộc theo luật — COCO không phân biệt được xe đạp điện với
-          xe đạp thường, nên hiện tại coi mọi 'bicycle' là được miễn, đây là giới hạn đã biết).
+        - vehicle (motorcycle/bicycle, COCO) → x-center gần nhất trong phạm vi chiều rộng
+          person, VÀ phải chồng lấp trục Y với person (xem `_vertical_overlap`) — thêm
+          điều kiện Y để giảm gán nhầm người đi bộ đứng gần xe máy thành người đang lái
+          (chỉ so X trước đây dễ khớp nhầm khi người đi bộ tình cờ thẳng hàng X với 1
+          xe máy khác ở "độ sâu" khác trong khung hình). Dùng để loại trừ người đi bộ
+          và người đi xe đạp thường khỏi việc bắt buộc đội mũ (chỉ xe máy và xe đạp
+          điện mới bắt buộc theo luật — COCO không phân biệt được xe đạp điện với xe
+          đạp thường, nên hiện tại coi mọi 'bicycle' là được miễn, giới hạn đã biết).
 
         Trả về list nhóm, mỗi nhóm: {helmet_dets: [...], plate_dets: [...], vehicle_type: str|None}.
         """
@@ -505,7 +594,8 @@ class VideoPipeline:
                 vx1, vy1, vx2, vy2 = v.bbox
                 vcx = (vx1 + vx2) / 2
                 dist = abs(vcx - pcx)
-                if dist < best_v_dist and dist <= p_width:
+                if (dist < best_v_dist and dist <= p_width
+                        and self._vertical_overlap(person.bbox, v.bbox)):
                     best_v_dist = dist
                     vehicle_type = v.class_name.lower()
                     matched_vehicle = v
@@ -537,6 +627,22 @@ class VideoPipeline:
             if len(riders) > MAX_RIDERS_PER_MOTORCYCLE:
                 for g in riders:
                     g['too_many_riders'] = True
+
+    @staticmethod
+    def _is_touching_frame_edge(bbox: tuple, frame_w: int, frame_h: int) -> bool:
+        """True nếu bbox còn chạm mép khung hình (chưa vào/đang ra hết khung).
+
+        Không có tracker theo dõi vật thể qua nhiều frame, nên đây là tín hiệu
+        rẻ tiền nhất để biết "vật thể có khả năng chưa vào hết khung" — tránh
+        đánh giá vi phạm (và chụp snapshot) khi biển số/người còn bị cắt cụt ở
+        rìa ảnh. Nhược điểm đã biết: xe dừng hẳn sát mép khung sẽ không bao giờ
+        được đánh giá — chấp nhận được vì camera cổng trường luôn có luồng xe
+        di chuyển qua, không phải điểm dừng cố định.
+        """
+        x1, y1, x2, y2 = bbox
+        margin_x = frame_w * FRAME_EDGE_MARGIN_RATIO
+        margin_y = frame_h * FRAME_EDGE_MARGIN_RATIO
+        return x1 <= margin_x or x2 >= frame_w - margin_x or y1 <= margin_y or y2 >= frame_h - margin_y
 
     def _read_plate_voted(self, frame: np.ndarray, plate_det: Detection):
         """Đọc biển số qua PlateVoter (đa khung hình + confidence). Trả về
@@ -871,12 +977,15 @@ class VideoPipeline:
                 future = self._detect_pool.submit(detector.detect_pose, person_crop)
                 pending.append((group, (x1, y1), future))
 
+            pose_data = []
             for group, offset, future in pending:
                 keypoints = future.result()
                 posture = classify_posture(keypoints) if keypoints else 'unknown'
                 group['posture_status'] = posture
                 if keypoints:
                     self._draw_pose_keypoints(frame, keypoints, offset=offset)
+                    pose_data.append((keypoints, offset))
+            self._last_pose_data = pose_data
 
         except Exception:
             # ISOLATED: posture errors must not break the main pipeline
@@ -926,17 +1035,36 @@ class VideoPipeline:
 
 # Pipeline instances keyed by gate_id
 _pipelines: dict[str, VideoPipeline] = {}
+# ponytail: global lock (không per-gate) — đổi camera là thao tác admin hiếm,
+# tốn ~10s (nạp lại model) nên khoá cả tiến trình đổi là chấp nhận được. Nếu
+# không khoá: 2 request restart cùng lúc (double-click, 2 tab) sẽ tạo 2
+# VideoPipeline song song, cả 2 cùng mở RTSP → camera (thường chỉ cho 1 client
+# RTSP) từ chối phiên thứ 2, pipeline bị OFFLINE. Bug này gặp thật khi test.
+_pipelines_lock = threading.Lock()
+
+
+def _create_pipeline_locked(gate_id: str) -> VideoPipeline:
+    """Tạo VideoPipeline mới cho gate_id — PHẢI gọi trong _pipelines_lock."""
+    gate_config = GATES.get(gate_id)
+    if gate_config is None:
+        raise ValueError(f"Unknown gate_id: {gate_id}. Available gates: {list(GATES.keys())}")
+    # Nguồn camera chọn qua /admin/camera (nếu có) đè lên mặc định từ env var.
+    # Mutate GATES tại chỗ vì _run_loop() đọc thẳng từ GATES, không dùng
+    # gate_config truyền vào đây (chỉ dùng để lấy "name").
+    saved_source = get_gate_camera_source(gate_id)
+    if saved_source is not None:
+        gate_config["source"] = saved_source
+    pipeline = VideoPipeline(gate_id, gate_config)
+    _pipelines[gate_id] = pipeline
+    return pipeline
 
 
 def get_pipeline(gate_id: str = "main") -> VideoPipeline:
     """Lấy (hoặc tạo mới) pipeline instance cho gate_id."""
-    global _pipelines
-    if gate_id not in _pipelines:
-        gate_config = GATES.get(gate_id)
-        if gate_config is None:
-            raise ValueError(f"Unknown gate_id: {gate_id}. Available gates: {list(GATES.keys())}")
-        _pipelines[gate_id] = VideoPipeline(gate_id, gate_config)
-    return _pipelines[gate_id]
+    with _pipelines_lock:
+        if gate_id not in _pipelines:
+            _create_pipeline_locked(gate_id)
+        return _pipelines[gate_id]
 
 
 def start_all_pipelines():
@@ -965,3 +1093,20 @@ def stop_pipeline(gate_id: str = "main"):
     pipeline = _pipelines.get(gate_id)
     if pipeline:
         pipeline.stop()
+
+
+def restart_pipeline(gate_id: str = "main"):
+    """Dừng và tạo lại pipeline cho gate (nạp lại model + mở nguồn camera mới).
+
+    stop() đã shutdown() các ThreadPoolExecutor của instance cũ — chúng không
+    thể tái dùng, nên phải xoá khỏi _pipelines để bắt buộc tạo instance mới,
+    thay vì chỉ start() lại instance cũ (sẽ lỗi RuntimeError khi submit task
+    vào pool đã shutdown). Giữ nguyên _pipelines_lock suốt pop+stop+tạo mới để
+    không race với get_pipeline() gọi song song (xem comment ở _pipelines_lock).
+    """
+    with _pipelines_lock:
+        old = _pipelines.pop(gate_id, None)
+        if old:
+            old.stop()
+        pipeline = _create_pipeline_locked(gate_id)
+    pipeline.start()

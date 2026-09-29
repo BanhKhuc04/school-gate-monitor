@@ -8,6 +8,7 @@ const ICONS = {
   chart: 'M4 20V10m6 10V4m6 16v-7m6 7V8',
   shield: 'M12 3l7 3v6c0 5-3.4 8.4-7 9-3.6-.6-7-4-7-9V6l7-3Z',
   users: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 2.7-5 6-5s6 2 6 5m2 0c0-2.5 2-4.5 6-4.5s6 2 6 4.5',
+  zone: 'M4 6h16v12H4V6Zm3 3 4 4 3-3 3 5',
   logout: 'M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3m5-4 4-4-4-4m4 4H9',
 };
 
@@ -38,6 +39,8 @@ export default function Sidebar() {
   }
   if (user.role === 'admin') {
     links.push({ to: '/admin/health', label: 'Sức khỏe & Lưu trữ', icon: 'shield' });
+    links.push({ to: '/admin/roi', label: 'Vùng nhận diện', icon: 'zone' });
+    links.push({ to: '/admin/camera', label: 'Cấu hình Camera', icon: 'camera' });
     links.push({ to: '/admin/users', label: 'Quản lý tài khoản', icon: 'users' });
   }
   // Feature 9: teacher — scoped views for homeroom class

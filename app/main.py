@@ -14,6 +14,8 @@ from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.dev import router as dev_router
 from app.api.system import router as system_router
+from app.api.roi import router as roi_router
+from app.api.camera import router as camera_router
 from app.db import init_db
 
 _pipeline_started = False
@@ -92,6 +94,8 @@ def create_app() -> FastAPI:
     app.include_router(stats_router)
     app.include_router(users_router)
     app.include_router(system_router)
+    app.include_router(roi_router)
+    app.include_router(camera_router)
 
     return app
 

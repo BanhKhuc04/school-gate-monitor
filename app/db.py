@@ -121,6 +121,26 @@ def init_db():
             ON system_maintenance_log(started_at)
         ''')
 
+        # Vùng nhận diện (ROI) per-gate — xem app/cv/roi.py. points_json là
+        # danh sách [[x,y],...] tỉ lệ % khung hình, hoặc thiếu row = chưa cấu hình.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gate_roi (
+                gate_id    TEXT PRIMARY KEY,
+                points_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
+        # Nguồn camera per-gate chọn qua /admin/camera — override GATES[gate_id]["source"]
+        # đọc từ env var. Thiếu row = dùng mặc định trong app/config.py.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gate_camera_source (
+                gate_id    TEXT PRIMARY KEY,
+                source     TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
         # ── 2. Migrations cho bảng đã tồn tại (ALTER TABLE — an toàn nếu cột đã có) ──
         # posture_status + plate_format_valid (từ trước)
         try:
@@ -1192,6 +1212,77 @@ def link_violation_events(id_a: int, id_b: int, status: str = 'matched') -> bool
                 return False
             conn.commit()
             return True
+        finally:
+            conn.close()
+
+
+# ─── Vùng nhận diện (ROI) per-gate — xem app/cv/roi.py ───────────────────────
+
+def get_gate_roi(gate_id: str) -> list | None:
+    """Trả về danh sách điểm [[x,y],...] đã lưu cho gate, None nếu chưa cấu hình."""
+    import json
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT points_json FROM gate_roi WHERE gate_id = ?", (gate_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        points = json.loads(row["points_json"])
+        return points or None
+    finally:
+        conn.close()
+
+
+def set_gate_roi(gate_id: str, points: list) -> None:
+    """Lưu (hoặc thay thế) vùng ROI cho gate. `points=[]` nghĩa là tắt ROI."""
+    import json
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''INSERT INTO gate_roi (gate_id, points_json, updated_at)
+                   VALUES (?, ?, datetime('now'))
+                   ON CONFLICT(gate_id) DO UPDATE SET
+                       points_json = excluded.points_json,
+                       updated_at = excluded.updated_at''',
+                (gate_id, json.dumps(points)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# ─── Nguồn camera per-gate — chọn qua /admin/camera ──────────────────────────
+
+def get_gate_camera_source(gate_id: str) -> str | None:
+    """Trả về source đã lưu cho gate, None nếu chưa từng đổi (dùng mặc định env)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT source FROM gate_camera_source WHERE gate_id = ?", (gate_id,))
+        row = cursor.fetchone()
+        return row["source"] if row else None
+    finally:
+        conn.close()
+
+
+def set_gate_camera_source(gate_id: str, source: str) -> None:
+    """Lưu (hoặc thay thế) nguồn camera cho gate."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''INSERT INTO gate_camera_source (gate_id, source, updated_at)
+                   VALUES (?, ?, datetime('now'))
+                   ON CONFLICT(gate_id) DO UPDATE SET
+                       source = excluded.source,
+                       updated_at = excluded.updated_at''',
+                (gate_id, source),
+            )
+            conn.commit()
         finally:
             conn.close()
 

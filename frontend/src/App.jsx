@@ -6,6 +6,8 @@ import AdminVehiclesPage from './pages/AdminVehiclesPage';
 import AdminViolationsPage from './pages/AdminViolationsPage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import AdminHealthPage from './pages/AdminHealthPage';
+import AdminRoiPage from './pages/AdminRoiPage';
+import AdminCameraPage from './pages/AdminCameraPage';
 import DashboardPage from './pages/DashboardPage';
 import StudentViolationHistoryPage from './pages/StudentViolationHistoryPage';
 import RequireRole from './auth/RequireRole';
@@ -94,6 +96,30 @@ function AppRoutes() {
         }
       >
         <Route path="/admin/health" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <AdminRoiPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/roi" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <AdminCameraPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/camera" element={null} />
       </Route>
 
       {/* Feature 9: Teacher routes — reuse admin pages with server-side scope filtering */}
