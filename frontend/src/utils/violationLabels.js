@@ -6,6 +6,7 @@ export const VIOLATION_LABELS = {
   NO_PLATE: 'Không có biển số',
   PLATE_OBSCURED: 'Biển số bị che/mờ',
   PLATE_UNREADABLE: 'Không đọc được biển số',
+  PLATE_LOW_CONFIDENCE: 'Biển số cần kiểm tra',
   MULTIPLE: 'Nhiều vi phạm',
   RIDING_THROUGH_GATE: 'Xe chạy qua cổng',
   TOO_MANY_RIDERS: 'Chở quá số người quy định',

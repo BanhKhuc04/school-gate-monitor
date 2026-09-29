@@ -34,6 +34,7 @@ VIOLATION_TYPE_LABELS = {
     'NO_PLATE': 'Không có biển số',
     'PLATE_OBSCURED': 'Biển số bị che/mờ',
     'PLATE_UNREADABLE': 'Không đọc được biển số',  # legacy, kept for historical data
+    'PLATE_LOW_CONFIDENCE': 'Biển số cần kiểm tra',  # đợt 2, Bước 1 — đọc được nhưng không đủ tin cậy
     'MULTIPLE': 'Nhiều vi phạm',
     'RIDING_THROUGH_GATE': 'Xe chạy qua cổng',
     'TOO_MANY_RIDERS': 'Chở quá số người quy định',
@@ -240,6 +241,7 @@ def list_violations_json(
     date_to: str = None,
     violation_type: str = None,
     plate: str = None,
+    status: str = None,
     current_user: dict = Depends(require_role("admin", "teacher", "management")),
 ):
     """
@@ -253,6 +255,7 @@ def list_violations_json(
         date_to: ISO timestamp end (inclusive)
         violation_type: e.g. 'NO_HELMET', 'PLATE_NOT_REGISTERED'
         plate: filter by plate number (partial match)
+        status: e.g. 'needs_review' (đợt 2, Bước 1)
     """
     import app.db as db
     # Feature 9: server-side scope enforcement for teacher role
@@ -268,6 +271,7 @@ def list_violations_json(
         violation_type=violation_type,
         plate=plate,
         student_class=class_filter,
+        status=status,
     )
     # Attach snapshot_url and clip_url to each item
     for row in result.get('items', []):

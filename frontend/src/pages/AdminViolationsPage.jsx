@@ -35,6 +35,11 @@ const VIOLATION_COLORS = {
     border: 'border-[#f0aab3]', dot: 'bg-[#c92035]',
     label: 'Không đọc được biển số',
   },
+  PLATE_LOW_CONFIDENCE: {
+    bg: 'bg-[#ede9fe]', text: 'text-[#5b21b6]',
+    border: 'border-[#c4b5fd]', dot: 'bg-[#7c3aed]',
+    label: 'Biển số cần kiểm tra',
+  },
   MULTIPLE: {
     bg: 'bg-[#dbe3ee]', text: 'text-[#7a1422]',
     border: 'border-[#bcc7de]', dot: 'bg-[#c92035]',
@@ -58,6 +63,11 @@ const STATUS_COLORS = {
     bg: 'bg-[#fef3c7]', text: 'text-[#92400e]',
     border: 'border-[#fcd34d]', dot: 'bg-[#f59e0b]',
     label: 'Chưa xử lý',
+  },
+  needs_review: {
+    bg: 'bg-[#ede9fe]', text: 'text-[#5b21b6]',
+    border: 'border-[#c4b5fd]', dot: 'bg-[#7c3aed]',
+    label: 'AI cần kiểm tra',
   },
   reviewed: {
     bg: 'bg-[#dbeafe]', text: 'text-[#1e40af]',
@@ -193,6 +203,13 @@ function ViolationDetailModal({ violation, onClose, onUpdate }) {
 
             <dt className="text-[#6b7280] font-mono text-[11px] uppercase">Biển số khớp</dt>
             <dd className="col-span-2 text-[#374151] font-mono">{v.plate_matched || '—'}</dd>
+
+            {v.plate_confidence != null && (
+              <>
+                <dt className="text-[#6b7280] font-mono text-[11px] uppercase">Độ tin cậy biển số</dt>
+                <dd className="col-span-2 text-[#374151] font-mono">{Math.round(v.plate_confidence * 100)}%</dd>
+              </>
+            )}
 
             <dt className="text-[#6b7280] font-mono text-[11px] uppercase">Học sinh</dt>
             <dd className="col-span-2 text-[#374151] font-semibold">

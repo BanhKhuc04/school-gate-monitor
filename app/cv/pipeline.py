@@ -20,10 +20,12 @@ from app.config import (
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, DETECT_WIDTH, DETECT_HEIGHT,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
+    PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
 )
 from app.cv.capture import WebcamStream
 from app.cv.detector import HelmetPlateDetector, Detection
-from app.cv.ocr import read_plate, validate_plate_format
+from app.cv.ocr import read_plate_detailed, validate_plate_format
+from app.cv.plate_voter import PlateVoter
 from app.db import get_vehicle_by_plate, add_violation_event
 
 
@@ -108,12 +110,16 @@ class VideoPipeline:
         # Cooldown cho ghi log vi phạm vào DB: {(plate_type, violation_type): last_time}
         self._last_log_time: dict = {}
 
-        # Cache OCR gần nhất theo vị trí biển số trên khung hình — EasyOCR chạy
-        # CPU tốn 300-800ms/lần; nếu chạy lại mỗi frame detect cho CÙNG 1 xe đang
-        # đứng/đi qua cổng ở gần đúng vị trí cũ thì lãng phí toàn bộ thời gian đó
-        # và làm nghẽn cả vòng lặp đọc frame. Key: ô lưới thô quanh tâm bbox biển
-        # số, TTL ngắn vì xe di chuyển qua khung hình khá nhanh.
-        self._plate_ocr_cache: dict = {}
+        # Vote biển số qua nhiều lần đọc gần nhau (vị trí + thời gian) — thay cho
+        # cache 1-giá-trị cũ. EasyOCR CPU tốn 300-800ms/lần nên vẫn cache theo vị
+        # trí như trước, nhưng giờ giữ nhiều mẫu để tính confidence + biết khi nào
+        # KHÔNG chắc chắn (đọc lệch nhau liên tục) thay vì tin tuyệt đối 1 lần đọc.
+        self._plate_voter = PlateVoter(
+            grid_px=60,
+            window_sec=PLATE_VOTE_WINDOW_SEC,
+            min_agree=PLATE_VOTE_MIN_AGREE,
+            min_confidence_single=PLATE_MIN_CONFIDENCE_SINGLE,
+        )
 
         # Timestamps for health monitoring
         self._start_time: float = time.time()
@@ -494,38 +500,10 @@ class VideoPipeline:
                 for g in riders:
                     g['too_many_riders'] = True
 
-    _OCR_CACHE_GRID = 60      # px — ô lưới thô để coi 2 lần detect là "cùng 1 biển"
-    _OCR_CACHE_TTL = 1.5      # giây — thời gian tái dùng kết quả OCR cũ
-    _OCR_CACHE_MAX_SIZE = 200  # ngưỡng dọn cache để không phình vô hạn qua nhiều giờ chạy
-
-    def _read_plate_cached(self, frame: np.ndarray, plate_det: Detection) -> str:
-        """
-        Đọc biển số có cache theo vị trí. EasyOCR (CPU) tốn 300-800ms/lần — nếu
-        chạy lại mỗi frame detect cho cùng 1 xe đứng/đi qua cổng ở gần đúng vị trí
-        cũ thì lãng phí toàn bộ thời gian đó. Cache theo ô lưới thô quanh tâm bbox,
-        TTL ngắn vì xe di chuyển qua khung hình khá nhanh — không dùng để né OCR
-        vĩnh viễn, chỉ tránh lặp lại trong vài frame liên tiếp gần nhau.
-        """
-        x1, y1, x2, y2 = plate_det.bbox
-        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-        key = (cx // self._OCR_CACHE_GRID, cy // self._OCR_CACHE_GRID)
-
-        now = time.time()
-        cached = self._plate_ocr_cache.get(key)
-        if cached is not None and (now - cached[1]) < self._OCR_CACHE_TTL:
-            return cached[0]
-
-        crop = frame[y1:y2, x1:x2]
-        plate_read = ""
-        if crop.size > 0 and crop.shape[0] > 20 and crop.shape[1] > 40:
-            plate_read = read_plate(crop)
-
-        self._plate_ocr_cache[key] = (plate_read, now)
-        if len(self._plate_ocr_cache) > self._OCR_CACHE_MAX_SIZE:
-            self._plate_ocr_cache = {
-                k: v for k, v in self._plate_ocr_cache.items() if now - v[1] < self._OCR_CACHE_TTL
-            }
-        return plate_read
+    def _read_plate_voted(self, frame: np.ndarray, plate_det: Detection):
+        """Đọc biển số qua PlateVoter (đa khung hình + confidence). Trả về
+        PlateReadResult — xem app/cv/plate_voter.py."""
+        return self._plate_voter.read(frame, plate_det, read_plate_detailed)
 
     def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list,
                          posture_status: str = 'unknown', vehicle_type: str | None = None,
@@ -557,20 +535,28 @@ class VideoPipeline:
         has_with_helmet = any('With Helmet' in d.class_name for d in helmet_dets)
         has_without_helmet = any('Without Helmet' in d.class_name for d in helmet_dets)
 
-        # Đọc biển số từ plate detections (chỉ 1 plate gán vào nhóm này) — có cache
-        # theo vị trí để tránh chạy lại EasyOCR cho cùng 1 xe (xem _read_plate_cached)
+        # Đọc biển số từ plate detections (chỉ 1 plate gán vào nhóm này) — vote qua
+        # nhiều khung hình + confidence (xem _read_plate_voted / app/cv/plate_voter.py)
         plate_read = ""
+        plate_confidence = None
+        needs_review = False
         if plate_dets:
             best_plate = plate_dets[0]  # Đã được gán ở _group_by_person
-            plate_read = self._read_plate_cached(frame, best_plate)
+            plate_result = self._read_plate_voted(frame, best_plate)
+            plate_read = plate_result.text
+            plate_confidence = plate_result.confidence if plate_read else None
+            needs_review = bool(plate_read) and not plate_result.is_confident
             # Feature 7: track plate read attempts/successes
             self._plate_attempts += 1
             if plate_read:
                 self._plate_successes += 1
 
-        # Tra whitelist
+        # Tra whitelist — KHÔNG tra khi needs_review=True: 1 lần đọc mơ hồ/lệch
+        # nhau giữa các frame không đủ tin cậy để gán vào 1 học sinh cụ thể. Đây
+        # là chỗ áp dụng "không tự đoán" — thà để needs_review cho người kiểm tra
+        # còn hơn tự khớp nhầm biển số.
         plate_matched = None
-        if plate_read:
+        if plate_read and not needs_review:
             vehicle = get_vehicle_by_plate(plate_read)
             if vehicle:
                 plate_matched = vehicle['plate_number']
@@ -596,30 +582,34 @@ class VideoPipeline:
         # 2. Có box biển số nhưng OCR đọc rỗng → bị che/mờ/hỏng
         elif not plate_read:
             violation_types.append("PLATE_OBSCURED")
-        
-        # 2. Có đọc được biển số nhưng không tìm thấy trong whitelist
-        if plate_read and not plate_matched:
+        # 3. Đọc được nhưng không đủ tin cậy (đa khung hình không đồng nhất /
+        # confidence thấp) → cần người kiểm tra, KHÔNG khẳng định là biển lạ
+        elif needs_review:
+            violation_types.append("PLATE_LOW_CONFIDENCE")
+
+        # 4. Đọc được, đủ tin cậy, nhưng không tìm thấy trong whitelist
+        if plate_read and not needs_review and not plate_matched:
             violation_types.append("PLATE_NOT_REGISTERED")
         
-        # 3. Không có mũ bảo hiểm (có Without Helmet mà không có With Helmet).
+        # 5. Không có mũ bảo hiểm (có Without Helmet mà không có With Helmet).
         # Dắt bộ xe (posture == 'standing') không bắt buộc đội mũ theo luật —
         # chỉ bắt lỗi khi đang ngồi lái (riding) hoặc không xác định được tư thế
         # (unknown, giữ hành vi cũ để không bỏ sót khi pose detection thất bại).
         if has_without_helmet and not has_with_helmet and posture_status != 'standing':
             violation_types.append("NO_HELMET")
 
-        # 4. Tư thế đang ngồi xe (riding) + có helmet → vi phạm đặc biệt
+        # 6. Tư thế đang ngồi xe (riding) + có helmet → vi phạm đặc biệt
         if posture_status == 'riding' and has_with_helmet and not has_without_helmet:
             violation_types.append("RIDING_THROUGH_GATE")
 
-        # 5. Tư thế đang ngồi xe (riding) + không helmet → cũng là riding
+        # 7. Tư thế đang ngồi xe (riding) + không helmet → cũng là riding
         if posture_status == 'riding' and not has_with_helmet:
             if "NO_HELMET" in violation_types:
                 violation_types.remove("NO_HELMET")
             if "RIDING_THROUGH_GATE" not in violation_types:
                 violation_types.append("RIDING_THROUGH_GATE")
 
-        # 6. Chở quá số người quy định (đếm sẵn ở _count_riders_per_vehicle)
+        # 8. Chở quá số người quy định (đếm sẵn ở _count_riders_per_vehicle)
         if too_many_riders:
             violation_types.append("TOO_MANY_RIDERS")
 
@@ -656,11 +646,13 @@ class VideoPipeline:
         # vẽ box đè lên chính frame này ngay sau khi hàm này return — snapshot
         # phải là ảnh gốc chưa vẽ box, không copy sẽ lưu nhầm ảnh có box.
         frame_snapshot = frame.copy()
+        initial_status = 'needs_review' if needs_review else 'pending'
         self._io_pool.submit(
             self._persist_violation,
             frame_snapshot, snapshot_path, snapshot_filename,
             plate_read, plate_matched, helmet_status, violation_type,
             posture_status, plate_format_valid,
+            plate_confidence, self.gate_id, initial_status,
         )
 
         # Cập nhật cooldown ngay (không chờ IO xong) — tránh spam ghi khi nhiều
@@ -690,7 +682,10 @@ class VideoPipeline:
     def _persist_violation(self, frame: np.ndarray, snapshot_path: str, snapshot_filename: str,
                             plate_read: str, plate_matched: str | None, helmet_status: str,
                             violation_type: str, posture_status: str,
-                            plate_format_valid: bool | None):
+                            plate_format_valid: bool | None,
+                            plate_confidence: float | None = None,
+                            gate_id: str | None = None,
+                            status: str = 'pending'):
         """Lưu snapshot + ghi log vi phạm vào DB. Chạy trên _io_pool (thread nền)."""
         success = cv2.imwrite(snapshot_path, frame)
 
@@ -713,6 +708,9 @@ class VideoPipeline:
                 posture_status=posture_status,
                 plate_format_valid=plate_format_valid,
                 clip_path=clip_path,
+                plate_confidence=plate_confidence,
+                gate_id=gate_id,
+                status=status,
             )
             print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}")
         except Exception as e:

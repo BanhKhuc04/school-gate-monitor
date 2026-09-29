@@ -126,6 +126,17 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        # Đợt 2, Bước 1: độ tin cậy biển số (PlateVoter) + camera nào ghi nhận
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN plate_confidence REAL")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN gate_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+
         # Feature 9: giáo viên chủ nhiệm — homeroom_class (thêm sau vì bảng users đã tạo ở bước 1)
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN homeroom_class TEXT")
@@ -340,7 +351,10 @@ def add_violation_event(timestamp: str, plate_read: str = None,
                        violation_type: str = None, snapshot_path: str = None,
                        posture_status: str = None,
                        plate_format_valid: Optional[bool] = None,
-                       clip_path: str = None) -> int:
+                       clip_path: str = None,
+                       plate_confidence: Optional[float] = None,
+                       gate_id: str = None,
+                       status: str = 'pending') -> int:
     """
     Thêm sự kiện vi phạm.
 
@@ -354,6 +368,9 @@ def add_violation_event(timestamp: str, plate_read: str = None,
         posture_status: 'standing' | 'riding' | 'unknown' | None
         plate_format_valid: biển đọc được có khớp định dạng VN không (None nếu không có plate_read)
         clip_path: Đường dẫn video clip ngắn (Feature 4)
+        plate_confidence: độ tin cậy đọc biển số 0.0-1.0 (đợt 2, Bước 1 — PlateVoter)
+        gate_id: camera nào tạo ra bản ghi này (đợt 2, Bước 1 — cần cho Bước 3 ghép 2 camera)
+        status: 'pending' (mặc định) | 'needs_review' (AI không chắc chắn — Bước 1)
 
     Returns:
         ID của sự kiện mới
@@ -364,10 +381,11 @@ def add_violation_event(timestamp: str, plate_read: str = None,
             cursor = conn.cursor()
             cursor.execute(
                 '''INSERT INTO violation_events
-                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path, plate_confidence, gate_id, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status,
-                 None if plate_format_valid is None else int(plate_format_valid), clip_path)
+                 None if plate_format_valid is None else int(plate_format_valid), clip_path,
+                 plate_confidence, gate_id, status)
             )
             conn.commit()
             return cursor.lastrowid
@@ -383,6 +401,7 @@ def list_violations(
     violation_type: Optional[str] = None,
     plate: Optional[str] = None,
     student_class: Optional[str] = None,  # Feature 9: teacher scope filter
+    status: Optional[str] = None,  # Đợt 2, Bước 1: lọc riêng 'needs_review'
 ) -> List[dict]:
     """
     Liệt kê các sự kiện vi phạm với phân trang và lọc.
@@ -395,6 +414,7 @@ def list_violations(
         violation_type: Lọc theo loại vi phạm (e.g. 'NO_HELMET')
         plate: Lọc theo biển số (tìm chứa, không phải khớp tuyệt đối)
         student_class: Lọc theo lớp học sinh (Feature 9 — teacher scope)
+        status: Lọc theo trạng thái xử lý (e.g. 'needs_review')
 
     Returns:
         {"total": int, "limit": int, "offset": int, "items": [dict]}
@@ -423,6 +443,9 @@ def list_violations(
         if student_class:
             conditions.append('rv.student_class = ?')
             params.append(student_class)
+        if status:
+            conditions.append('ve.status = ?')
+            params.append(status)
 
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
 

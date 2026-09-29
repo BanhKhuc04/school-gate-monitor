@@ -125,6 +125,11 @@ REPEAT_OFFENDER_THRESHOLD = 3   # >= 3 vi phạm trong window → gắn cờ
 VIOLATION_CLIP_SECONDS = 4
 VIOLATION_CLIP_FPS = 8          # thấp hơn hiển thị (20fps) để giảm CPU encode + dung lượng
 
+# Đợt 2, Bước 1: vote biển số đa khung hình — xem app/cv/plate_voter.py
+PLATE_VOTE_WINDOW_SEC = 2.5         # cửa sổ thời gian giữ mẫu đọc để vote
+PLATE_VOTE_MIN_AGREE = 2            # cần >= N lần đọc giống nhau trong window để tin
+PLATE_MIN_CONFIDENCE_SINGLE = 0.55  # HOẶC 1 lần đọc confidence >= ngưỡng này là đủ tin ngay
+
 # JWT Authentication
 # secrets.token_hex(32) → hardcoded (không sinh lại mỗi lần khởi động)
 JWT_SECRET_KEY = "a3f8c1b9e2d47f0a5c6e8b3d9f1e2a4c7b5d9f3e1a8c6b4d2f0e7a3c5b9d"
