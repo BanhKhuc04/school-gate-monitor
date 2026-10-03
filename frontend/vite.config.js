@@ -21,6 +21,12 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // Guard APIs also use the frontend origin; keep /guard itself for React Router.
+      '/guard/audio': { target: 'http://localhost:8000', changeOrigin: true },
+      '/guard/recognition_log': { target: 'http://localhost:8000', changeOrigin: true },
+      '/guard/recognition_cards': { target: 'http://localhost:8000', changeOrigin: true },
+      '/guard/recognition_image': { target: 'http://localhost:8000', changeOrigin: true },
+      '/guard/plate_best': { target: 'http://localhost:8000', changeOrigin: true },
       // WebSocket proxy
       '/guard/ws': {
         target: 'http://localhost:8000',

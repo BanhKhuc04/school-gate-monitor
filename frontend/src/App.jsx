@@ -10,6 +10,11 @@ import AdminRoiPage from './pages/AdminRoiPage';
 import AdminCameraPage from './pages/AdminCameraPage';
 import DashboardPage from './pages/DashboardPage';
 import StudentViolationHistoryPage from './pages/StudentViolationHistoryPage';
+// Task 3 — training data, jobs, candidates, BBox editor (admin only)
+import DatasetManagerPage from './pages/DatasetManagerPage';
+import TrainingJobsPage from './pages/TrainingJobsPage';
+import CandidateComparePage from './pages/CandidateComparePage';
+import BBoxEditorDemoPage from './pages/BBoxEditorDemoPage';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
 
@@ -158,6 +163,55 @@ function AppRoutes() {
         }
       >
         <Route path="/admin/students/:vehicleId/violations" element={null} />
+      </Route>
+
+      {/* Task 3 — training data & jobs & candidates (admin only) */}
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <DatasetManagerPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/training/datasets" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <TrainingJobsPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/training/jobs" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <CandidateComparePage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/training/candidates" element={null} />
+      </Route>
+
+      <Route
+        element={
+          <RequireRole allow={['admin']}>
+            <Layout>
+              <BBoxEditorDemoPage />
+            </Layout>
+          </RequireRole>
+        }
+      >
+        <Route path="/admin/training/bbox" element={null} />
       </Route>
 
       {/* Default redirect */}

@@ -22,15 +22,23 @@ class TestRunPostureDetectionGroupDict:
         from concurrent.futures import ThreadPoolExecutor
         pipeline = VideoPipeline.__new__(VideoPipeline)  # skip __init__ (no camera/models)
         pipeline._detect_pool = ThreadPoolExecutor(max_workers=1)
+        pipeline._source_epoch = 0
         frame = np.zeros((200, 200, 3), dtype=np.uint8)
         person = Detection(class_name="person", confidence=0.9, bbox=(10, 10, 100, 190))
-        groups = [{"_person": person, "helmet_dets": [], "plate_dets": []}]
+        vehicle = Detection('motorcycle', .9, (20,90,140,190), 7)
+        groups = [{"_person": person, '_vehicle':vehicle, 'track_id':42, 'vehicle_track_id':7,
+                   "helmet_dets": [], "plate_dets": []}]
 
-        with patch("app.cv.pose.PostureDetector.detect_pose") as mock_detect, \
-             patch("app.cv.pose.classify_posture", return_value="riding") as mock_classify:
-            mock_detect.return_value = [{"x": 0, "y": 0, "confidence": 0.9}] * 17
-
-            result = pipeline._run_posture_detection(frame, groups)
+        with patch("app.cv.pose.PostureDetector.detect_pose") as mock_detect:
+            points=[{'x':0,'y':0,'confidence':0} for _ in range(17)]
+            for index,xy in {5:(50,40),6:(50,40),11:(50,100),12:(50,100),
+                             13:(50,130),14:(50,130),15:(80,130),16:(80,130)}.items():
+                points[index]={'x':xy[0],'y':xy[1],'confidence':.9}
+            mock_detect.return_value = points
+            try:
+                result = pipeline._run_posture_detection(frame, groups)
+            finally:
+                pipeline._detect_pool.shutdown(wait=True)
 
         assert mock_detect.called, "detect_pose was never reached — person lookup still broken"
         assert result[0]["posture_status"] == "riding"

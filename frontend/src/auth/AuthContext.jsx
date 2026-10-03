@@ -42,18 +42,27 @@ export function AuthProvider({ children }) {
     if (res.status !== 200) {
       throw new Error(res.data?.detail || 'Login failed');
     }
-    const { access_token, username: u, role } = res.data;
+    const { access_token, username: u, role, homeroom_class } = res.data;
     setToken(access_token);
-    const userData = { username: u, role };
+    // Lưu homeroom_class cho teacher để UI hiện "lớp tôi". Quyền dữ liệu vẫn
+    // do server quyết định — FE chỉ hiển thị, KHÔNG dùng để filter phía client.
+    const userData = { username: u, role, homeroom_class: homeroom_class || null };
     setUser(userData);
     return userData;
   };
 
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const logout = async () => {
+    try {
+      // Gọi API để xóa session cookie (chỉ có tác dụng khi dùng cookie session)
+      await client.post('/api/auth/logout');
+    } catch {
+      // ignore errors — client-side cleanup vẫn phải chạy
+    } finally {
+      setToken(null);
+      setUser(null);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
   };
 
   return (

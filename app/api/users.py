@@ -14,7 +14,9 @@ from app.db import (
     get_user_by_id,
     count_admins,
     update_user,
+    update_user_atomic,
     delete_user,
+    delete_user_atomic,
 )
 from app.auth import hash_password, require_role
 
@@ -51,8 +53,12 @@ def create_user_json(
     """
     if body.role not in ("admin", "security", "management", "teacher"):
         raise HTTPException(status_code=422, detail="role must be one of: admin, security, management, teacher")
-    if body.role == "teacher" and not body.homeroom_class:
-        raise HTTPException(status_code=422, detail="homeroom_class is required for teacher role")
+    if body.role == "teacher":
+        # Normalize + bắt buộc có lớp sau trim
+        if isinstance(body.homeroom_class, str):
+            body.homeroom_class = body.homeroom_class.strip()
+        if not body.homeroom_class:
+            raise HTTPException(status_code=422, detail="homeroom_class is required for teacher role")
     try:
         pw_hash = hash_password(body.password)
         user_id = db_create_user(body.username, pw_hash, body.role, body.homeroom_class)
@@ -69,22 +75,14 @@ def update_user_json(
 ):
     """
     PUT /api/users/{id} — update role and/or password (admin only).
-    Cannot demote the last admin.
+    T2.4: last-admin check chạy atomic dưới _write_lock (update_user_atomic)
+    để chống race hai admin cùng demote nhau.
     """
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Cannot demote last admin
-    if body.role is not None and user["role"] == "admin" and body.role != "admin":
-        if count_admins() <= 1:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Cannot demote the last admin",
-            )
-
-    # Build update kwargs
-    kwargs = {}
+    # Validate role + teacher class yêu cầu
     if body.role is not None:
         if body.role not in ("admin", "security", "management", "teacher"):
             raise HTTPException(
@@ -96,15 +94,37 @@ def update_user_json(
                 status_code=422,
                 detail="homeroom_class is required for teacher role",
             )
+    # Normalize homeroom_class: trim nếu là str
+    if isinstance(body.homeroom_class, str):
+        body.homeroom_class = body.homeroom_class.strip() or None
+
+    kwargs = {}
+    if body.role is not None:
         kwargs["role"] = body.role
     if body.password:
         kwargs["password_hash"] = hash_password(body.password)
     if body.homeroom_class is not None:
         kwargs["homeroom_class"] = body.homeroom_class
 
-    success = update_user(user_id, **kwargs)
-    if not success:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not kwargs:
+        # Không có gì để đổi → trả user hiện tại (idempotent)
+        return user
+
+    # T2.4 — atomic: check last-admin + UPDATE trong cùng transaction
+    result = update_user_atomic(user_id, **kwargs)
+    if not result.get("ok"):
+        err = result.get("error")
+        if err == "last_admin_demote":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot demote the last admin",
+            )
+        if err == "not_found":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err)
     return get_user_by_id(user_id)
 
 
@@ -115,27 +135,27 @@ def delete_user_json(
 ):
     """
     DELETE /api/users/{id} — delete a user (admin only).
-    Cannot delete yourself or the last admin.
+    T2.4: last-admin check + self-delete check atomic dưới _write_lock
+    (delete_user_atomic).
     """
-    user = get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    # Cannot delete yourself
-    if user["username"] == current_user["username"]:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete your own account",
-        )
-
-    # Cannot delete last admin
-    if user["role"] == "admin" and count_admins() <= 1:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete the last admin",
-        )
-
-    success = delete_user(user_id)
-    if not success:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    # T2.4 — atomic: self-delete check + last-admin check + DELETE cùng transaction
+    result = delete_user_atomic(user_id, current_user["username"])
+    if not result.get("ok"):
+        err = result.get("error")
+        if err == "self_delete":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete your own account",
+            )
+        if err == "last_admin":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete the last admin",
+            )
+        if err == "not_found":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err)
     return None

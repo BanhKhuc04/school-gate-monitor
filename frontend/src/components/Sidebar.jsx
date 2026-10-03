@@ -10,6 +10,8 @@ const ICONS = {
   users: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 2.7-5 6-5s6 2 6 5m2 0c0-2.5 2-4.5 6-4.5s6 2 6 4.5',
   zone: 'M4 6h16v12H4V6Zm3 3 4 4 3-3 3 5',
   logout: 'M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3m5-4 4-4-4-4m4 4H9',
+  // Task 3 — database icon (collection/folder for training data)
+  database: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 6c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0 1.7-3.6 3-8 3s-8-1.3-8-3v6zm0 6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6c0 1.7-3.6 3-8 3s-8-1.3-8-3v6z',
 };
 
 function Icon({ path, className }) {
@@ -42,6 +44,11 @@ export default function Sidebar() {
     links.push({ to: '/admin/roi', label: 'Vùng nhận diện', icon: 'zone' });
     links.push({ to: '/admin/camera', label: 'Cấu hình Camera', icon: 'camera' });
     links.push({ to: '/admin/users', label: 'Quản lý tài khoản', icon: 'users' });
+    // Task 3 — training data, jobs, candidates, BBox editor (admin only)
+    links.push({ to: '/admin/training/datasets', label: 'Dữ liệu huấn luyện', icon: 'database' });
+    links.push({ to: '/admin/training/jobs', label: 'Training jobs', icon: 'shield' });
+    links.push({ to: '/admin/training/candidates', label: 'So sánh model', icon: 'chart' });
+    links.push({ to: '/admin/training/bbox', label: 'Sửa bbox', icon: 'zone' });
   }
   // Feature 9: teacher — scoped views for homeroom class
   if (user.role === 'teacher') {

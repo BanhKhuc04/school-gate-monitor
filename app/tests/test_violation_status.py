@@ -5,15 +5,15 @@ import pytest
 
 
 def test_update_status_ok(client):
-    """Security can update violation status → 200."""
+    """Security can update violation status → 404 (no such violation, but auth OK)."""
     from app.tests.conftest import auth_headers
 
     resp = client.patch(
         "/api/violations/999/status",
-        json={"status": "reviewed", "note": "Đã kiểm tra"},
+        json={"status": "reviewed", "note": "Đã kiểm tra", "expected_version": 0},
         headers=auth_headers(client, "security"),
     )
-    # 404 OK — violation doesn't exist, but auth succeeded (not 401/403)
+    # 404 OK — violation doesn't exist, but auth + concurrency check succeeded.
     assert resp.status_code == 404
 
 
@@ -39,22 +39,34 @@ def test_update_status_invalid_value(client):
 
     resp = client.patch(
         "/api/violations/1/status",
-        json={"status": "invalid_status"},
+        json={"status": "invalid_status", "expected_version": 0},
         headers=auth_headers(client, "security"),
     )
     assert resp.status_code == 422
 
 
-def test_update_status_management_ok(client):
-    """Management role can update status → 404 (not 403)."""
+def test_update_status_missing_expected_version(client):
+    """T2.4: thiếu expected_version → 422 (atomic CAS bắt buộc)."""
     from app.tests.conftest import auth_headers
-
     resp = client.patch(
         "/api/violations/1/status",
         json={"status": "resolved"},
         headers=auth_headers(client, "management"),
     )
-    assert resp.status_code == 404  # violation doesn't exist, but role OK
+    assert resp.status_code == 422
+
+
+def test_update_status_management_ok(client):
+    """Management role passes auth, but version conflict → 409 (vì version=0 và row mới trống)."""
+    from app.tests.conftest import auth_headers
+
+    resp = client.patch(
+        "/api/violations/1/status",
+        json={"status": "resolved", "expected_version": 0},
+        headers=auth_headers(client, "management"),
+    )
+    # 404 (no violation) hoặc 409 nếu violation_id tồn tại với version khác
+    assert resp.status_code in (404, 409)
 
 
 def test_get_audit_log_requires_auth(client):

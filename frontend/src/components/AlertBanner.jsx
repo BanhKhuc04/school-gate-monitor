@@ -71,7 +71,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
     if (!token) return;
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
+    const wsHost = new URL(API_BASE_URL || window.location.origin).host;
     const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}&gate=${gate}`;
 
     // Phát chuỗi beep phân biệt theo loại vi phạm, trả về tổng thời lượng
