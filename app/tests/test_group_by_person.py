@@ -22,6 +22,16 @@ def _det(class_name, bbox):
     return Detection(class_name=class_name, confidence=0.9, bbox=bbox)
 
 
+def test_tracked_bike_seen_as_motorcycle_stays_motorcycle_when_coco_says_bicycle():
+    p = _pipeline()
+    person = Detection('person', .9, (100, 100, 200, 300), track_id=1)
+    first, _ = p._group_by_person([person], [], [], [Detection('motorcycle', .9, (90, 150, 210, 320), track_id=5)])
+    later, _ = p._group_by_person([person], [], [], [Detection('bicycle', .9, (90, 150, 210, 320), track_id=5)])
+    other, _ = p._group_by_person([person], [], [], [Detection('bicycle', .9, (90, 150, 210, 320), track_id=6)])
+    assert first[0]['vehicle_type'] == later[0]['vehicle_type'] == 'motorcycle'
+    assert other[0]['vehicle_type'] == 'bicycle'
+
+
 def test_vertical_overlap_true_when_y_ranges_intersect():
     assert VideoPipeline._vertical_overlap((0, 100, 50, 200), (10, 150, 60, 250)) is True
 

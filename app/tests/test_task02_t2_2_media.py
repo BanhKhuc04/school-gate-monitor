@@ -330,6 +330,15 @@ class TestProductionDeepLinkAndApi404:
         main_mod._attach_spa_fallback(new_app, str(dist))
         return new_app
 
+    def test_root_public_file_served_and_traversal_blocked(self, production_app, tmp_path):
+        """favicon/logo copied from public/ live at dist root, not under assets/."""
+        (tmp_path / "frontend_dist" / "favicon.svg").write_bytes(b"<svg/>")
+        (tmp_path / "secret.txt").write_bytes(b"nope")
+        client = TestClient(production_app)
+        assert client.get("/favicon.svg").content == b"<svg/>"
+        assert client.get("/missing.svg").status_code == 404
+        assert client.get("/..%2Fsecret.txt").status_code == 404
+
     def test_admin_deep_link_returns_html(self, production_app):
         """/admin/violations phải 200 + text/html (KHÔNG 410, codex F03)."""
         client = TestClient(production_app)

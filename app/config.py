@@ -191,9 +191,11 @@ CAMERA_LOOP = _gate_cfgs["main"]["loop"]
 # Model paths
 HELMET_MODEL_PATH = os.environ.get("HELMET_MODEL_PATH") or str(BASE_DIR / "models" / "helmet_best.pt")
 PLATE_MODEL_PATH = str(BASE_DIR / "models" / "plate_best.pt")
-# yolov8n.pt/yolov8n-pose.pt COCO - ultralytics tự tải khi khởi tạo, không cần đặt vào models/
-PERSON_MODEL_PATH = os.environ.get('PERSON_MODEL_PATH', 'yolov8n.pt')
-POSE_MODEL_PATH = os.environ.get('POSE_MODEL_PATH', 'yolov8n-pose.pt')
+# COCO weights ở gốc repo (gitignore). YOLO11n trên 120 khung hình cổng thật:
+# bắt được 84 xe máy so với 73 của yolov8n (cùng số người), pose ra khớp
+# xương 234/267 crop so với 228. Đổi lại bằng env PERSON_MODEL_PATH=yolov8n.pt.
+PERSON_MODEL_PATH = os.environ.get('PERSON_MODEL_PATH', 'yolo11n.pt')
+POSE_MODEL_PATH = os.environ.get('POSE_MODEL_PATH', 'yolo11n-pose.pt')
 
 # ponytail: đã thử export ONNX + benchmark thật (scripts/export_onnx.py,
 # scripts/benchmark_inference.py) — chậm hơn .pt trên CPU này (0.3x-1.0x), không
@@ -202,6 +204,10 @@ POSE_MODEL_PATH = os.environ.get('POSE_MODEL_PATH', 'yolov8n-pose.pt')
 
 # Detection thresholds
 HELMET_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho helmet detection
+# "Không đội mũ" là lời buộc tội: dưới ngưỡng này coi là chưa rõ. Duyệt tay 30
+# phát hiện ở imgsz 640: các lần gán nhầm "không mũ" (mũ tối nhìn từ sau) đều
+# có confidence 0.29–0.44, các lần "không mũ" đúng phần lớn >= 0.5.
+HELMET_NO_HELMET_MIN_CONF = float(os.environ.get("HELMET_NO_HELMET_MIN_CONF", "0.5"))
 PLATE_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho plate detection
 PERSON_CONF_THRESHOLD = 0.4  # Ngưỡng confidence cho person detection (COCO)
 # Hạ từ 0.5 xuống 0.3 (2026-09-29) — người ở xa/bị che một phần trong crop nhỏ

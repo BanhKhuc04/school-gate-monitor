@@ -31,7 +31,9 @@ for _relative in ('snapshots', 'clips', 'student_photos', 'backups', 'recordings
     (_QA_RUN / _relative).mkdir()
 os.environ.update(QA_MODE='1', CV_PIPELINES_ENABLED='0', BACKUP_ENABLED='0',
                   CLEANUP_ENABLED='0', TASK3_TRAINING_WORKER_ENABLED='0',
-                  TASK3_SAMPLE_COLLECTOR_ENABLED='0', TASK3_COLLECTOR_ENABLED='0')
+                  TASK3_SAMPLE_COLLECTOR_ENABLED='0', TASK3_COLLECTOR_ENABLED='0',
+                  # OCR tests stub EasyOCR's reader; the char engine has its own tests.
+                  PLATE_OCR_ENGINE='easyocr')
 
 
 @pytest.fixture(scope='session', autouse=True)

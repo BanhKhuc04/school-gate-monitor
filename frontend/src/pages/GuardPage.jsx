@@ -5,7 +5,7 @@ import RecognitionLogPanel from '../components/RecognitionLogPanel';
 import PlateReviewPanel from '../components/PlateReviewPanel';
 import DebugOverlayControl from '../components/DebugOverlayControl';
 import client, { API_BASE_URL } from '../api/client';
-import { VIOLATION_LABELS } from '../utils/violationLabels';
+import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
 import { useAudioLease } from '../utils/useAudioLease';
 import { getVietnameseVoiceStatus } from '../utils/speak';
 
@@ -88,7 +88,7 @@ export default function GuardPage() {
             )}
             {!isSplit && (
               <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
-                CAM_01
+                {`CAM_${String(Math.max(0, gates?.findIndex(g => g.id === activeGate) ?? 0) + 1).padStart(2, '0')}`}
               </span>
             )}
             <button
@@ -218,11 +218,14 @@ export default function GuardPage() {
                 Chưa có cảnh báo nào trong phiên này.
               </div>
             ) : (
-              alertLog.map((a) => (
+              alertLog.map((a) => {
+                const shown = describeAlert(a);
+                return (
                 <div key={a._id} className="bg-primary-container rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-error text-on-error">
-                      {VIOLATION_LABELS[a.violation_type] || a.violation_type}
+                    <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded text-white"
+                      style={{ backgroundColor: TONE_COLORS[shown.tone] }}>
+                      {shown.title}
                     </span>
                     <span className="font-mono text-[10px] text-on-primary-container">
                       {new Date(a.timestamp).toLocaleTimeString('vi-VN', { hour12: false })}
@@ -236,10 +239,11 @@ export default function GuardPage() {
                     />
                   )}
                   <span className="font-mono text-xs">
-                    {a.plate_matched || a.plate_read || 'Không đọc được biển số'}
+                    {shown.detail}
                   </span>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
           </div>

@@ -255,8 +255,15 @@ def _attach_spa_fallback(app: FastAPI, dist_dir: str) -> None:
         if full_path.startswith("api/") or full_path.startswith("media/"):
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Not Found")
-        # Có extension (file tĩnh) → KHÔNG fallback index
+        # Có extension (file tĩnh) → KHÔNG fallback index. File thật ở gốc
+        # dist (favicon.svg, icons.svg, logo/banner từ public/) phải phục vụ
+        # được, nếu không logo trang đăng nhập/landing bị vỡ ảnh.
         if "." in full_path.split("/")[-1]:
+            import os as _os
+            root = _os.path.realpath(dist_dir)
+            candidate = _os.path.realpath(_os.path.join(root, full_path))
+            if _os.path.commonpath([root, candidate]) == root and _os.path.isfile(candidate):
+                return FileResponse(candidate)
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Not Found")
         return FileResponse(spa_index, media_type="text/html")

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from ultralytics import YOLO
 
-from app.config import DEVICE, USE_FP16
+from app.config import DEVICE, USE_FP16, DETECT_WIDTH
 from app.cv.inference_worker import model_owner
 from weakref import WeakValueDictionary
 
@@ -75,7 +75,11 @@ class HelmetPlateDetector:
             self._tracker.reset()
 
     def _infer(self, frame, tracked):
-        results = self.model(frame, verbose=False, conf=self.conf_threshold, half=USE_FP16)
+        # Explicit imgsz: helmet_best.pt was trained at 224 and Ultralytics
+        # falls back to that, shrinking the detect frame to 224 px wide —
+        # it found 54 helmets on 90 gate frames instead of 213 at 640.
+        results = self.model(frame, verbose=False, conf=self.conf_threshold, half=USE_FP16,
+                             imgsz=DETECT_WIDTH)
         detections = []
         for result in results:
             if result.boxes is None:

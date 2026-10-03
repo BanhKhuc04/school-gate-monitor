@@ -131,6 +131,13 @@ def _origin_allowed(request_or_ws) -> bool:
     origin = request_or_ws.headers.get("origin") or request_or_ws.headers.get("Origin") or ""
     if not origin:
         return True  # Same-origin (curl, server-to-server, native app)
+    # Browsers always send Origin on a WebSocket, even same-origin. The app
+    # served by this backend (START_DEMO opens :8000) must reach its own
+    # /guard/ws, or every alert and spoken warning is silently refused.
+    from urllib.parse import urlsplit
+    host = request_or_ws.headers.get("host") or ""
+    if host and urlsplit(origin).netloc == host:
+        return True
     configured = os.environ.get("WS_ALLOWED_ORIGINS")
     allowed = {v.strip() for v in configured.split(",")} if configured is not None else _ALLOWED_WS_ORIGINS
     if origin in allowed:

@@ -61,6 +61,33 @@ def test_only_crossing_seals_one_vehicle_event_for_two_people(pipeline,monkeypat
     assert p._persist_violation.call_count==1
 
 
+def test_bike_labelled_bicycle_still_raises_riding_event(pipeline,monkeypatch):
+    import json
+    p=pipeline; g=group(); g['vehicle_type']='bicycle'
+    frame=feed(p,[g],monkeypatch)
+    p._crossing_detector._tracks[7]=SimpleNamespace(has_crossed=True,crossed_at=5,rearmed=False)
+    p._frame_seq=5; p._process_vehicle_crossings(frame,[g])
+    for f in p._crossing_jobs.values():
+        f.result(timeout=2)
+    assert 'RIDING_THROUGH_GATE' in {i['code'] for i in json.loads(p._persist_violation.call_args.args[13])}
+
+
+def test_front_camera_walked_bike_with_unread_plate_raises_nothing(pipeline,monkeypatch):
+    p=pipeline; p.role='front'; groups=[group(posture='unknown')]
+    frame=feed(p,groups,monkeypatch)
+    p._crossing_detector._tracks[7]=SimpleNamespace(has_crossed=True,crossed_at=5,rearmed=False)
+    p._process_vehicle_crossings(frame,groups)
+    for f in p._crossing_jobs.values():
+        f.result(timeout=2)
+    p._persist_violation.assert_not_called()
+
+
+def test_missing_gate_line_falls_back_to_default_so_crossings_happen():
+    from app.cv.pipeline import _DEFAULT_GATE_LINE
+    detector=VideoPipeline._make_crossing_detector(None)
+    assert detector.is_configured and detector.gate_line==list(_DEFAULT_GATE_LINE)
+
+
 def test_unknown_crossing_never_riding_and_partial_never_lookup(pipeline,monkeypatch):
     import app.cv.pipeline as module
     lookup=MagicMock(); monkeypatch.setattr(module,'get_vehicle_by_plate',lookup)
@@ -178,3 +205,22 @@ def test_existing_rider_count_rule_joins_same_crossing_event(pipeline,monkeypatc
     assert p._persist_violation.call_count==1
     issues=json.loads(p._persist_violation.call_args.args[13])
     assert 'TOO_MANY_RIDERS' in {issue['code'] for issue in issues}
+
+
+def test_plate_announced_once_per_plate_and_only_after_consensus(pipeline):
+    import queue as _queue
+    from app.cv.plate_voter import PlateReadResult
+    p = pipeline
+    p._alert_queue = _queue.Queue()
+    reads = {}
+    p._consensus_result = lambda tid, single: reads.get(tid, PlateReadResult())
+    single = PlateReadResult(text='89F123792', confidence=.9, sample_count=1, is_confident=True)
+    p._announce_plate(7, single)
+    assert p._alert_queue.empty()  # one read is not enough
+    reads[7] = reads[8] = PlateReadResult(text='89F123792', confidence=.9, sample_count=2, is_confident=True)
+    p._announce_plate(7, single)
+    p._announce_plate(8, single)  # same bike on a plate-only track
+    message = p._alert_queue.get_nowait()
+    assert message['type'] == 'plate_recognized' and message['plate_read'] == '89F123792'
+    assert message['registered'] is False
+    assert p._alert_queue.empty()

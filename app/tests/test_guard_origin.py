@@ -122,3 +122,18 @@ def test_ws_rejects_unknown_origin(client, monkeypatch):
         with client.websocket_connect("/guard/ws", headers={"Origin":"http://evil.test"}):
             pass
     assert error.value.code == 1008
+
+
+def test_ws_same_origin_accepted_even_when_not_in_allowlist(client, monkeypatch):
+    """START_DEMO serves the UI from the backend itself (:8000); the browser
+    sends Origin on every WebSocket and must not be refused by its own app."""
+    from app.api.guard import _origin_allowed
+    from types import SimpleNamespace
+    monkeypatch.setenv("WS_ALLOWED_ORIGINS", "http://localhost:5173")
+    same = SimpleNamespace(headers={"origin": "http://127.0.0.1:8000", "host": "127.0.0.1:8000"})
+    other = SimpleNamespace(headers={"origin": "http://evil.test", "host": "127.0.0.1:8000"})
+    assert _origin_allowed(same) is True
+    assert _origin_allowed(other) is False
+    _login_token(client, "security")
+    with client.websocket_connect("/guard/ws", headers={"Origin": "http://testserver"}):
+        pass

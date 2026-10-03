@@ -1,5 +1,5 @@
 """
-Posture detection using YOLOv8-pose (yolov8n-pose.pt).
+Posture detection using YOLO pose weights (POSE_MODEL_PATH, yolo11n-pose.pt).
 
 Automatically downloads the model on first run (requires internet).
 Runs on GPU (CUDA) when torch detects one, falls back to CPU otherwise —

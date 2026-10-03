@@ -5,6 +5,7 @@ Luồng: đọc frame → detect helmet → detect plate → OCR → tra DB → 
 Có thêm queue cho cảnh báo vi phạm (Bước 4) và ghi log vi phạm vào DB (Bước 6).
 """
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, Future
 import time
 import queue
@@ -19,7 +20,7 @@ from typing import Optional
 
 from app.config import (
     GATES, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
-    HELMET_CONF_THRESHOLD, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
+    HELMET_CONF_THRESHOLD, HELMET_NO_HELMET_MIN_CONF, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, DETECT_WIDTH, DETECT_HEIGHT, RECOGNITION_LOG_ENABLED,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
@@ -66,7 +67,10 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 # Vạch mốc mặc định (ngang giữa khung hình) dùng cho cảnh báo loa SỚM khi
 # admin chưa tự vẽ gate_line riêng — chỉ dùng cho tín hiệu nhắc nhở tức thời,
 # KHÔNG dùng cho quyết định vi phạm RIDING_THROUGH_GATE chính thức.
-_DEFAULT_GATE_LINE = (0.0, 0.5, 1.0, 0.5)
+# Camera nhìn xe tiến lại: mặt đường chiếm nửa dưới khung hình, nên vạch mặc
+# định đặt giữa vùng mặt đường (y=0.5 trùng mép xa của sân demo, xe không bao
+# giờ cắt qua). Admin vẫn vẽ lại vạch thật ở trang ROI.
+_DEFAULT_GATE_LINE = (0.0, 0.65, 1.0, 0.65)
 
 
 def _sha256_file(path: str, chunk_size: int = 1024 * 1024) -> Optional[str]:
@@ -475,8 +479,7 @@ class VideoPipeline:
         # pixel 1 lần ở đây. None = không giới hạn vùng (mặc định, không đổi
         # hành vi cũ). set_roi() cập nhật sống khi admin lưu vùng mới, không
         # cần restart pipeline.
-        _gate_line = get_gate_line(gate_id)
-        self._crossing_detector = self._make_crossing_detector(_gate_line)
+        self._crossing_detector = self._make_crossing_detector(get_gate_line(gate_id))
         self._roi_points = get_gate_roi(gate_id)
         self._roi_polygon_px = to_pixel_polygon(self._roi_points, VIDEO_WIDTH, VIDEO_HEIGHT)
 
@@ -604,6 +607,10 @@ class VideoPipeline:
         print(f"[Pipeline] Preview thread started (queue maxsize=2)")
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        ocr_pool = getattr(self, '_ocr_pool', None)
+        if getattr(self, '_plate_detector', None) is not None and ocr_pool is not None:
+            from app.cv.ocr import warm_up_plate_reader
+            ocr_pool.submit(warm_up_plate_reader)
 
     def stop(self):
         """Dừng thread nền. Phase 1: set `_stopped=True` + tăng generation
@@ -1500,7 +1507,9 @@ class VideoPipeline:
             self._diagnostic('ocr', 'observed', 'best_plate_selected', tid, best_plate=group['_plate_debug'])
         if not detector or not detector.gate_line:
             self._diagnostic('decision', 'pending', 'gate_line_missing', tid)
-        return self._consensus_result(tid, store.result(tid))
+        single = store.result(tid)
+        self._announce_plate(tid, single)
+        return self._consensus_result(tid, single)
 
     def _observe_plate_only(self, source_frame, plate_dets):
         """N02 (Post-Video Review): rear/ocr_only hoặc camera chỉ thấy biển
@@ -1550,7 +1559,9 @@ class VideoPipeline:
                     self._ocr_health['empty'] += 1
             if PLATE_CONSENSUS_ENABLED:
                 self._consensus_ingest(tid, result, store.completed_candidate(tid) or best)
-            read = self._consensus_result(tid, store.result(tid))
+            single = store.result(tid)
+            self._announce_plate(tid, single)
+            read = self._consensus_result(tid, single)
             self._diagnostic('ocr', 'error' if read and read.error else 'pending' if read and read.pending else 'review',
                 'ocr_error' if read and read.error else 'ocr_pending' if read and read.pending else 'plate_candidate' if read and read.text else 'plate_not_read',
                 tid, plate_text=read.text if read else '', association='unverified')
@@ -1723,6 +1734,49 @@ class VideoPipeline:
         if consensus is None:
             return None, 0.0, 0
         return consensus.decide(tid)
+
+    def _announce_plate(self, tid, single):
+        """Tell viewers once per track when its plate is confirmed, with the
+        registration lookup. Visual only (no evidence/audio): violations stay
+        the only spoken alerts, so a plate is never read aloud on its own.
+        Needs >=2 agreeing reads: a single confident read of the same bike
+        on another track came out 89F123192 instead of 89F123792."""
+        read = self._consensus_result(tid, single)
+        if tid is None or not read.is_confident or not read.text:
+            return
+        # One bike can hold a vehicle track and a plate-only track at once,
+        # so dedupe on the plate itself for a minute, not on the track.
+        announced = getattr(self, '_announced_plates', None)
+        if announced is None:
+            announced = self._announced_plates = OrderedDict()
+        now = time.monotonic()
+        key = (self._source_epoch, read.text)
+        if now - announced.get(key, -1e9) < 60:
+            return
+        announced[key] = now
+        announced.move_to_end(key)
+        while len(announced) > 512:
+            announced.popitem(last=False)
+        try:
+            vehicle = get_vehicle_by_plate(read.text)
+        except Exception:
+            vehicle = None
+        message = {
+            'type': 'plate_recognized', 'plate_read': read.text,
+            'plate_matched': vehicle['plate_number'] if vehicle else None,
+            'registered': vehicle is not None,
+            'student_name': vehicle.get('student_name') if vehicle else None,
+            'student_class': vehicle.get('student_class') if vehicle else None,
+            'camera_id': getattr(self, 'camera_id', None), 'track_id': tid,
+            'source_epoch': self._source_epoch,
+            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        alerts = getattr(self, '_alert_queue', None)
+        if alerts is not None:
+            try:
+                alerts.put_nowait(message)
+            except queue.Full:
+                pass
 
     def _consensus_result(self, tid, single):
         from app.cv.plate_voter import PlateReadResult
@@ -2159,7 +2213,8 @@ class VideoPipeline:
                 # phải tổng tuần tự.
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
                 vehicle_dets = [d for d in raw_person_dets if d.class_name.lower() in ('motorcycle', 'bicycle')]
-                helmet_dets = self._rescale_dets(helmet_future.result(), scale_x, scale_y)
+                helmet_dets = [d for d in self._rescale_dets(helmet_future.result(), scale_x, scale_y)
+                               if d.class_name != 'Without Helmet' or d.confidence >= HELMET_NO_HELMET_MIN_CONF]
                 plate_dets = self._rescale_dets(plate_future.result(), scale_x, scale_y)
                 self._metrics_detect.add((time.perf_counter() - t_detect_start) * 1000)
                 self._fps_ai_window += 1
@@ -2492,10 +2547,25 @@ class VideoPipeline:
             candidates.sort(key=lambda pair: pair[0])
             ambiguous = len(candidates)>1 and candidates[1][0]-candidates[0][0] <= .1*(x2-x1)
             vehicle = candidates[0][1] if candidates and not ambiguous else None
+            vehicle_type = vehicle.class_name.lower() if vehicle else None
+            vtid = getattr(vehicle, 'track_id', None)
+            if vtid is not None:
+                # A tracked bike once seen as a motorcycle stays one; COCO
+                # rarely calls a real bicycle a motorcycle, the reverse is common.
+                seen = getattr(self, '_motorcycle_tracks', None)
+                if seen is None:
+                    seen = self._motorcycle_tracks = OrderedDict()
+                if vehicle_type == 'motorcycle':
+                    seen[vtid] = True
+                    seen.move_to_end(vtid)
+                    while len(seen) > 512:
+                        seen.popitem(last=False)
+                elif vtid in seen:
+                    vehicle_type = 'motorcycle'
             groups.append({'_person': person, '_vehicle': vehicle,
                 'track_id': getattr(person, 'track_id', None),
-                'vehicle_track_id': getattr(vehicle, 'track_id', None),
-                'vehicle_type': vehicle.class_name.lower() if vehicle else None,
+                'vehicle_track_id': vtid,
+                'vehicle_type': vehicle_type,
                 'helmet_dets': [], 'plate_dets': [], 'posture_status': 'unknown',
                 'association_reasons': ['vehicle_association_ambiguous'] if ambiguous else []})
         matched_helmet_dets = []
@@ -2565,8 +2635,10 @@ class VideoPipeline:
     @staticmethod
     def _make_crossing_detector(gate_line):
         from app.cv.crossing import CrossingDetector
+        # Without a drawn line no vehicle ever crosses, so no violation or
+        # alert is ever raised; a fresh demo DB would stay silent.
         return CrossingDetector(
-            gate_line,
+            list(gate_line or _DEFAULT_GATE_LINE),
             edge_margin=CROSSING_EDGE_MARGIN,
             min_frames_per_side=CROSSING_MIN_FRAMES_PER_SIDE,
             rearm_distance=CROSSING_REARM_DISTANCE,
@@ -2695,7 +2767,11 @@ class VideoPipeline:
         buckets = {}
         for group in groups:
             tid = group.get('vehicle_track_id')
-            if tid is not None and group.get('vehicle_type') == 'motorcycle' and group.get('_vehicle') is not None:
+            # COCO labels a motorbike "bicycle" in up to half of night/close
+            # frames and cannot tell an e-bike from a bicycle; the gate rules
+            # (walk through, helmet, rider count) apply to every two-wheeler.
+            if (tid is not None and group.get('vehicle_type') in ('motorcycle', 'bicycle')
+                    and group.get('_vehicle') is not None):
                 buckets.setdefault(tid, []).append(group)
         for key, future in list(getattr(self, '_crossing_jobs', {}).items()):
             if future.done():
@@ -2837,7 +2913,8 @@ class VideoPipeline:
                 plate = PlateReadResult(error=f'ocr_engine_error:{type(exc).__name__}')
         if frozen['source_epoch'] != self._source_epoch:
             return True
-        event = aggregate_crossing_event(frozen['vehicle_track_id'], frozen['event_id'], frozen['issues'], plate)
+        event = aggregate_crossing_event(frozen['vehicle_track_id'], frozen['event_id'], frozen['issues'], plate,
+                                         plate_expected=getattr(self, 'role', None) != 'front')
         # Matching is permitted ONLY for a complete validated recognition.
         matched = None
         if event['plate_status'] == 'CONFIRMED':

@@ -289,17 +289,63 @@ def read_plate(crop: np.ndarray) -> str:
     return all_text
 
 
+_char_reader = None
+_char_reader_lock = threading.Lock()
+
+
+def _read_char_plate(crop):
+    """Character-level YOLO reader, or None when its weights cannot load.
+
+    On 72 hand-labelled VN plate crops: 63 exact vs EasyOCR's 23, and 4 of
+    50 confident reads wrong vs EasyOCR's 12 of 22.
+    """
+    global _char_reader
+    from app.cv.char_plate_reader import CharPlateReader
+    with _char_reader_lock:
+        if _char_reader is None:
+            _char_reader = CharPlateReader()
+            if not _char_reader.load_model():
+                print(f'[OCR] Char plate reader unavailable ({_char_reader.load_error}); using EasyOCR.')
+    if not _char_reader.is_loaded:
+        return None
+    r = _char_reader.predict(crop)
+    result = {'full': r.full, 'top_line': r.top_line, 'bottom_line': r.bottom_line,
+              'confidence': r.confidence, 'engine': r.engine, 'raw_text': r.full,
+              'normalized_text': normalize_plate(r.full), 'char_confidences': None}
+    if r.error == 'ambiguous_characters':
+        # Competing characters are an unreadable observation, not an engine fault.
+        result.update(needs_review=True, confidence=0.0)
+    elif r.error:
+        result.update(error=f'ocr_engine_error:{r.error}', confidence=0.0)
+    return result
+
+
+def warm_up_plate_reader() -> None:
+    """Load the char reader and run one dummy crop so the first real plate
+    does not pay ~1s of weight loading and CUDA warm-up mid-stream."""
+    import os
+    if os.environ.get('PLATE_OCR_ENGINE', 'char') == 'char':
+        _read_char_plate(np.zeros((64, 96, 3), np.uint8))
+
+
 def read_plate_detailed(crop: np.ndarray) -> dict:
     import os
-    if os.environ.get('PLATE_OCR_ENGINE', 'easyocr') == 'cct':
+    engine = os.environ.get('PLATE_OCR_ENGINE', 'char')
+    if engine == 'char':
+        result = _read_char_plate(crop)
+        if result is not None:
+            return result
+    if engine == 'cct':
         from app.cv.fast_plate_ocr import configured_reader
         try:
             return configured_reader().read(crop)
         except Exception as exc:
             return {'full': '', 'confidence': 0.0, 'needs_review': True,
                     'engine': 'FastPlateOCR', 'error': f'ocr_engine_error:{type(exc).__name__}'}
-    from app.cv.inference_worker import model_owner
-    return model_owner().run('ocr', _read_easyocr_locked, crop)
+    # Not routed through the shared model-owner thread: one read holds it
+    # 44-78ms, stalling detection on both cameras. _reader_lock already
+    # serializes the EasyOCR engine itself.
+    return _read_easyocr_locked(crop)
 
 
 def _read_easyocr_locked(crop):

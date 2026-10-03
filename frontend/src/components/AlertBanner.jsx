@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
 import { warmUpVoices, speakVietnamese, stopSpeech } from '../utils/speak';
-import { getAlertPriority } from '../utils/alertPriority';
 import { createAlertAudio, buildAlertMessage } from '../utils/alertAudio';
+import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
 
 /**
  * AlertBanner — connects to /guard/ws WebSocket and renders a banner with
@@ -89,11 +89,12 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
     const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?${params.toString()}`;
 
     function handleAlert(data) {
-      const priority = getAlertPriority(data.violation_type);
-      setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
+      if (data?.type === 'gate_crossed') return;
+      const { tone, title, detail } = describeAlert(data);
+      setMessage(`${tone === 'info' ? '✅' : '⚠️'} ${title} — ${detail}`);
       setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
-      setBannerBg(priority === 'high' ? '#c92035' : '#f59e0b');
+      setBannerBg(TONE_COLORS[tone]);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => setVisible(false), 3000);
 
