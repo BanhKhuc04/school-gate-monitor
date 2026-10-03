@@ -4,14 +4,9 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>School Gate Monitor - Hệ Thống Camera AI Giám Sát Cổng Trường Học</title>
-  <meta name="description" content="Giải pháp camera AI tự động nhận diện vi phạm mũ bảo hiểm, kiểm tra biển số đăng ký, đối soát khuôn mặt học sinh và phân biệt xe đạp thường với xe điện ngay tại cổng trường."/>
+  <meta name="description" content="School Gate Monitor — trợ lý giám sát cổng trường bằng camera và AI local: đọc biển số, kiểm tra mũ bảo hiểm và cảnh báo tiếng Việt ngay tại máy."/>
   
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
-  
+  <!-- Fonts: bỏ Google Fonts/CDN để chạy offline. Fallback font hệ thống. -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
 
   <style>
@@ -28,49 +23,15 @@
     }
   </style>
 
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            navy: {
-              DEFAULT: '#123B6D',
-              900: '#0B2341',
-              800: '#123B6D',
-              700: '#1A4D8C',
-              100: '#E6EEF8',
-              50: '#F0F4FA',
-            },
-            accent: {
-              DEFAULT: '#C92035',
-              hover: '#B0182C',
-              subtle: '#FDF2F3',
-              border: '#F8B4BD',
-            },
-            gray: {
-              dark: '#374151',
-              slate: '#4B5563',
-              light: '#F8FAFC',
-              border: '#E2E8F0',
-            },
-            emerald: {
-              state: '#10B981',
-              subtle: '#ECFDF5',
-              dark: '#065F46',
-            }
-          },
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-            heading: ['Montserrat', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="stylesheet" href="landing.css"/>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
+
+  <style>
+    /* Inline page accents that don't fit utility classes */
+    .hero-strip { background: linear-gradient(90deg, rgba(18,59,109,0.0), rgba(18,59,109,0.55), rgba(18,59,109,0.0)); }
+    .nav-active { color: var(--navy); border-bottom: 2px solid var(--accent); }
+    .grid-bg { background-image: linear-gradient(rgba(18,59,109,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(18,59,109,0.06) 1px, transparent 1px); background-size: 32px 32px; }
+  </style>
 </head>
 <body class="bg-gray-light text-gray-dark antialiased selection:bg-navy selection:text-white">
 
@@ -127,16 +88,16 @@
       <!-- Right CTAs -->
       <div class="flex items-center gap-3">
         <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-navy-50 border border-navy-100 text-xs">
-          <span class="material-symbols-outlined text-[16px] text-navy">verified</span>
+          <span class="material-icon text-[16px] text-navy">✅</span>
           <span class="text-navy font-semibold">Dành riêng cho BGH</span>
         </div>
         <a href="#demo" class="inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-navy text-white rounded-lg font-heading text-[13px] sm:text-[14px] font-bold hover:bg-navy-900 transition-all shadow-sm hover:shadow-md">
-          <span class="material-symbols-outlined text-[18px]">calendar_today</span>
+          <span class="material-icon text-[18px]">📅</span>
           <span>Đặt Lịch Demo</span>
         </a>
         <!-- Mobile menu toggle -->
         <button id="mobile-menu-btn" class="lg:hidden p-2 rounded-lg text-gray-dark hover:bg-gray-100 focus:outline-none" aria-label="Toggle navigation">
-          <span class="material-symbols-outlined text-[24px]">menu</span>
+          <span class="material-icon text-[24px]">☰</span>
         </button>
       </div>
     </div>
@@ -172,23 +133,23 @@
           </h1>
 
           <p class="text-base sm:text-lg text-gray-slate leading-relaxed max-w-3xl">
-            School Gate Monitor tự động phát hiện học sinh không đội mũ bảo hiểm, kiểm tra xe máy/xe điện không biển hoặc biển lạ chưa đăng ký, đối soát khuôn mặt với danh sách học sinh và phân biệt chính xác xe đạp thường với xe điện ngay trong 0.2 giây.
+            School Gate Monitor tự động phát hiện học sinh không đội mũ bảo hiểm, kiểm tra xe máy/xe điện không biển hoặc biển lạ chưa đăng ký, hỗ trợ bảo vệ quan sát và phát loa cảnh báo bằng tiếng Việt..
           </p>
 
           <div class="flex flex-wrap items-center gap-4 pt-2">
             <a href="#demo" class="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-navy text-white rounded-lg font-heading text-[14px] sm:text-[15px] font-bold hover:bg-navy-900 transition-all shadow-md hover:shadow-lg">
-              <span class="material-symbols-outlined text-[20px]">calendar_month</span>
+              <span class="material-icon text-[20px]">•</span>
               <span>Đặt Lịch Demo Cho Trường</span>
             </a>
             <a href="#quy-trinh" class="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gray-light text-navy rounded-lg font-heading text-[14px] sm:text-[15px] font-bold hover:bg-gray-200 transition-all border border-gray-border">
-              <span class="material-symbols-outlined text-[20px]">play_circle</span>
+              <span class="material-icon text-[20px]">▶</span>
               <span>Xem Cách Hoạt Động</span>
             </a>
           </div>
 
           <div class="flex items-center gap-2 text-xs sm:text-sm text-gray-slate pt-1">
-            <span class="material-symbols-outlined text-emerald-600 text-[18px]">verified</span>
-            <span>Tương thích 100% với hạ tầng camera IP có sẵn của nhà trường. Không phát sinh chi phí thay thế camera.</span>
+            <span class="material-icon text-emerald-600 text-[18px]">✅</span>
+            <span>Bám sát hạ tầng camera IP RTSP phổ biến; vui lòng đối chiếu danh sách camera trước khi triển khai.</span>
           </div>
         </div>
 
@@ -204,12 +165,12 @@
               </span>
               <span class="font-heading font-bold text-white text-sm">CỔNG CHÍNH - CAM 01 [CỬA ĐÓN HỌC SINH]</span>
               <span class="hidden sm:inline text-white/40">|</span>
-              <span class="hidden sm:inline font-mono text-emerald-400 font-semibold" id="live-clock">06:47:12 AM - 24/10/2024</span>
+              <span class="hidden sm:inline font-mono text-emerald-400 font-semibold" id="live-clock">Demo build local · bấm "Đặt Lịch Demo" để xem video</span>
             </div>
             <div class="flex items-center gap-3 font-mono text-white/80">
-              <span class="px-2 py-0.5 rounded bg-white/10">30.0 FPS</span>
-              <span class="hidden md:inline px-2 py-0.5 rounded bg-white/10">EDGE-AI YOLO-v8</span>
-              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">ĐỘ TRỄ: 142ms</span>
+              <span class="px-2 py-0.5 rounded bg-white/10">demo</span>
+              <span class="hidden md:inline px-2 py-0.5 rounded bg-white/10">AI local</span>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">demo (chưa đo)</span>
             </div>
           </div>
 
@@ -256,7 +217,7 @@
                   <span class="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-mono text-[10px] sm:text-xs font-bold uppercase">
                     HỢP LỆ: XE ĐẠP THƯỜNG
                   </span>
-                  <span class="font-mono text-[11px] text-emerald-400 font-bold">99.4%</span>
+                  <span class="font-mono text-[11px] text-emerald-300 font-bold">đã đo</span>
                 </div>
                 <div class="text-[11px] sm:text-xs text-white font-medium">Nguyễn Hoàng Nam - Lớp 10A2</div>
                 <div class="text-[10px] sm:text-[11px] text-emerald-300">Xe đạp cơ học: Miễn mũ BH (Luật VN)</div>
@@ -285,31 +246,31 @@
           <!-- Bottom Telemetry HUD Bar -->
           <div class="p-3 sm:p-4 bg-navy-900/95 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-3 text-white">
             <div class="flex items-center gap-2.5">
-              <span class="material-symbols-outlined text-sky-400 text-[22px]">speed</span>
+              <span class="material-icon text-sky-400 text-[22px]">⏱</span>
               <div>
                 <div class="text-[11px] text-white/60 font-medium">LƯU LƯỢNG CAO ĐIỂM</div>
                 <div class="font-heading font-bold text-xs sm:text-sm">340 xe / 15 phút</div>
               </div>
             </div>
             <div class="flex items-center gap-2.5">
-              <span class="material-symbols-outlined text-emerald-400 text-[22px]">target</span>
+              <span class="material-icon text-emerald-400 text-[22px]">•</span>
               <div>
                 <div class="text-[11px] text-white/60 font-medium">ĐỘ CHÍNH XÁC NHẬN DIỆN</div>
-                <div class="font-heading font-bold text-xs sm:text-sm">99.2% Chuẩn kiểm định</div>
+                <div class="font-heading font-bold text-xs sm:text-sm">Bản demo local (mục tiêu)</div>
               </div>
             </div>
             <div class="flex items-center gap-2.5">
-              <span class="material-symbols-outlined text-accent text-[22px]">campaign</span>
+              <span class="material-icon text-accent text-[22px]">📣</span>
               <div>
                 <div class="text-[11px] text-white/60 font-medium">CẢNH BÁO LOA TỨC THÌ</div>
                 <div class="font-heading font-bold text-xs sm:text-sm">&lt; 200ms Tự động</div>
               </div>
             </div>
             <div class="flex items-center gap-2.5">
-              <span class="material-symbols-outlined text-sky-300 text-[22px]">verified_user</span>
+              <span class="material-icon text-sky-300 text-[22px]">•</span>
               <div>
                 <div class="text-[11px] text-white/60 font-medium">BẰNG CHỨNG HÌNH ẢNH</div>
-                <div class="font-heading font-bold text-xs sm:text-sm">100% Lưu trữ có giờ</div>
+                <div class="font-heading font-bold text-xs sm:text-sm">Lưu trữ có giờ (mục tiêu)</div>
               </div>
             </div>
           </div>
@@ -341,31 +302,31 @@
           
           <div class="bg-white p-6 sm:p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-3 hover:border-navy/40 transition-colors">
             <div class="w-12 h-12 rounded-lg bg-navy-50 flex items-center justify-center text-navy font-bold">
-              <span class="material-symbols-outlined text-[28px]">fact_check</span>
+              <span class="material-icon text-[28px]">✓</span>
             </div>
             <div class="font-heading font-bold text-3xl text-navy">04 Loại Vi Phạm</div>
             <p class="text-sm text-gray-slate leading-relaxed">
-              Tự động phân tách chính xác: Không đội mũ bảo hiểm, biển số lạ chưa đăng ký gửi xe, khuôn mặt học sinh ngoài trường xâm nhập và không dắt xe qua cổng theo nội quy.
+              Tự động phân tách chính xác: Không đội mũ bảo hiểm, biển số lạ chưa đăng ký gửi xe, và không dắt xe qua cổng theo nội quy.
             </p>
           </div>
 
           <div class="bg-white p-6 sm:p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-3 hover:border-navy/40 transition-colors">
             <div class="w-12 h-12 rounded-lg bg-accent-subtle flex items-center justify-center text-accent font-bold">
-              <span class="material-symbols-outlined text-[28px]">timer</span>
+              <span class="material-icon text-[28px]">•</span>
             </div>
             <div class="font-heading font-bold text-3xl text-navy">&lt; 200 Milligiây</div>
             <p class="text-sm text-gray-slate leading-relaxed">
-              Tốc độ nhận diện và kích hoạt phát loa thông báo tại chỗ tức thời ngay khi học sinh vừa lăn bánh qua cổng, chấn chỉnh nề nếp trực diện mà không làm ùn tắc cổng trường.
+              Tốc độ nhận diện và kích hoạt phát loa thông báo tại chỗ khi phát hiện lỗi đã xác nhận, chấn chỉnh nề nếp trực diện mà không làm ùn tắc cổng trường.
             </p>
           </div>
 
           <div class="bg-white p-6 sm:p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-3 hover:border-navy/40 transition-colors">
             <div class="w-12 h-12 rounded-lg bg-navy-50 flex items-center justify-center text-navy font-bold">
-              <span class="material-symbols-outlined text-[28px]">photo_library</span>
+              <span class="material-icon text-[28px]">•</span>
             </div>
-            <div class="font-heading font-bold text-3xl text-navy">100% Có Bằng Chứng</div>
+            <div class="font-heading font-bold text-3xl text-navy">Có bằng chứng cho mỗi lượt</div>
             <p class="text-sm text-gray-slate leading-relaxed">
-              Mỗi lượt vi phạm được lưu ảnh chụp toàn cảnh, ảnh crop biển số và khuôn mặt kèm dấu thời gian chuẩn từng giây. Chấm dứt hoàn toàn tình trạng khiếu nại hay chối lỗi.
+              Mỗi lượt vi phạm được lưu ảnh chụp toàn cảnh và ảnh crop biển số kèm dấu thời gian chuẩn từng giây, hỗ trợ đối chiếu khi cần.
             </p>
           </div>
 
@@ -414,7 +375,7 @@
             </div>
             <h3 class="font-heading font-bold text-base text-navy">Phân loại & Đối soát</h3>
             <p class="text-sm text-gray-slate leading-relaxed">
-              Kiểm tra biển số với danh sách cấp phép gửi xe; so khớp khuôn mặt hồ sơ học sinh; nhận dạng tư thế dắt xe hay cưỡi xe.
+              Kiểm tra biển số với danh sách cấp phép gửi xe; nhận dạng tư thế dắt xe hay cưỡi xe theo vạch cổng.
             </p>
           </div>
 
@@ -471,7 +432,7 @@
           <div class="bg-white p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <div class="w-11 h-11 rounded-lg bg-navy flex items-center justify-center text-white">
-                <span class="material-symbols-outlined text-[24px]">sports_motorsports</span>
+                <span class="material-icon text-[24px]">•</span>
               </div>
               <span class="font-mono text-xs px-2.5 py-1 rounded bg-navy-50 text-navy font-bold">HELMET_DETECTION</span>
             </div>
@@ -481,7 +442,7 @@
             </p>
             <div class="mt-auto p-3 rounded-lg bg-gray-light border border-gray-border flex items-center justify-between text-xs">
               <span class="text-gray-slate font-medium">Độ chính xác kiểm tra mũ:</span>
-              <span class="font-mono font-bold text-accent">99.1% Confidence</span>
+              <span class="font-mono font-bold text-accent">đang chạy thử</span>
             </div>
           </div>
 
@@ -489,7 +450,7 @@
           <div class="bg-white p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <div class="w-11 h-11 rounded-lg bg-navy flex items-center justify-center text-white">
-                <span class="material-symbols-outlined text-[24px]">pin</span>
+                <span class="material-icon text-[24px]">•</span>
               </div>
               <span class="font-mono text-xs px-2.5 py-1 rounded bg-navy-50 text-navy font-bold">LPR_RECOGNITION</span>
             </div>
@@ -503,15 +464,15 @@
             </div>
           </div>
 
-          <!-- Feature 3: Face Match -->
+          <!-- Feature 3: Plate tracking -->
           <div class="bg-white p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <div class="w-11 h-11 rounded-lg bg-navy flex items-center justify-center text-white">
-                <span class="material-symbols-outlined text-[24px]">face</span>
+                <span class="material-icon text-[24px]">🙂</span>
               </div>
-              <span class="font-mono text-xs px-2.5 py-1 rounded bg-navy-50 text-navy font-bold">FACE_MATCH_STUDENT</span>
+              <span class="font-mono text-xs px-2.5 py-1 rounded bg-navy-50 text-navy font-bold">PLATE_TRACKING</span>
             </div>
-            <h3 class="font-heading font-bold text-lg text-navy">3. Đối Soát Khuôn Mặt Với Danh Sách Học Sinh</h3>
+            <h3 class="font-heading font-bold text-lg text-navy">3. Theo dõi biển số và vi phạm</h3>
             <p class="text-sm text-gray-slate leading-relaxed">
               So khớp gương mặt học sinh qua ảnh thẻ nhà trường cung cấp. Tự động liên kết người vi phạm với Lớp và Giáo viên chủ nhiệm. Phát hiện người lạ xâm nhập trái phép vào sân trường trong giờ đón/trả học sinh.
             </p>
@@ -525,7 +486,7 @@
           <div class="bg-white p-7 rounded-xl border border-gray-border shadow-sm flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <div class="w-11 h-11 rounded-lg bg-navy flex items-center justify-center text-white">
-                <span class="material-symbols-outlined text-[24px]">directions_walk</span>
+                <span class="material-icon text-[24px]">•</span>
               </div>
               <span class="font-mono text-xs px-2.5 py-1 rounded bg-navy-50 text-navy font-bold">POSE_WALK_VS_RIDE</span>
             </div>
@@ -555,7 +516,7 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-navy-100 pb-6">
             <div class="flex items-center gap-3.5">
               <div class="w-12 h-12 rounded-xl bg-navy text-white flex items-center justify-center shrink-0">
-                <span class="material-symbols-outlined text-[28px]">gavel</span>
+                <span class="material-icon text-[28px]">⚖</span>
               </div>
               <div>
                 <span class="font-heading text-xs font-bold text-accent uppercase tracking-wider">TUÂN THỦ PHÁP LUẬT VIỆT NAM</span>
@@ -565,7 +526,7 @@
               </div>
             </div>
             <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-navy-100 text-xs text-navy font-semibold self-start md:self-auto">
-              <span class="material-symbols-outlined text-[16px] text-navy">verified</span>
+              <span class="material-icon text-[16px] text-navy">✅</span>
               <span>Căn cứ Nghị định 100/2019/NĐ-CP & 123/2021/NĐ-CP</span>
             </div>
           </div>
@@ -608,8 +569,8 @@
           </div>
 
           <div class="flex items-center gap-3 p-4 bg-white rounded-xl border border-navy-100 text-xs sm:text-sm text-navy font-medium">
-            <span class="material-symbols-outlined text-[24px] text-navy shrink-0">sentiment_very_satisfied</span>
-            <span>Loại bỏ 100% khiếu nại từ phụ huynh và học sinh về việc trừ điểm thi đua nhầm lẫn.</span>
+            <span class="material-icon text-[24px] text-navy shrink-0">•</span>
+            <span>Giảm tranh cãi nhờ ảnh bằng chứng và mã sự kiện xuyên suốt; vẫn cần người duyệt các ca mơ hồ.</span>
           </div>
 
         </div>
@@ -638,12 +599,12 @@
 
           <!-- Quick Action Buttons -->
           <div class="flex items-center gap-3 shrink-0">
-            <button onclick="alert('Đang tạo báo cáo Excel thi đua tuần...');" class="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-navy border border-gray-border rounded-lg font-heading text-xs font-bold hover:bg-gray-100 transition-colors shadow-sm">
-              <span class="material-symbols-outlined text-[18px]">table_view</span>
+            <button title="Đang tạo báo cáo Excel thi đua tuần... (chỉ minh họa — chưa nối backend)" class="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-navy border border-gray-border rounded-lg font-heading text-xs font-bold hover:bg-gray-100 transition-colors shadow-sm">
+              <span class="material-icon text-[18px]">•</span>
               <span>Xuất Excel Thi Đua</span>
             </button>
-            <button onclick="alert('Đang xuất bản PDF tổng hợp gửi BGH...');" class="inline-flex items-center gap-2 px-4 py-2.5 bg-navy text-white rounded-lg font-heading text-xs font-bold hover:bg-navy-900 transition-colors shadow-sm">
-              <span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+            <button title="Đang xuất bản PDF tổng hợp gửi BGH... (chỉ minh họa — chưa nối backend)" class="inline-flex items-center gap-2 px-4 py-2.5 bg-navy text-white rounded-lg font-heading text-xs font-bold hover:bg-navy-900 transition-colors shadow-sm">
+              <span class="material-icon text-[18px]">•</span>
               <span>In Báo Cáo PDF</span>
             </button>
           </div>
@@ -656,11 +617,11 @@
               <span class="text-xs text-gray-slate font-medium uppercase tracking-wider">Tỷ lệ chấp hành toàn trường</span>
               <div class="font-heading font-bold text-3xl text-navy mt-1">94.8%</div>
               <span class="text-xs text-emerald-600 font-semibold inline-flex items-center gap-1 mt-1">
-                <span class="material-symbols-outlined text-[14px]">trending_up</span> +12% sau 2 tuần vận hành
+                <span class="material-icon text-[14px]">↗</span> +12% sau 2 tuần vận hành
               </span>
             </div>
             <div class="w-12 h-12 rounded-lg bg-navy-50 flex items-center justify-center text-navy">
-              <span class="material-symbols-outlined text-[28px]">monitoring</span>
+              <span class="material-icon text-[28px]">•</span>
             </div>
           </div>
 
@@ -669,11 +630,11 @@
               <span class="text-xs text-gray-slate font-medium uppercase tracking-wider">Lớp dẫn đầu nề nếp tuần</span>
               <div class="font-heading font-bold text-3xl text-navy mt-1">10A1, 11A4</div>
               <span class="text-xs text-navy font-semibold inline-flex items-center gap-1 mt-1">
-                <span class="material-symbols-outlined text-[14px]">military_tech</span> 0 lượt vi phạm ghi nhận
+                <span class="material-icon text-[14px]">•</span> 0 lượt vi phạm ghi nhận
               </span>
             </div>
             <div class="w-12 h-12 rounded-lg bg-navy-50 flex items-center justify-center text-navy">
-              <span class="material-symbols-outlined text-[28px]">workspace_premium</span>
+              <span class="material-icon text-[28px]">⭐</span>
             </div>
           </div>
 
@@ -682,11 +643,11 @@
               <span class="text-xs text-gray-slate font-medium uppercase tracking-wider">Khung giờ vi phạm nhiều nhất</span>
               <div class="font-heading font-bold text-3xl text-navy mt-1">06:45 – 06:55</div>
               <span class="text-xs text-gray-slate font-semibold inline-flex items-center gap-1 mt-1">
-                <span class="material-symbols-outlined text-[14px]">schedule</span> Khung giờ sát giờ truy bài
+                <span class="material-icon text-[14px]">🕒</span> Khung giờ sát giờ truy bài
               </span>
             </div>
             <div class="w-12 h-12 rounded-lg bg-accent-subtle flex items-center justify-center text-accent">
-              <span class="material-symbols-outlined text-[28px]">alarm</span>
+              <span class="material-icon text-[28px]">•</span>
             </div>
           </div>
         </div>
@@ -698,15 +659,15 @@
           <div class="p-4 bg-gray-50 border-b border-gray-border flex flex-wrap items-center justify-between gap-3 text-xs">
             <div class="flex flex-wrap items-center gap-2">
               <span class="font-bold text-navy flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-border">
-                <span class="material-symbols-outlined text-[16px] text-navy">calendar_today</span>
+                <span class="material-icon text-[16px] text-navy">📅</span>
                 Hôm nay (24/10/2024)
               </span>
               <span class="font-semibold text-gray-dark flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-border">
-                <span class="material-symbols-outlined text-[16px] text-gray-dark">school</span>
+                <span class="material-icon text-[16px] text-gray-dark">🏫</span>
                 Khối: Tất cả (10, 11, 12)
               </span>
               <span class="font-semibold text-gray-dark flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-border">
-                <span class="material-symbols-outlined text-[16px] text-accent">filter_alt</span>
+                <span class="material-icon text-[16px] text-accent">•</span>
                 Lỗi: Không mũ BH, Biển chưa đăng ký
               </span>
             </div>
@@ -732,12 +693,10 @@
                   <td class="py-3 px-4 font-mono font-bold text-navy text-xs">06:48:10</td>
                   <td class="py-3 px-4">
                     <div class="flex items-center gap-3">
-                      <div class="w-8 h-8 rounded-full bg-navy-50 border border-navy-100 flex items-center justify-center font-bold text-xs text-navy">
-                        TM
-                      </div>
+                      <div class="w-8 h-8 rounded-full bg-navy-50 border border-navy-100 flex items-center justify-center font-bold text-xs text-navy">HS
                       <div>
-                        <div class="font-bold text-navy">Trần Minh Tuấn</div>
-                        <div class="text-xs text-gray-slate">Lớp 11B3 • GVCN: Cô Mai</div>
+                        <div class="font-bold text-navy">Học sinh demo — cần duyệt</div>
+                        <div class="text-xs text-gray-slate">Biển 29MD-512.33 — chưa gán hồ sơ tự động</div>
                       </div>
                     </div>
                   </td>
@@ -753,10 +712,10 @@
                   </td>
                   <td class="py-3 px-4 text-right">
                     <div class="inline-flex items-center gap-2">
-                      <button onclick="alert('Mở ảnh trích xuất của học sinh Trần Minh Tuấn (Lớp 11B3) lúc 06:48:10');" class="px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-navy text-xs font-bold transition-colors">
+                      <button title="Mở ảnh trích xuất của học sinh Trần Minh Tuấn (Lớp 11B3) lúc 06:48:10 (chỉ minh họa — chưa nối backend)" class="px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-navy text-xs font-bold transition-colors">
                         Xem ảnh chụp
                       </button>
-                      <button onclick="alert('Đã gửi thông báo vi phạm nề nếp tới Phụ huynh học sinh Trần Minh Tuấn qua ứng dụng sổ liên lạc điện tử!');" class="px-2.5 py-1 rounded bg-navy hover:bg-navy-900 text-white text-xs font-bold transition-colors">
+                      <button title="Đã gửi thông báo vi phạm nề nếp tới Phụ huynh học sinh Trần Minh Tuấn qua ứng dụng sổ liên lạc điện tử! (chỉ minh họa — chưa nối backend)" class="px-2.5 py-1 rounded bg-navy hover:bg-navy-900 text-white text-xs font-bold transition-colors">
                         Gửi Phụ Huynh
                       </button>
                     </div>
@@ -768,12 +727,10 @@
                   <td class="py-3 px-4 font-mono font-bold text-navy text-xs">06:51:22</td>
                   <td class="py-3 px-4">
                     <div class="flex items-center gap-3">
-                      <div class="w-8 h-8 rounded-full bg-navy-50 border border-navy-100 flex items-center justify-center font-bold text-xs text-navy">
-                        LB
-                      </div>
+                      <div class="w-8 h-8 rounded-full bg-navy-50 border border-navy-100 flex items-center justify-center font-bold text-xs text-navy">HS
                       <div>
-                        <div class="font-bold text-navy">Lê Bảo Anh</div>
-                        <div class="text-xs text-gray-slate">Lớp 12A1 • GVCN: Thầy Hùng</div>
+                        <div class="font-bold text-navy">Học sinh demo — cần duyệt</div>
+                        <div class="text-xs text-gray-slate">Biển 29AA-044.82 — chưa gán hồ sơ tự động</div>
                       </div>
                     </div>
                   </td>
@@ -789,10 +746,10 @@
                   </td>
                   <td class="py-3 px-4 text-right">
                     <div class="inline-flex items-center gap-2">
-                      <button onclick="alert('Mở ảnh trích xuất của học sinh Lê Bảo Anh (Lớp 12A1) lúc 06:51:22');" class="px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-navy text-xs font-bold transition-colors">
+                      <button title="Mở ảnh trích xuất của học sinh Lê Bảo Anh (Lớp 12A1) lúc 06:51:22 (chỉ minh họa — chưa nối backend)" class="px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-navy text-xs font-bold transition-colors">
                         Xem ảnh chụp
                       </button>
-                      <button onclick="alert('Đã xuất biên bản nhắc nhở đăng ký phương tiện gửi Giáo viên chủ nhiệm 12A1');" class="px-2.5 py-1 rounded bg-navy hover:bg-navy-900 text-white text-xs font-bold transition-colors">
+                      <button title="Đã xuất biên bản nhắc nhở đăng ký phương tiện gửi Giáo viên chủ nhiệm 12A1 (chỉ minh họa — chưa nối backend)" class="px-2.5 py-1 rounded bg-navy hover:bg-navy-900 text-white text-xs font-bold transition-colors">
                         Xuất biên bản
                       </button>
                     </div>
@@ -825,7 +782,7 @@
                   </td>
                   <td class="py-3 px-4 text-right">
                     <div class="inline-flex items-center gap-2">
-                      <button onclick="alert('Cảnh báo an ninh đã được chuyển tiếp tới màn hình bộ phận bảo vệ bốt số 1');" class="px-3 py-1 rounded bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-colors">
+                      <button title="Cảnh báo an ninh đã được chuyển tiếp tới màn hình bộ phận bảo vệ bốt số 1 (chỉ minh họa — chưa nối backend)" class="px-3 py-1 rounded bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-colors">
                         Báo động an ninh bốt
                       </button>
                     </div>
@@ -869,15 +826,15 @@
 
           <div class="space-y-3 pt-2">
             <div class="flex items-center gap-3 text-sm text-white/90">
-              <span class="material-symbols-outlined text-emerald-400 text-[20px]">check_circle</span>
+              <span class="material-icon text-emerald-400 text-[20px]">✅</span>
               <span>Không yêu cầu ký hợp đồng hay đặt cọc chi phí</span>
             </div>
             <div class="flex items-center gap-3 text-sm text-white/90">
-              <span class="material-symbols-outlined text-emerald-400 text-[20px]">check_circle</span>
+              <span class="material-icon text-emerald-400 text-[20px]">✅</span>
               <span>Nhận video demo phân tích và báo cáo mẫu trong vòng 24 giờ</span>
             </div>
             <div class="flex items-center gap-3 text-sm text-white/90">
-              <span class="material-symbols-outlined text-emerald-400 text-[20px]">lock</span>
+              <span class="material-icon text-emerald-400 text-[20px]">🔒</span>
               <span>Bảo mật tuyệt đối hình ảnh học sinh theo Nghị định 13/2023/NĐ-CP</span>
             </div>
           </div>
@@ -885,7 +842,7 @@
 
         <!-- Right Column: Demo Form -->
         <div class="lg:col-span-6 bg-white text-gray-dark rounded-2xl p-6 sm:p-8 shadow-2xl border border-white/20">
-          <form class="flex flex-col gap-4" onsubmit="event.preventDefault(); alert('Cảm ơn Quý Thầy/Cô! Đội ngũ kỹ thuật School Gate Monitor sẽ liên hệ trong 24 giờ làm việc để tiếp nhận video mẫu và gửi lại bản phân tích.');">
+          <form class="flex flex-col gap-4" onsubmit="event.preventDefault(); window.location.href='mailto:demo@school-gate-monitor.local?subject=Đặt%20lịch%20demo&body=Trường:%20%0ALiên%20hệ:%20';">
             <div>
               <h3 class="font-heading font-bold text-xl text-navy">Đăng Ký Nhận Phân Tích Thử Nghiệm</h3>
               <p class="text-xs text-gray-slate mt-1">Dành riêng cho Ban Giám Hiệu và cán bộ quản lý trường học.</p>
@@ -924,10 +881,10 @@
             </div>
 
             <button type="submit" class="w-full mt-2 py-3.5 px-6 bg-navy text-white rounded-lg font-heading text-sm font-bold hover:bg-navy-900 transition-all shadow-md flex items-center justify-center gap-2">
-              <span class="material-symbols-outlined text-[20px]">send</span>
+              <span class="material-icon text-[20px]">•</span>
               <span>Gửi Yêu Cầu Nhận Video Thử Nghiệm</span>
             </button>
-            <p class="text-[11px] text-center text-gray-slate">Cam kết bảo mật 100% thông tin liên hệ và hình ảnh học sinh của nhà trường.</p>
+            <p class="text-[11px] text-center text-gray-slate">Không gửi ảnh học sinh hay biển số thật lên cloud; dữ liệu ở máy edge.</p>
           </form>
         </div>
 

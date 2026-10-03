@@ -3,8 +3,11 @@ import { useAuth } from '../auth/AuthContext';
 import AlertBanner from '../components/AlertBanner';
 import RecognitionLogPanel from '../components/RecognitionLogPanel';
 import PlateReviewPanel from '../components/PlateReviewPanel';
+import DebugOverlayControl from '../components/DebugOverlayControl';
 import client, { API_BASE_URL } from '../api/client';
 import { VIOLATION_LABELS } from '../utils/violationLabels';
+import { useAudioLease } from '../utils/useAudioLease';
+import { getVietnameseVoiceStatus } from '../utils/speak';
 
 const MAX_LOG_ITEMS = 12;
 
@@ -15,7 +18,9 @@ export default function GuardPage() {
   const [logTab, setLogTab] = useState('recognition');
   const [activeGate, setActiveGate] = useState('main');
   const [viewMode, setViewMode] = useState('single'); // 'single' | 'split'
+  const [voiceStatus, setVoiceStatus] = useState({ supported: false, local: false, voice: null });
   const idCounter = useRef(0);
+  const lease = useAudioLease(activeGate);
 
   // gates from API; null = chưa load (hoặc health = null); array = đã load
   const gates = health?.gates ?? null;
@@ -40,6 +45,20 @@ export default function GuardPage() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  // Voice readiness probe — surfaces "offline Vietnamese voice" state in the
+  // banner area so the operator knows whether the speaker will talk even when
+  // WAN is off.
+  useEffect(() => {
+    const probe = () => setVoiceStatus(getVietnameseVoiceStatus());
+    probe();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = probe;
+    }
+    return () => {
+      if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
   const handleAlert = useCallback((data) => {
     idCounter.current += 1;
     setAlertLog((prev) => [{ ...data, _id: idCounter.current }, ...prev].slice(0, MAX_LOG_ITEMS));
@@ -47,12 +66,13 @@ export default function GuardPage() {
 
   return (
     <div className="min-h-screen bg-primary text-inverse-on-surface flex flex-col">
-      <AlertBanner token={token} onAlert={handleAlert} gate={activeGate} />
+      <AlertBanner token={token} onAlert={handleAlert} gate={activeGate}
+        audioEnabled={lease.enabled} audioClientId={lease.clientId} />
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 p-4">
         {/* Video panel */}
         <div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
             {showGateSelector && !isSplit ? (
               <select
                 value={activeGate}
@@ -70,6 +90,41 @@ export default function GuardPage() {
               <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
                 CAM_01
               </span>
+            )}
+            <button
+              type="button"
+              onClick={lease.toggle}
+              disabled={lease.busy}
+              data-testid="audio-toggle"
+              className={`font-mono text-[11px] px-2.5 py-1 rounded border ${
+                lease.enabled
+                  ? 'bg-success/90 border-success text-on-success'
+                  : 'bg-transparent border-white/30 text-inverse-on-surface/80 hover:bg-white/10'
+              }`}
+              title={lease.enabled ? 'Bấm để nhường quyền loa' : 'Bấm để xin quyền phát loa (cần thao tác của người dùng)'}
+            >
+              {lease.busy ? '…' : lease.enabled ? '🔊 Loa: BẬT' : '🔈 Loa: TẮT'}
+            </button>
+            <span
+              className={`font-mono text-[11px] px-2 py-0.5 rounded ${
+                voiceStatus.local
+                  ? 'bg-success/80 text-on-success'
+                  : voiceStatus.supported
+                    ? 'bg-warning/90 text-on-warning'
+                    : 'bg-error/90 text-on-error'
+              }`}
+              title={voiceStatus.voice
+                ? `Giọng: ${voiceStatus.voice}${voiceStatus.local ? ' (local, chạy offline)' : ' (remote — cần Internet)'}`
+                : 'Trình duyệt không hỗ trợ Web Speech API'}
+            >
+              {voiceStatus.local
+                ? '🇻🇳 VI-local'
+                : voiceStatus.supported
+                  ? 'VI-remote'
+                  : 'VI-n/a'}
+            </span>
+            {lease.error && (
+              <span className="text-[11px] text-error ml-1">{lease.error}</span>
             )}
             {showGateSelector && (
               <div className="ml-auto flex items-center rounded-lg border border-white/30 overflow-hidden text-[11px] font-mono">
@@ -90,11 +145,14 @@ export default function GuardPage() {
               </div>
             )}
           </div>
+          {!isSplit && <DebugOverlayControl key={activeGate} gate={activeGate} name={activeGateName} />}
 
           {isSplit ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {gates.map(g => (
-                <div key={g.id} className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
+                <div key={g.id}>
+                  <DebugOverlayControl gate={g.id} name={g.name} />
+                  <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
                   <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[10px] font-bold">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                     LIVE
@@ -109,6 +167,7 @@ export default function GuardPage() {
                     className="w-full h-auto block"
                     style={{ maxHeight: 'calc(100vh - 260px)', objectFit: 'contain' }}
                   />
+                  </div>
                 </div>
               ))}
             </div>
