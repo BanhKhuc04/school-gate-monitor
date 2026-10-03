@@ -1,5 +1,8 @@
 """Webcam capture wrapper using OpenCV."""
 import os
+import threading
+import time
+from dataclasses import dataclass
 
 # P0 FIX: phải set TRƯỚC khi cv2 mở bất kỳ VideoCapture(CAP_FFMPEG) nào —
 # đây là biến môi trường FFmpeg đọc lúc khởi tạo, set sau (kể cả qua
@@ -41,6 +44,7 @@ class WebcamStream:
         self._loop = loop and self._is_file_or_url and not network
         self._network = network
         self._target_size = (width, height)
+        self.frame_interval = 0.0
 
         if network:
             self.cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG, [
@@ -70,6 +74,9 @@ class WebcamStream:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
         self._is_opened = True
+        if self._is_file_or_url and not network:
+            fps = float(self.cap.get(cv2.CAP_PROP_FPS))
+            self.frame_interval = 1.0 / fps if fps > 0 else 1.0 / 25
 
     def read_source_frame(self) -> np.ndarray:
         """
@@ -118,3 +125,81 @@ class WebcamStream:
     @property
     def is_opened(self) -> bool:
         return self._is_opened and self.cap.isOpened()
+
+
+@dataclass(frozen=True)
+class CapturedFrame:
+    image: np.ndarray
+    seq: int
+    captured_at: float
+    read_ms: float
+
+
+class LatestFrameCapture:
+    """One reader owns capture I/O. Slow consumers receive only the latest frame.
+
+    The caller retains stream lifetime ownership; stop must join successfully
+    before releasing/reusing it. File inputs are paced at their recorded FPS.
+    """
+    def __init__(self, stream, on_frame=None):
+        self.stream, self.on_frame = stream, on_frame
+        self._condition = threading.Condition()
+        self._stop = threading.Event()
+        self._latest = None
+        self._error = None
+        self._thread = None
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, daemon=True, name='camera-capture')
+        self._thread.start()
+
+    def _run(self):
+        seq = 0
+        try:
+            while not self._stop.is_set():
+                started = time.monotonic()
+                reader = getattr(type(self.stream), 'read_source_frame', None)
+                image = self.stream.read_source_frame() if callable(reader) else self.stream.read_frame()
+                if self._stop.is_set():
+                    break
+                seq += 1
+                packet = CapturedFrame(image, seq, time.monotonic(), (time.monotonic()-started)*1000)
+                with self._condition:
+                    self._latest = packet
+                    self._condition.notify_all()
+                if self.on_frame:
+                    self.on_frame(packet)
+                remaining = getattr(self.stream, 'frame_interval', 0.0) - (time.monotonic()-started)
+                if remaining > 0:
+                    self._stop.wait(remaining)
+        except Exception as exc:
+            with self._condition:
+                self._error = exc
+                self._condition.notify_all()
+
+    def read_latest(self, after=0, timeout=3.5):
+        deadline = time.monotonic()+timeout
+        with self._condition:
+            while True:
+                if self._stop.is_set():
+                    raise RuntimeError('capture stopped')
+                if self._latest is not None and self._latest.seq > after:
+                    return self._latest
+                if self._error:
+                    raise RuntimeError(str(self._error)) from self._error
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError('capture frame timeout')
+                self._condition.wait(remaining)
+
+    def stop(self, timeout=4):
+        self._stop.set()
+        with self._condition:
+            self._condition.notify_all()
+        if self._thread:
+            self._thread.join(timeout)
+        return not self._thread or not self._thread.is_alive()
+
+    @property
+    def buffered_frames(self):
+        return int(self._latest is not None)

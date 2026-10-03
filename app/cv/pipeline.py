@@ -36,7 +36,7 @@ from app.config import (
     get_gate_role, get_gate_profile,
     DEBUG_ALERT,
 )
-from app.cv.capture import WebcamStream
+from app.cv.capture import WebcamStream, LatestFrameCapture
 from app.cv.detector import HelmetPlateDetector, Detection
 from pathlib import Path  # noqa: E402, used in hot-reload methods
 from app.cv.ocr import read_plate_detailed, validate_plate_format, compute_blur_score
@@ -556,6 +556,9 @@ class VideoPipeline:
         self._stopped: bool = False
         # Exponential-backoff state for camera reconnect — reset khi read OK.
         self._reconnect_failures: int = 0
+        self._capture = None
+        self._capture_consumed_seq = 0
+        self._capture_seq_base = 0
         # Track có TTL/prune — Phase 1: map crossing/sealed/approach có giới hạn
         # và không hồi sinh lượt cũ gây duplicate. Đếm entry + cuối cùng prune
         # entry quá hạn thay vì chờ dict phình ra vô hạn.
@@ -573,8 +576,6 @@ class VideoPipeline:
         self._stopped = False
         self._run_generation += 1
         self._running = True
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
         # Bước 7: start recorder SAU thread chính — push_frame ngay frame đầu tiên
         # (trước mọi early-return trong _run_loop). Xem comment trong _run_loop.
         if self._recorder is not None:
@@ -591,6 +592,8 @@ class VideoPipeline:
             target=self._preview_loop, daemon=True, name=f"preview-{self.gate_id}")
         self._preview_thread.start()
         print(f"[Pipeline] Preview thread started (queue maxsize=2)")
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
 
     def stop(self):
         """Dừng thread nền. Phase 1: set `_stopped=True` + tăng generation
@@ -603,6 +606,7 @@ class VideoPipeline:
         self._stopped = True
         self._running = False
         self._run_generation += 1  # invalidate mọi callback cũ
+        self._stop_capture()
         if self._thread:
             self._thread.join(timeout=3.0)
         # F01 (Task 1): guard None cho _detect_pool — minimal profile không
@@ -765,7 +769,7 @@ class VideoPipeline:
             for tid in stale:
                 rec.pop(tid, None)
 
-    def _publish_frame_jpeg(self, frame: np.ndarray, frame_seq: int) -> None:
+    def _publish_frame_jpeg(self, frame: np.ndarray, frame_seq: int, expected_epoch=None) -> None:
         """R3: encode JPEG đúng 1 lần cho frame này, chia sẻ cho viewer
         qua `get_jpeg()`. Gọi ở cuối mỗi frame loop — kể cả SKIP / NO-PERSON.
 
@@ -784,6 +788,8 @@ class VideoPipeline:
             jpeg_buf = None
         encode_ms = (time.perf_counter() - t_enc) * 1000
         self._metrics_encode.add(encode_ms)
+        if expected_epoch is not None and expected_epoch != self._source_epoch:
+            return
         if not ok or jpeg_buf is None:
             self._frames_dropped_encode += 1
             with self._lock:
@@ -805,6 +811,9 @@ class VideoPipeline:
             self._jpeg_repeat_count += 1
         self._jpeg_cache[frame_seq] = (jpeg_bytes, time.time())
         with self._lock:
+            if expected_epoch is not None and expected_epoch != self._source_epoch:
+                self._jpeg_cache.pop(frame_seq, None)
+                return
             self._latest_jpeg = jpeg_bytes
             self._latest_frame = frame
 
@@ -814,10 +823,14 @@ class VideoPipeline:
         Queue maxsize=2, drop oldest nếu full — không block main loop.
         Stop khi `_preview_stop` event được set."""
         import queue
-        while not self._preview_stop.wait(0.1):  # False = event set → exit
+        while not self._preview_stop.is_set():
             try:
-                frame, frame_seq = self._preview_frame_queue.get_nowait()
+                item = self._preview_frame_queue.get(timeout=.1)
             except queue.Empty:
+                continue
+            # Legacy test/producer pairs carry no epoch. Runtime always does.
+            epoch, frame, frame_seq = item if len(item) == 3 else (self._source_epoch, *item)
+            if epoch != self._source_epoch:
                 continue
             try:
                 # Reuse the latest completed inference without waiting for AI.
@@ -829,7 +842,10 @@ class VideoPipeline:
                 self._draw_roi(frame)
                 if DEBUG_CROSSING:
                     self._draw_crossing_line_debug(frame)
-                self._publish_frame_jpeg(frame, frame_seq)
+                if len(item) == 3:
+                    self._publish_frame_jpeg(frame, frame_seq, expected_epoch=epoch)
+                else:
+                    self._publish_frame_jpeg(frame, frame_seq)
             except Exception:
                 pass
 
@@ -1198,6 +1214,8 @@ class VideoPipeline:
         discard JPEG cũ, reset detection state để track mới từ nguồn mới không
         trộn với track cũ. Lỗi đổi giữ nguồn cũ (CameraSwitch.apply đã lo).
         Trả về True nếu apply thành công, False nếu thất bại."""
+        if not self._stop_capture():
+            return False
         try:
             from app.cv.camera_switch import CameraSwitch
             if not isinstance(self.camera_switch, CameraSwitch):
@@ -1212,6 +1230,7 @@ class VideoPipeline:
         except Exception:
             return False
         if result is None:
+            self._start_capture()
             return False
         self._webcam, frame = result
         self._active_source = self.camera_switch.source
@@ -1301,6 +1320,7 @@ class VideoPipeline:
                 tracker.reset()
         except Exception:
             pass
+        self._start_capture()
         return True
 
     def _maybe_reload_source(self) -> None:
@@ -1857,11 +1877,48 @@ class VideoPipeline:
             loop=gate_config.get("loop", True),
         )
 
+    def _stop_capture(self):
+        capture = getattr(self, '_capture', None)
+        if capture is not None and not capture.stop():
+            return False
+        self._capture = None
+        return True
+
+    def _start_capture(self):
+        if self._webcam is None or not hasattr(self, '_preview_frame_queue'):
+            return  # compatibility with manually constructed pipeline tests
+        self._capture_seq_base = self._frame_seq
+        self._capture_consumed_seq = 0
+        epoch = self._source_epoch
+        generation = self._run_generation
+        def received(packet):
+            if epoch != self._source_epoch or generation != self._run_generation:
+                return
+            raw = packet.image
+            h, w = raw.shape[:2]
+            scale = min(1., VIDEO_WIDTH/w, VIDEO_HEIGHT/h)
+            frame = cv2.resize(raw, (round(w*scale), round(h*scale)), interpolation=cv2.INTER_AREA) if scale < 1 else raw.copy()
+            self._last_frame_time = time.time()
+            self._fps_capture_window += 1
+            self._metrics_capture.add(packet.read_ms)
+            item = (epoch, frame, self._capture_seq_base+packet.seq)
+            try:
+                self._preview_frame_queue.put_nowait(item)
+            except queue.Full:
+                try:
+                    self._preview_frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                self._preview_frame_queue.put_nowait(item)
+        self._capture = LatestFrameCapture(self._webcam, on_frame=received)
+        self._capture.start()
+
     def _run_loop(self):
         """Vòng lặp chính của thread nền."""
         gate_config = GATES.get(self.gate_id, {"source": 0, "loop": True, "name": self.gate_id})
         try:
             self._webcam = self._open_webcam(gate_config)
+            self._start_capture()
             print("[Pipeline] Webcam opened")
             self._diagnostic('camera', 'observed', 'camera_connected')
         except Exception as e:
@@ -1907,7 +1964,13 @@ class VideoPipeline:
                 # Đọc frame
                 t_read_start = time.perf_counter()
                 native_reader = getattr(type(self._webcam), 'read_source_frame', None)
-                raw = self._webcam.read_source_frame() if callable(native_reader) else self._webcam.read_frame()
+                if getattr(self, '_capture', None) is not None:
+                    packet = self._capture.read_latest(after=self._capture_consumed_seq)
+                    self._capture_consumed_seq = packet.seq
+                    self._frame_seq = self._capture_seq_base+packet.seq-1
+                    raw = packet.image
+                else:
+                    raw = self._webcam.read_source_frame() if callable(native_reader) else self._webcam.read_frame()
                 self._original_source_frame = raw
                 raw_h, raw_w = raw.shape[:2]
                 scale = min(1., VIDEO_WIDTH/raw_w, VIDEO_HEIGHT/raw_h)
@@ -1919,7 +1982,8 @@ class VideoPipeline:
                 self._last_frame_time = time.time()
                 # Phase 0: capture latency chỉ tính phần cv2 read+resize, không
                 # gồm detect (tách ở buffer riêng).
-                self._metrics_capture.add((time.perf_counter() - t_read_start) * 1000)
+                if getattr(self, '_capture', None) is None:
+                    self._metrics_capture.add((time.perf_counter() - t_read_start) * 1000)
 
                 # F02 (Task 1): publish JPEG NGAY SAU khi đọc frame xong, TRƯỚC
                 # mọi detect/pose/OCR/DB. Trước đây JPEG publish nằm trong
@@ -1928,7 +1992,8 @@ class VideoPipeline:
                 # push frame vào preview queue để thread preview encode riêng.
                 # Main loop KHÔNG chờ encode. Queue size=2 → drop oldest if full.
                 try:
-                    self._preview_frame_queue.put_nowait((frame.copy(), self._frame_seq))
+                    if getattr(self, '_capture', None) is None:
+                        self._preview_frame_queue.put_nowait((frame.copy(), self._frame_seq))
                 except Exception:
                     # Queue full — drop oldest frame (don't block main loop)
                     try:
@@ -2176,7 +2241,8 @@ class VideoPipeline:
                 # Phase 0: AI FPS = số frame ĐÃ QUA detect/giây. Capture FPS
                 # đếm ở đầu loop. Cả 2 đều cập nhật theo interval 1s để tránh
                 # chia cho 0 và phản ánh thực tế.
-                self._fps_capture_window += 1
+                if getattr(self, '_capture', None) is None:
+                    self._fps_capture_window += 1
                 self._fps_ai_window += 1
                 self._resource_sampler.update()
                 # Resize down before buffering to save RAM (640x360 = ~1/4 of 1280x720)
@@ -2195,11 +2261,15 @@ class VideoPipeline:
                 if _consecutive_errors >= _RECONNECT_AFTER:
                     print(f"[Pipeline] {_consecutive_errors} consecutive read failures — reconnecting camera")
                     try:
+                        if not self._stop_capture():
+                            raise RuntimeError('capture reader did not stop')
                         self._webcam.release()
                     except Exception:
                         pass
                     try:
-                        self._webcam = self._open_webcam(gate_config)
+                        # Same URL reconnect is a new tracking/source session.
+                        self.camera_switch.request(GATES[self.gate_id]['source'], persist=False)
+                        self._apply_camera_change()
                         print("[Pipeline] Webcam reconnected")
                     except Exception as reconnect_err:
                         print(f"[Pipeline] Reconnect failed: {reconnect_err}")
@@ -2226,6 +2296,7 @@ class VideoPipeline:
                 self._maybe_update_fps()
 
         # Cleanup
+        self._stop_capture()
         if self._webcam:
             self._webcam.release()
             print("[Pipeline] Webcam released")

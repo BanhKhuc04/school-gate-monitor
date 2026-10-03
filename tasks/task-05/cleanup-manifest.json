@@ -1,0 +1,44 @@
+[
+  {
+    "path": "D:\\Work\\Project_motorbike\\tests_v2",
+    "files": 39238,
+    "bytes": 16820713824,
+    "action": "delete-generated-test-copy",
+    "head_tracked": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\tests_full_reg",
+    "files": 39224,
+    "bytes": 16819539256,
+    "action": "delete-generated-test-copy",
+    "head_tracked": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\tests_v4",
+    "files": 12671,
+    "bytes": 5038468587,
+    "action": "delete-generated-test-copy",
+    "head_tracked": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\qa_logs\\ocr_fix_full",
+    "files": 10457,
+    "bytes": 4267673869,
+    "action": "delete-generated-test-copy",
+    "head_tracked": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\qa_logs\\ocr_fix_full_isolated",
+    "files": 7700,
+    "bytes": 3210472474,
+    "action": "delete-generated-test-copy",
+    "head_tracked": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\tasks\\task-02\\pytest-r3retest",
+    "files": 17119,
+    "bytes": 7111800151,
+    "action": "delete-generated-test-copy",
+    "head_tracked": false
+  }
+]
