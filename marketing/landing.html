@@ -129,8 +129,12 @@
           </div>
 
           <h1 class="font-heading font-extrabold text-3xl sm:text-4xl lg:text-5xl text-navy tracking-tight leading-tight sm:leading-[1.15]">
-            Không một phương tiện nào qua cổng trường mà không được định danh chính xác.
+            Giám sát cổng trường theo thời gian thực, cảnh báo vi phạm bằng giọng nói tiếng Việt.
           </h1>
+          <p class="font-body text-lg sm:text-xl text-slate-600 leading-relaxed mt-4 max-w-2xl mx-auto lg:mx-0">
+            Mỗi lượt xe qua cổng được tách thành các mốc quan sát (phát hiện → theo dõi → vượt vạch) và chỉ phát cảnh báo khi đủ bằng chứng đồng thuận.
+            Mọi số liệu hiển thị trong dashboard là số đo được trên camera thật của hệ thống, không phải số tham chiếu từ tài liệu.
+          </p>
 
           <p class="text-base sm:text-lg text-gray-slate leading-relaxed max-w-3xl">
             School Gate Monitor tự động phát hiện học sinh không đội mũ bảo hiểm, kiểm tra xe máy/xe điện không biển hoặc biển lạ chưa đăng ký, hỗ trợ bảo vệ quan sát và phát loa cảnh báo bằng tiếng Việt..
@@ -314,7 +318,7 @@
             <div class="w-12 h-12 rounded-lg bg-accent-subtle flex items-center justify-center text-accent font-bold">
               <span class="material-icon text-[28px]">•</span>
             </div>
-            <div class="font-heading font-bold text-3xl text-navy">&lt; 200 Milligiây</div>
+            <div class="font-heading font-bold text-3xl text-navy">Đo được trên runtime</div>
             <p class="text-sm text-gray-slate leading-relaxed">
               Tốc độ nhận diện và kích hoạt phát loa thông báo tại chỗ khi phát hiện lỗi đã xác nhận, chấn chỉnh nề nếp trực diện mà không làm ùn tắc cổng trường.
             </p>
@@ -422,7 +426,7 @@
             Công nghệ thị giác máy tính tinh chỉnh cho trường học Việt Nam
           </h2>
           <p class="text-base text-gray-slate leading-relaxed">
-            Mô hình AI được huấn luyện trên hàng triệu khung hình thực tế tại cổng trường: đồng phục học sinh, các loại xe máy điện (VinFast, Yadea, Vespa 50cc), biển số 29AA/MD và thói quen che chắn khẩu trang.
+            Mô hình AI được tinh chỉnh cho điều kiện cổng trường Việt Nam. Bộ dữ liệu huấn luyện được mô tả chi tiết ở mục "Đánh giá mô hình" trong tài liệu kỹ thuật đính kèm — không công bố con số "hàng triệu khung hình" nếu chưa đo.
           </p>
         </div>
 
@@ -474,7 +478,7 @@
             </div>
             <h3 class="font-heading font-bold text-lg text-navy">3. Theo dõi biển số và vi phạm</h3>
             <p class="text-sm text-gray-slate leading-relaxed">
-              So khớp gương mặt học sinh qua ảnh thẻ nhà trường cung cấp. Tự động liên kết người vi phạm với Lớp và Giáo viên chủ nhiệm. Phát hiện người lạ xâm nhập trái phép vào sân trường trong giờ đón/trả học sinh.
+              Theo dõi biển số giữa các khung hình bằng ByteTrack; so khớp với biển đã đăng ký gửi xe. Phát cảnh báo khi biển lạ xuất hiện hoặc biển đã đăng ký vi phạm nội quy (không mũ, dắt xe, v.v.). Hệ thống KHÔNG nhận diện gương mặt và KHÔNG tự liên kết với hồ sơ học sinh — biển số là mã liên kết duy nhất.
             </p>
             <div class="mt-auto p-3 rounded-lg bg-gray-light border border-gray-border flex items-center justify-between text-xs">
               <span class="text-gray-slate font-medium">Bảo mật dữ liệu cá nhân:</span>
@@ -842,7 +846,7 @@
 
         <!-- Right Column: Demo Form -->
         <div class="lg:col-span-6 bg-white text-gray-dark rounded-2xl p-6 sm:p-8 shadow-2xl border border-white/20">
-          <form class="flex flex-col gap-4" onsubmit="event.preventDefault(); window.location.href='mailto:demo@school-gate-monitor.local?subject=Đặt%20lịch%20demo&body=Trường:%20%0ALiên%20hệ:%20';">
+          <form class="flex flex-col gap-4" onsubmit="event.preventDefault(); alert('Liên hệ demo: vui lòng gửi yêu cầu qua kênh nội bộ của trường (không công khai email placeholder). Hệ thống chưa có form backend đã xác nhận.');">
             <div>
               <h3 class="font-heading font-bold text-xl text-navy">Đăng Ký Nhận Phân Tích Thử Nghiệm</h3>
               <p class="text-xs text-gray-slate mt-1">Dành riêng cho Ban Giám Hiệu và cán bộ quản lý trường học.</p>

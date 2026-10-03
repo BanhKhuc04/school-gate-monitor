@@ -1,7 +1,9 @@
 #!/usr/bin/env python
-"""One-shot smoke: gọi endpoint /api/system/health của backend local, in trạng thái
-và danh sách gates/pipelines. Dùng trong START_DEMO.ps1 để fail-fast khi
-backend chưa sẵn sàng."""
+"""One-shot smoke: gọi endpoint readiness tối thiểu của backend local.
+
+Ưu tiên /api/system/ready (no-auth, read-only). Fallback /api/system/health
+nếu được cấp token. Dùng trong START_DEMO.ps1 để fail-fast khi backend
+chưa sẵn sàng."""
 import argparse
 import json
 import os
@@ -9,6 +11,14 @@ import sys
 import time
 import urllib.error
 import urllib.request
+
+
+def _probe(url: str, token: str, timeout: float = 4.0):
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header('Authorization', f'Bearer {token}')
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode('utf-8'))
 
 
 def main():
@@ -19,19 +29,30 @@ def main():
     ap.add_argument('--delay', type=float, default=2.0)
     args = ap.parse_args()
 
+    base = args.base_url.rstrip('/')
+    ready_url = base + '/api/system/ready'
+    health_url = base + '/api/system/health'
     last_err = None
     for attempt in range(1, args.retries + 1):
+        # Luôn thử /ready trước (no-auth, dành cho launcher).
         try:
-            req = urllib.request.Request(args.base_url.rstrip('/') + '/api/system/health')
-            if args.token:
-                req.add_header('Authorization', f'Bearer {args.token}')
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-            print(json.dumps({'attempt': attempt, 'ok': True, 'health': data}, indent=2, ensure_ascii=False))
+            data = _probe(ready_url, token='', timeout=4.0)
+            print(json.dumps({'attempt': attempt, 'ok': True, 'endpoint': 'ready', 'data': data},
+                             indent=2, ensure_ascii=False))
             return 0
         except (urllib.error.URLError, urllib.error.HTTPError) as e:
             last_err = e
-            print(json.dumps({'attempt': attempt, 'ok': False, 'error': str(e)}, ensure_ascii=False))
+            # Nếu có token, thử /health (auth) — KHÔNG thay thế ready.
+            if args.token:
+                try:
+                    data = _probe(health_url, token=args.token, timeout=4.0)
+                    print(json.dumps({'attempt': attempt, 'ok': True, 'endpoint': 'health',
+                                      'data': data}, indent=2, ensure_ascii=False))
+                    return 0
+                except (urllib.error.URLError, urllib.error.HTTPError) as e2:
+                    last_err = e2
+            print(json.dumps({'attempt': attempt, 'ok': False, 'error': str(last_err)},
+                             ensure_ascii=False))
             time.sleep(args.delay)
     print('Backend not reachable after retries:', last_err, file=sys.stderr)
     return 2

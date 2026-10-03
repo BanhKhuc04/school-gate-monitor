@@ -27,6 +27,24 @@ from app.config import SNAPSHOTS_DIR, BACKUP_DIR, BACKUP_KEEP_COUNT, GATES
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
+
+@router.get("/ready", include_in_schema=False)
+def get_ready():
+    """Readiness tối thiểu — không auth, read-only.
+
+    Dùng cho START_DEMO.ps1 và các health probe bên ngoài. KHÔNG trả
+    thông tin nhạy cảm (storage, violation count, disk usage, gates).
+    """
+    import os as _os
+    import sys as _sys
+    return {
+        "ok": True,
+        "service": "school-gate-monitor",
+        "version": "2.0.0",
+        "pid": _os.getpid(),
+        "python": _sys.version.split()[0],
+    }
+
 # Phase 0 (Task 1): cache kết quả các phép đo dung lượng (snapshot, disk, breakdown)
 # — trước đây `_storage_breakdown()` duyệt toàn bộ thư mục mỗi lần GET /health, poll
 # nhiều lần liên tục (mỗi 2–3 giây từ frontend Admin) khiến I/O đĩa tăng không
@@ -479,10 +497,41 @@ def run_backup_now(
 
     Trả về set_dir + file DB bên trong. UI/CLI có thể dùng set_dir để
     restore hoặc verify.
+
+    R1 — preflight disk trước khi backup: estimate dựa trên size hiện có của
+    DB + media dir. Nếu thiếu chỗ cho output + reserve (10 GiB) → 507 + lý do.
     """
     os.makedirs(BACKUP_DIR, exist_ok=True)
     photos_root = os.path.join(os.path.dirname(SNAPSHOTS_DIR), "student_photos")
     photos_arg = photos_root if os.path.isdir(photos_root) else None
+
+    # R1 — preflight disk: estimate tổng bytes DB + snapshots + photos
+    estimated = 0
+    try:
+        if os.path.exists(DB_PATH):
+            estimated += os.path.getsize(DB_PATH)
+    except OSError:
+        pass
+    if os.path.isdir(SNAPSHOTS_DIR):
+        for root, _dirs, files in os.walk(SNAPSHOTS_DIR):
+            for fname in files:
+                try:
+                    estimated += os.path.getsize(os.path.join(root, fname))
+                except OSError:
+                    pass
+    if photos_arg and os.path.isdir(photos_arg):
+        for root, _dirs, files in os.walk(photos_arg):
+            for fname in files:
+                try:
+                    estimated += os.path.getsize(os.path.join(root, fname))
+                except OSError:
+                    pass
+    from app.storage_budget import require_space
+    try:
+        require_space(BACKUP_DIR, expected_bytes=estimated + 64 * 1024 * 1024)
+    except ValueError as exc:
+        raise HTTPException(status_code=507, detail=f"không đủ dung lượng: {exc}")
+
     result = create_backup_set(
         backup_root=BACKUP_DIR,
         snapshots_dir=SNAPSHOTS_DIR,

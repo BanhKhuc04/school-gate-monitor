@@ -69,10 +69,24 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
 
   useEffect(() => {
     if (!token) return;
+    // Cleanup helper — đóng WS + clear reconnect timer khi unmount/đổi gate.
+    let stopped = false;
+    let reconnectTimer = null;
+    let currentWs = null;
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = new URL(API_BASE_URL || window.location.origin).host;
-    const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}&gate=${gate}`;
+    // QUAN TRỌNG (review F2): phải gửi client_id=audioClientId để backend
+    // nhận diện speaker owner từ lease. Thiếu client_id → owns_audio()
+    // luôn false → mọi alert có audio_authorized=false → helper bị dedup,
+    // audio im lặng dù lease HTTP 200.
+    const params = new URLSearchParams();
+    params.set('token', token);
+    params.set('gate', gate);
+    if (audioClientId) {
+      params.set('client_id', audioClientId);
+    }
+    const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?${params.toString()}`;
 
     function handleAlert(data) {
       const priority = getAlertPriority(data.violation_type);
@@ -95,9 +109,10 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
     }
 
     function connect() {
-      let reconnectTimer = null;
+      if (stopped) return;
       try {
         const ws = new WebSocket(wsUrl);
+        currentWs = ws;
         wsRef.current = ws;
 
         ws.onopen = () => console.log('[AlertBanner] WS connected');
@@ -114,24 +129,34 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
         };
         ws.onclose = () => {
           if (wsRef.current === ws) wsRef.current = null;
-          reconnectTimer = setTimeout(connect, 3000);
+          if (stopped) return;
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 3000);
         };
       } catch (e) {
-        reconnectTimer = setTimeout(connect, 5000);
+        if (stopped) return;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, 5000);
       }
     }
 
     connect();
 
     return () => {
+      stopped = true;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-        wsRef.current = null;
+      if (currentWs) {
+        currentWs.onclose = null;
+        currentWs.close();
       }
+      if (wsRef.current === currentWs) wsRef.current = null;
     };
-  }, [token, gate, audioEnabled]);
+  }, [token, gate, audioEnabled, audioClientId]);
 
   return (
     <div

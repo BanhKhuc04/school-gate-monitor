@@ -9,6 +9,7 @@
 
 const FEMALE_VOICE_HINTS = ['hoaimy', 'nữ', 'female', 'linh', 'mai', 'huyền'];
 let cachedVoice = null;
+let lastFallbackClip = null;  // URL clip local lần phát gần nhất (tránh cùng clip stale)
 
 function pickVietnameseFemaleVoice() {
   if (!('speechSynthesis' in window)) return null;
@@ -64,6 +65,35 @@ export function speakVietnamese(text, options = {}) {
   } catch (e) {
     console.warn('[speak] TTS blocked:', e.message);
   }
+}
+
+// Fallback phát file clip WAV/MP3 local (đường dẫn do caller truyền).
+// Dùng khi Web Speech không khả dụng (Edge không có voice vi-VN local, WAN
+// tắt không lấy được remote voice). Trả về Promise resolve khi audio bắt
+// đầu phát (hoặc reject nếu không có file).
+export async function speakFallbackClip(clipUrl, options = {}) {
+  return new Promise((resolve, reject) => {
+    if (!clipUrl) { reject(new Error('no_clip_url')); return; }
+    try {
+      const audio = new Audio(clipUrl);
+      lastFallbackClip = clipUrl;
+      audio.preload = 'auto';
+      audio.onstart = () => {
+        if (options.onstart) try { options.onstart(); } catch {}
+      };
+      audio.onend = () => {
+        if (options.onend) try { options.onend(); } catch {}
+        resolve({ played: true, source: 'clip' });
+      };
+      audio.onerror = (e) => {
+        if (options.onerror) try { options.onerror(e); } catch {}
+        reject(new Error(`clip_error: ${clipUrl}`));
+      };
+      audio.play().catch((e) => reject(e));
+    } catch (e) {
+      reject(e);
+    }
+  });
 }
 
 export function stopSpeech() {

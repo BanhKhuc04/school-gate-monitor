@@ -1,8 +1,36 @@
 import {useEffect, useRef, useState} from 'react';
 import client from '../api/client';
 
+// UUID an toàn cho cả origin HTTP LAN (crypto.randomUUID chỉ có ở secure
+// context). Fallback dùng crypto.getRandomValues để tạo UUID v4 format
+// RFC 4122 — đảm bảo mỗi tab/instance có UUID khác nhau, audioClientId
+// khớp lease owner, WS speaker check pass.
+function safeUUID() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {}
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    // Không có crypto API — fallback Math.random() (UUID format hợp lệ, đủ
+    // dùng cho owner identity local).
+    const hex = (n) => Math.floor(Math.random() * 0x100).toString(16).padStart(2, '0');
+    return ([1e7]+-1e3+-4e3+-8e5+-1e11).replace(/[018]/g, (c) =>
+      (c ^ (Math.random() * 16) >> (c / 4)).toString(16));
+  }
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  // version 4 + variant theo RFC 4122
+  buf[6] = (buf[6] & 0x0f) | 0x40;
+  buf[8] = (buf[8] & 0x3f) | 0x80;
+  const hex = Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
 export function useAudioLease(gate) {
-  const [clientId] = useState(() => crypto.randomUUID());
+  // State khởi tạo bằng lazy initializer — chỉ chạy 1 lần khi mount,
+  // đảm bảo mỗi tab/instance có UUID khác nhau (không bị reset khi re-render).
+  const [clientId] = useState(() => safeUUID());
   const [leaseGate, setLeaseGate] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
