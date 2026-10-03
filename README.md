@@ -2,9 +2,101 @@
 
 Phát hiện mũ bảo hiểm + nhận diện biển số xe máy tại cổng trường học, dùng webcam và YOLOv8, giao diện React SPA với đăng nhập phân quyền.
 
-## License
+## Cài đặt (dành cho máy chưa có gì cả)
 
-[AGPL-3.0](LICENSE). Dự án dùng [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (chính nó cũng license AGPL-3.0) — nếu phát hành bản sửa đổi của dự án này dưới dạng dịch vụ mạng (SaaS) mà không public source, hoặc muốn phân phối dưới license khác (vd. thương mại hóa đóng nguồn), cần mua [Ultralytics Enterprise License](https://ultralytics.com/license) để không bị ràng buộc điều khoản copyleft của AGPL.
+Hướng dẫn này giả sử máy bạn **chưa cài Python, Node.js hay Git** — làm theo đúng thứ tự là chạy được, không cần biết lập trình. Các bước dưới viết cho **Windows** (có ghi chú riêng cho macOS/Linux ở bước nào khác biệt).
+
+### Bước 1 — Cài 3 phần mềm nền tảng
+
+| Phần mềm | Tải ở đâu | Lưu ý khi cài |
+|---|---|---|
+| **Git** | [git-scm.com/downloads](https://git-scm.com/downloads) | Cứ Next hết, không cần đổi gì |
+| **Python 3.9 trở lên** | [python.org/downloads](https://www.python.org/downloads/) | ⚠️ **Tick vào ô "Add python.exe to PATH"** ở màn hình cài đặt đầu tiên — rất dễ quên, quên là bước sau lỗi ngay |
+| **Node.js 18 trở lên** (bản LTS) | [nodejs.org](https://nodejs.org/) | Cứ Next hết |
+
+Cài xong, **mở lại** cửa sổ dòng lệnh (PowerShell/Terminal) để nó nhận phần mềm vừa cài, rồi gõ lần lượt 3 lệnh sau để kiểm tra (mỗi lệnh phải ra số phiên bản, không phải lỗi "not recognized"):
+
+```bash
+git --version
+python --version
+node --version
+```
+
+### Bước 2 — Tải mã nguồn về máy
+
+```bash
+git clone https://github.com/BanhKhuc04/school-gate-monitor.git
+cd school-gate-monitor
+```
+
+### Bước 3 — Cài phần backend (Python)
+
+```bash
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Trên macOS/Linux, dòng thứ 2 đổi thành `source venv/bin/activate`.
+
+Lệnh `pip install` tải khá nhiều thư viện AI (YOLOv8, EasyOCR...) nên có thể mất **5–15 phút** tùy mạng — thấy đứng im là bình thường, cứ đợi. Mỗi lần mở cửa sổ dòng lệnh MỚI để chạy dự án sau này, luôn phải gõ lại `.\venv\Scripts\activate` trước (dấu hiệu đã bật đúng: đầu dòng lệnh hiện chữ `(venv)`).
+
+### Bước 4 — Cài phần giao diện (Node.js)
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+### Bước 5 — Tạo file cấu hình riêng (`.env`)
+
+File `.env` chứa các thiết lập riêng của máy bạn (không được chia sẻ công khai, đã bị `.gitignore` chặn commit).
+
+```bash
+copy .env.example .env
+```
+
+Trên macOS/Linux dùng `cp .env.example .env`.
+
+Mở file `.env` vừa tạo bằng Notepad (hoặc bất kỳ trình soạn thảo nào), điền dòng `JWT_SECRET_KEY=` — đây là "chìa khóa" để hệ thống tự ký phiên đăng nhập, **bắt buộc phải có giá trị riêng**, không để trống hay dùng chung với ai khác. Sinh 1 giá trị ngẫu nhiên bằng lệnh:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Copy chuỗi ký tự nó in ra, dán vào sau dấu `=`, ví dụ: `JWT_SECRET_KEY=a1b2c3...` (không có dấu cách, không có dấu nháy). Lưu file lại.
+
+Các dòng còn lại trong `.env` (camera, cổng phụ...) để nguyên mặc định là chạy được với webcam laptop — chỉ cần sửa nếu bạn có camera IP/RTSP thật (xem chú thích ngay trong file).
+
+### Bước 6 — Chạy thử
+
+Mở **2 cửa sổ dòng lệnh** (2 tab/terminal riêng), cả hai đều đứng ở thư mục `school-gate-monitor`:
+
+```bash
+# Cửa sổ 1 — Backend (nhớ .\venv\Scripts\activate trước nếu là cửa sổ mới)
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+```bash
+# Cửa sổ 2 — Frontend
+cd frontend
+npm run dev
+```
+
+Mở trình duyệt vào `http://localhost:5173`, đăng nhập bằng 1 trong các tài khoản có sẵn ở mục "Users" bên dưới (ví dụ `admin` / `admin123`).
+
+### Lỗi thường gặp
+
+| Thông báo lỗi | Nguyên nhân & cách sửa |
+|---|---|
+| `'python' is not recognized...` | Quên tick "Add to PATH" lúc cài Python — gỡ cài rồi cài lại, nhớ tick ô đó |
+| `pip install` báo lỗi liên quan `torch`/`opencv` | Kiểm tra lại đã `.\venv\Scripts\activate` chưa (đầu dòng lệnh phải có chữ `(venv)`) trước khi chạy `pip install` |
+| Trang web load được nhưng không thấy hình camera | Máy không có webcam, hoặc đang bị app khác (Zoom, Teams...) chiếm camera — đóng app đó lại |
+| `address already in use` khi chạy `uvicorn` | Cổng 8000 đang bị chiếm bởi 1 tiến trình backend cũ — tắt cửa sổ dòng lệnh cũ đang chạy nó rồi thử lại |
+| Trang trắng hoặc lỗi CORS trên `localhost:5173` | Backend (cửa sổ 1) chưa chạy hoặc bị lỗi — xem log ở cửa sổ 1 trước |
+
+Máy không có GPU NVIDIA vẫn chạy được bình thường (tự động dùng CPU, chỉ chậm hơn), không cần cài thêm gì.
 
 ## Tiến độ phát triển hiện tại
 
@@ -27,24 +119,6 @@ Phát hiện mũ bảo hiểm + nhận diện biển số xe máy tại cổng t
 - Mua/lắp camera IP thật tại cổng — đang khảo giá (Hikvision dòng IP "CD", Imou), chưa chốt.
 - OCR (EasyOCR) và model helmet vẫn dùng pretrained public, chưa fine-tune bằng dữ liệu thật của trường (model plate đã fine-tune, xem mục "Model" bên trên).
 
-## Yêu cầu
-
-- Python 3.9+
-- Node.js 18+
-
-## Setup
-
-```bash
-# Backend
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-
-# Frontend
-cd frontend
-npm install
-```
-
 ## Model
 
 `models/helmet_best.pt` và `models/plate_best.pt` đã nằm sẵn trong repo (clone
@@ -57,23 +131,7 @@ Model `models/yolov8n.pt` (person COCO) và `yolov8n-pose.pt` (tư thế đi b�
 
 ## Biến môi trường
 
-Copy `.env.example` → `.env` rồi điền. Bắt buộc với production:
-- `JWT_SECRET_KEY` — nếu để trống, app tự dùng key dev không an toàn (in cảnh báo ra log) và **bất kỳ ai đọc được source code cũng tự ký được token admin giả**. Sinh key mới: `python -c "import secrets; print(secrets.token_hex(32))"`.
-
-Cũng nên đổi mật khẩu của các tài khoản seed mặc định (xem bảng "Users" bên dưới) trước khi dùng thật — đây là mật khẩu demo công khai trong README.
-
-## Chạy (Development)
-
-```bash
-# Terminal 1: Backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Terminal 2: Frontend
-cd frontend
-npm run dev
-```
-
-Mở trình duyệt: `http://localhost:5173`
+Xem chi tiết từng biến (camera, cổng phụ, JWT...) trong file `.env.example` — đã có chú thích đầy đủ. Bước cài đặt ở trên (Bước 5) đã hướng dẫn tạo `.env` và set `JWT_SECRET_KEY`. Nên đổi luôn mật khẩu của các tài khoản seed mặc định (xem bảng "Users" bên dưới) trước khi dùng thật — đây là mật khẩu demo công khai trong README.
 
 ## Chạy (Production — một process duy nhất)
 
@@ -145,3 +203,7 @@ Mở trình duyệt: `http://localhost:8000`
 | `PLATE_UNREADABLE` | Không đọc được biển số |
 | `MULTIPLE` | Nhiều loại vi phạm cùng lúc |
 | `RIDING_THROUGH_GATE` | Người ngồi trên xe đi qua cổng (tư thế riding + có mũ) |
+
+## License
+
+[AGPL-3.0](LICENSE). Dự án dùng [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (chính nó cũng license AGPL-3.0) — nếu phát hành bản sửa đổi của dự án này dưới dạng dịch vụ mạng (SaaS) mà không public source, hoặc muốn phân phối dưới license khác (vd. thương mại hóa đóng nguồn), cần mua [Ultralytics Enterprise License](https://ultralytics.com/license) để không bị ràng buộc điều khoản copyleft của AGPL.
