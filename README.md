@@ -2,6 +2,10 @@
 
 Phát hiện mũ bảo hiểm + nhận diện biển số xe máy tại cổng trường học, dùng webcam và YOLOv8, giao diện React SPA với đăng nhập phân quyền.
 
+## License
+
+[AGPL-3.0](LICENSE). Dự án dùng [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (chính nó cũng license AGPL-3.0) — nếu phát hành bản sửa đổi của dự án này dưới dạng dịch vụ mạng (SaaS) mà không public source, hoặc muốn phân phối dưới license khác (vd. thương mại hóa đóng nguồn), cần mua [Ultralytics Enterprise License](https://ultralytics.com/license) để không bị ràng buộc điều khoản copyleft của AGPL.
+
 ## Tiến độ phát triển hiện tại
 
 **Đã xong (chạy được):**
@@ -11,8 +15,8 @@ Phát hiện mũ bảo hiểm + nhận diện biển số xe máy tại cổng t
 - Auth JWT phân quyền 3 role (admin / security / management), CRUD xe đăng ký, quản lý user, thống kê dashboard, dọn ảnh vi phạm cũ.
 - Giao diện đã restyle theo design "Vanguard Campus Security" (landing page, login).
 
-**Đang làm dở (WIP):**
-- Restyle `GuardPage` (trang bảo vệ xem camera + cảnh báo) theo design system mới — **còn bug đã biết: cảnh báo WebSocket (`/guard/ws`) không hiển thị lên UI**, đang sửa ở `app/api/guard.py` (xem `git status`/commit `3c19125`).
+**Đã sửa (trước đây ghi là "bug đã biết"):**
+- `/guard/ws` cảnh báo không tới client: đã thêm test tự động `app/tests/test_guard_ws.py` tái hiện đúng kịch bản điều tra trong `HANDOFF_CURSOR.md` (1 client, 2 client đồng thời + trigger dồn dập) — cả hai đều PASS với code hiện tại. Nhân tiện sửa 2 vấn đề thật tìm thấy trong `app/api/guard.py`: (1) thiếu try/except quanh `decode_access_token` khiến token hết hạn/sai làm WS đóng đột ngột không rõ lý do; (2) `_clients_lock` dùng `threading.Lock` (blocking thật) thay vì `asyncio.Lock` trong code async — tiềm ẩn treo cứng event loop nếu 2 client broadcast trùng lúc. Nếu vẫn gặp alert không hiện trên UI thật, nhiều khả năng do nguyên nhân khác (nhiều process backend chạy song song trên cùng port, trình duyệt cụ thể) — báo lại kèm bước tái hiện để điều tra tiếp.
 
 **Đã bỏ:**
 - **Nhận diện khuôn mặt** — gỡ hoàn toàn (commit `d4d8dc4`): mở khẩu trang không đeo mặt nạ vẫn xâm phạm dữ liệu sinh trắc học trẻ vị thành niên, rủi ro pháp lý không đáng đánh đổi. Không còn `app/api/faces.py`, `app/cv/face.py`, bảng `face_embeddings`/`face_match_events`, trang `AdminFacesPage`.
@@ -21,7 +25,7 @@ Phát hiện mũ bảo hiểm + nhận diện biển số xe máy tại cổng t
 - Chạy 2 camera song song (cổng vào/cổng ra) — hiện pipeline chỉ đọc **1 nguồn camera duy nhất** (`CAMERA_SOURCE` trong `app/config.py`), chưa có route/logic phân biệt hướng vào/ra.
 - Deploy lên VPS (103.101.162.111, 1 vCPU/1GB/15GB) — VPS mới có, chưa cấu hình gì; kế hoạch là chỉ host API + DB + frontend static, inference vẫn chạy ở máy edge tại chỗ.
 - Mua/lắp camera IP thật tại cổng — đang khảo giá (Hikvision dòng IP "CD", Imou), chưa chốt.
-- Chưa fine-tune lại model helmet/plate/OCR bằng dữ liệu thật của trường (đang dùng model pretrained public, xem mục "Loại vi phạm" & giới hạn model bên dưới).
+- OCR (EasyOCR) và model helmet vẫn dùng pretrained public, chưa fine-tune bằng dữ liệu thật của trường (model plate đã fine-tune, xem mục "Model" bên trên).
 
 ## Yêu cầu
 
@@ -41,16 +45,22 @@ cd frontend
 npm install
 ```
 
-## Tải model
+## Model
 
-Trước khi chạy, tải 2 file model vào thư mục `models/`:
+`models/helmet_best.pt` và `models/plate_best.pt` đã nằm sẵn trong repo (clone
+về là chạy được ngay, không cần tải thêm) — đây là 2 file model **dành riêng
+cho dự án**, không phải bản pretrained public gốc:
+- `helmet_best.pt`: bản pretrained gốc từ [iam-tsr/yolov8n-helmet-detection](https://huggingface.co/iam-tsr/yolov8n-helmet-detection) (thử fine-tune lại trên dữ liệu thật nhưng kết quả tệ hơn nên giữ nguyên bản gốc, xem commit `d631432`).
+- `plate_best.pt`: **đã fine-tune** trên 8259 ảnh biển số xe máy Việt Nam thật (`scripts/train_plate.py`) — tỉ lệ nhận diện trên khung hình xe máy thật tăng từ ~0% lên ~70% so với bản gốc [Koushim/yolov8-license-plate-detection](https://huggingface.co/Koushim/yolov8-license-plate-detection). **Không tải bản gốc từ HuggingFace để thay thế file này** — sẽ làm chất lượng nhận diện biển số giảm mạnh.
 
-| File | Nguồn |
-|------|--------|
-| `models/helmet_best.pt` | [iam-tsr/yolov8n-helmet-detection](https://huggingface.co/iam-tsr/yolov8n-helmet-detection) |
-| `models/plate_best.pt` | [Koushim/yolov8-license-plate-detection](https://huggingface.co/Koushim/yolov8-license-plate-detection) |
+Model `models/yolov8n.pt` (person COCO) và `yolov8n-pose.pt` (tư thế đi bộ vs ngồi xe) vẫn tự tải lần đầu khi chạy (cần internet, ~6MB, không commit vì tải lại y hệt được).
 
-Model `models/yolov8n.pt` (person COCO) và `yolov8n-pose.pt` (tư thế đi bộ vs ngồi xe) sẽ tự tải lần đầu khi chạy (cần internet, ~6MB).
+## Biến môi trường
+
+Copy `.env.example` → `.env` rồi điền. Bắt buộc với production:
+- `JWT_SECRET_KEY` — nếu để trống, app tự dùng key dev không an toàn (in cảnh báo ra log) và **bất kỳ ai đọc được source code cũng tự ký được token admin giả**. Sinh key mới: `python -c "import secrets; print(secrets.token_hex(32))"`.
+
+Cũng nên đổi mật khẩu của các tài khoản seed mặc định (xem bảng "Users" bên dưới) trước khi dùng thật — đây là mật khẩu demo công khai trong README.
 
 ## Chạy (Development)
 
@@ -92,7 +102,7 @@ Mở trình duyệt: `http://localhost:8000`
 | `/admin/violations` | admin | Bảng vi phạm + ảnh snapshot + lọc + phân trang |
 | `/admin/users` | admin | Quản lý tài khoản (CRUD user) |
 | `/admin/health` | admin | Trạng thái pipeline + lưu trữ + dọn ảnh cũ |
-| `/guard` | security, admin | Camera MJPEG + AlertBanner (cảnh báo thời gian thực) — **đang có bug WS, xem "Tiến độ phát triển"** |
+| `/guard` | security, admin | Camera MJPEG + AlertBanner (cảnh báo thời gian thực) |
 | `/dashboard` | management, admin | KPI + biểu đồ thống kê |
 
 ## API Routes (JSON)
@@ -111,7 +121,7 @@ Mở trình duyệt: `http://localhost:8000`
 | `/api/system/health` | GET | admin, management | Trạng thái pipeline + storage |
 | `/api/system/snapshots/cleanup` | POST | admin | Dọn ảnh vi phạm cũ |
 | `/guard/video_feed` | GET | security, admin | MJPEG stream (query: `?token=`) |
-| `/guard/ws` | WS | security, admin | WebSocket cảnh báo (query: `?token=`) — **bug đang sửa: alert không tới UI** |
+| `/guard/ws` | WS | security, admin | WebSocket cảnh báo (query: `?token=`) |
 | `/api/dev/trigger-test-alert` | POST | security, admin | Giả lập cảnh báo vi phạm (test) |
 | `/media/{file}` | GET | any | Ảnh snapshot vi phạm |
 

@@ -8,6 +8,11 @@ from pathlib import Path
 # Thư mục gốc dự án
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Nạp biến môi trường từ file .env (nếu có) trước khi đọc bất kỳ os.environ.get
+# nào bên dưới — không override biến đã set sẵn trong shell/hệ thống.
+from dotenv import load_dotenv
+load_dotenv(BASE_DIR / ".env")
+
 # Thiết bị chạy model — tự động dùng GPU nếu máy có (torch bản CUDA + driver
 # NVIDIA hợp lệ), fallback về CPU nếu không. Import torch ở đây là rẻ vì
 # ultralytics (dependency bắt buộc) đã kéo theo torch, không thêm chi phí gì.
@@ -70,8 +75,14 @@ GATES: dict[str, dict] = _gate_cfgs
 CAMERA_PRESETS = [
     {"label": "Webcam laptop", "source": "0"},
     {"label": "OBS Virtual Camera", "source": "1"},
-    {"label": "EZVIZ CS-CV246 (Cổng chính)", "source": "rtsp://admin:CTTPQS@192.168.1.6:554/ch1/main"},
 ]
+# Camera RTSP thật (IP + tài khoản riêng của từng nơi lắp đặt) KHÔNG được hardcode
+# ở đây (sẽ lộ khi push lên git) — set qua biến môi trường CAMERA_PRESET_RTSP_*
+# nếu muốn preset đó xuất hiện trong dropdown, xem .env.example.
+_rtsp_label = os.environ.get("CAMERA_PRESET_RTSP_LABEL")
+_rtsp_url = os.environ.get("CAMERA_PRESET_RTSP_URL")
+if _rtsp_label and _rtsp_url:
+    CAMERA_PRESETS.append({"label": _rtsp_label, "source": _rtsp_url})
 
 
 # Loop video when reading from file — kept for backwards compat (main gate only)
@@ -183,7 +194,14 @@ CONTINUOUS_RECORDING_RETENTION_DAYS = int(os.environ.get("CONTINUOUS_RECORDING_R
 CONTINUOUS_RECORDING_DIR = os.environ.get("CONTINUOUS_RECORDING_DIR") or str(BASE_DIR / "data" / "recordings")
 
 # JWT Authentication
-# secrets.token_hex(32) → hardcoded (không sinh lại mỗi lần khởi động)
-JWT_SECRET_KEY = "a3f8c1b9e2d47f0a5c6e8b3d9f1e2a4c7b5d9f3e1a8c6b4d2f0e7a3c5b9d"
+# BẮT BUỘC set JWT_SECRET_KEY qua biến môi trường khi deploy thật — key này
+# từng bị hardcode thẳng trong file (push lên git công khai = ai cũng tự ký
+# được token admin giả). Sinh key mới: python -c "import secrets; print(secrets.token_hex(32))"
+_DEV_ONLY_JWT_SECRET_KEY = "dev-only-insecure-key-do-not-use-in-production"
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or _DEV_ONLY_JWT_SECRET_KEY
+if JWT_SECRET_KEY == _DEV_ONLY_JWT_SECRET_KEY:
+    print("[Config] CẢNH BÁO: JWT_SECRET_KEY chưa được set qua biến môi trường — "
+          "đang dùng key mặc định KHÔNG AN TOÀN, chỉ hợp lệ cho dev/test. "
+          "Set JWT_SECRET_KEY trong .env trước khi chạy production.")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 12

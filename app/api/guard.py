@@ -7,7 +7,6 @@ import asyncio
 import json
 import time
 import jwt as _jwt
-import threading
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
@@ -18,7 +17,17 @@ router = APIRouter(prefix="/guard", tags=["guard"])
 # ─── Broadcast manager ────────────────────────────────────────────────────────
 # Key: WebSocket object id, Value: WebSocket
 _connected_clients: dict[int, WebSocket] = {}
-_clients_lock = threading.Lock()
+# asyncio.Lock, không phải threading.Lock: lock này chỉ bao giờ được acquire
+# từ coroutine chạy trên event loop (không có thread nào khác đụng vào
+# _connected_clients). threading.Lock().acquire() là lời gọi blocking THẬT
+# (không nhường event loop) — nếu 2 client cùng lúc broadcast (mỗi client 1
+# coroutine `websocket_alerts`) và coroutine giữ lock đang `await
+# ws.send_text(...)`, coroutine thứ 2 gọi `with _clients_lock` sẽ treo cứng
+# toàn bộ event loop (không chỉ riêng request đó) cho tới khi coroutine đầu
+# được chính event loop đó lên lịch lại để nhả lock — nhưng event loop đang
+# bị chặn nên không bao giờ xảy ra → deadlock toàn bộ server, không riêng gì
+# WebSocket. asyncio.Lock nhường event loop đúng cách khi phải chờ.
+_clients_lock = asyncio.Lock()
 
 
 @router.get("/video_feed")
@@ -88,14 +97,22 @@ async def websocket_alerts(websocket: WebSocket, gate: str = "main"):
     if not raw_token:
         await websocket.close(code=1008, reason="Missing token")
         return
-    payload = decode_access_token(raw_token)
-    if not payload or payload.get("role") not in ("security", "admin", "management"):
+    try:
+        payload = decode_access_token(raw_token)
+    except (_jwt.ExpiredSignatureError, _jwt.InvalidTokenError):
+        # decode_access_token raises on bad/expired token thay vì trả None — nếu
+        # không catch ở đây, exception văng thẳng ra khỏi handler và đóng kết nối
+        # một cách không rõ ràng (client chỉ thấy WS đóng đột ngột, không rõ vì sao,
+        # rồi lặp lại reconnect timer 3s của AlertBanner mà không bao giờ vào được).
         await websocket.close(code=1008, reason="Invalid or expired token")
+        return
+    if payload.get("role") not in ("security", "admin", "management"):
+        await websocket.close(code=1008, reason="Insufficient permissions")
         return
 
     await websocket.accept()
     client_id = id(websocket)
-    with _clients_lock:
+    async with _clients_lock:
         _connected_clients[client_id] = websocket
     print(f"[WS] Client connected: id={client_id}, gate={gate}, total={len(_connected_clients)}")
 
@@ -108,7 +125,7 @@ async def websocket_alerts(websocket: WebSocket, gate: str = "main"):
             if alert:
                 # Broadcast to ALL connected clients
                 disconnected = []
-                with _clients_lock:
+                async with _clients_lock:
                     for cid, ws in _connected_clients.items():
                         try:
                             await ws.send_text(json.dumps(alert))
@@ -128,6 +145,6 @@ async def websocket_alerts(websocket: WebSocket, gate: str = "main"):
     except Exception as e:
         print(f"[WS] Error with client {client_id}: {e}")
     finally:
-        with _clients_lock:
+        async with _clients_lock:
             _connected_clients.pop(client_id, None)
         print(f"[WS] Cleaned up client {client_id}, remaining={len(_connected_clients)}")

@@ -8,7 +8,7 @@ import axios from 'axios';
 
 // ponytail: export as constant so GuardPage + AlertBanner can reuse it
 // instead of hardcoding 'http://localhost:8000' in multiple places.
-export const API_BASE_URL = 'http://localhost:8001';
+export const API_BASE_URL = 'http://localhost:8000';
 
 const client = axios.create({
   baseURL: API_BASE_URL,

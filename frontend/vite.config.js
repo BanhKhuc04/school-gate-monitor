@@ -10,20 +10,20 @@ export default defineConfig({
       // Proxy only API and specific guard endpoints — NOT root /guard
       // (React Router handles /guard as a SPA route)
       '/api': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/media': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/guard/video_feed': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       // WebSocket proxy
       '/guard/ws': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true,
       },
