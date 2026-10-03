@@ -1,5 +1,11 @@
 # Giao Cursor hoàn tất đợt 5 — ALPR, hai camera, YOLO11
 
+**Ưu tiên tiếp theo theo yêu cầu mới:** đọc
+[Prompt đợt 6](../task-06-demo-2026-10-04/NEXT_CURSOR_PROMPT.md) và
+[plan trước 01:00](../task-06-demo-2026-10-04/PLAN_BEFORE_0100.md).
+Đợt 6 tiếp tục phần còn mở, chốt demo offline/hai camera/loa/VPS/slide;
+không coi R0–R15 đã hoàn tất và không xóa checklist bên dưới.
+
 Cập nhật: 03/10/2026, theo yêu cầu bàn giao phần còn lại. Workspace:
 `D:\Work\Project_motorbike`, branch `codex/alpr-yolo11-local`.
 Đọc file này trước các prompt/checklist lịch sử. Giữ lịch sử Task 1–4;

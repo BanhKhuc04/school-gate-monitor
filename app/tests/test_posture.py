@@ -29,12 +29,12 @@ class TestRunPostureDetectionGroupDict:
         groups = [{"_person": person, '_vehicle':vehicle, 'track_id':42, 'vehicle_track_id':7,
                    "helmet_dets": [], "plate_dets": []}]
 
-        with patch("app.cv.pose.PostureDetector.detect_pose") as mock_detect:
+        with patch("app.cv.pose.PostureDetector.detect_pose_batch") as mock_detect:
             points=[{'x':0,'y':0,'confidence':0} for _ in range(17)]
             for index,xy in {5:(50,40),6:(50,40),11:(50,100),12:(50,100),
                              13:(50,130),14:(50,130),15:(80,130),16:(80,130)}.items():
                 points[index]={'x':xy[0],'y':xy[1],'confidence':.9}
-            mock_detect.return_value = points
+            mock_detect.return_value = [points]
             try:
                 result = pipeline._run_posture_detection(frame, groups)
             finally:

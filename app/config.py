@@ -192,8 +192,8 @@ CAMERA_LOOP = _gate_cfgs["main"]["loop"]
 HELMET_MODEL_PATH = os.environ.get("HELMET_MODEL_PATH") or str(BASE_DIR / "models" / "helmet_best.pt")
 PLATE_MODEL_PATH = str(BASE_DIR / "models" / "plate_best.pt")
 # yolov8n.pt/yolov8n-pose.pt COCO - ultralytics tự tải khi khởi tạo, không cần đặt vào models/
-PERSON_MODEL_PATH = "yolov8n.pt"
-POSE_MODEL_PATH = "yolov8n-pose.pt"
+PERSON_MODEL_PATH = os.environ.get('PERSON_MODEL_PATH', 'yolov8n.pt')
+POSE_MODEL_PATH = os.environ.get('POSE_MODEL_PATH', 'yolov8n-pose.pt')
 
 # ponytail: đã thử export ONNX + benchmark thật (scripts/export_onnx.py,
 # scripts/benchmark_inference.py) — chậm hơn .pt trên CPU này (0.3x-1.0x), không
@@ -237,7 +237,12 @@ MAX_RIDERS_PER_MOTORCYCLE = 2
 FRAME_EDGE_MARGIN_RATIO = 0.03
 
 # Frame processing
-FRAME_SKIP = 2  # Xử lý cách 1 frame để giảm tải CPU (1 = mọi frame, 2 = cách 1 frame)
+# FRAME_SKIP=1 → chạy AI trên MỌI frame (target 30 FPS khi camera capture 30 FPS).
+# FRAME_SKIP=N → chỉ chạy AI trên mỗi N frame (giảm tải CPU/GPU ~Nx).
+# Default 1 (2026-10-04): tăng từ 2 → 1 sau khi GPU lease sẵn + detect_ms p50
+# ~52ms còn budget thời gian dư cho encode + I/O trên RTX 3050. Override qua
+# env FRAME_SKIP=N nếu cần giảm tải (vd. máy yếu hoặc detect_ms > 80ms).
+FRAME_SKIP = max(1, int(os.environ.get("FRAME_SKIP", "1")))
 RECOGNITION_LOG_ENABLED = os.environ.get('RECOGNITION_LOG_ENABLED', '1') == '1'
 
 # Database

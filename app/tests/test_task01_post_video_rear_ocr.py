@@ -78,10 +78,11 @@ def _build_pipeline(profile='ocr_only'):
 
 class FakePlateDet:
     """Stand-in cho HelmetPlateDetector detection với bbox + confidence."""
-    def __init__(self, bbox, confidence=0.85):
+    def __init__(self, bbox, confidence=0.85, track_id=7):
         self.bbox = bbox
         self.confidence = confidence
         self.class_name = 'plate'
+        self.track_id = track_id
 
 
 def _make_frame(w=640, h=360):
@@ -120,8 +121,8 @@ def test_observe_plate_only_skipped_when_no_plates(monkeypatch):
     assert calls == [], "Không gọi _observe_plate_only khi plate_dets rỗng"
 
 
-def test_observe_plate_only_quantized_track_id_stable_across_frames():
-    """Cùng 1 biển đứng yên trong nhiều frame → cùng track_id tạm."""
+def test_observe_plate_only_preserves_tracker_id_across_frames():
+    """The camera's tracker owns identity, including movement between grid cells."""
     p = _build_pipeline(profile='ocr_only')
     # Cho offer chạy nhưng trigger/collect bị skip do ocr_pool stub.
     p._ocr_pool = object()
@@ -153,7 +154,7 @@ def test_observe_plate_only_different_plates_different_track_ids():
     p._ocr_pool = object()
     frame = _make_frame()
     plate_a = FakePlateDet([100, 100, 200, 150])  # centroid (190, 31)
-    plate_b = FakePlateDet([400, 100, 500, 150])  # centroid (450, 31)
+    plate_b = FakePlateDet([400, 100, 500, 150], track_id=8)
     offered = []
     orig_offer = p._best_plates.offer
     def spy_offer(tid, candidate):
@@ -165,9 +166,7 @@ def test_observe_plate_only_different_plates_different_track_ids():
     p._observe_plate_only(frame, [plate_a, plate_b])
     assert len(offered) == 2
     assert offered[0] != offered[1], "2 biển khác vị trí phải có 2 track_id khác nhau"
-    # Đảm bảo track_id âm (không đụng track_id thật)
-    assert offered[0] < 0
-    assert offered[1] < 0
+    assert offered == [7, 8]
 
 
 def test_observe_plate_only_safe_with_none_ocr_pool():

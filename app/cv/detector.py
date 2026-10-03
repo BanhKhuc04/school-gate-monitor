@@ -1,4 +1,4 @@
-"""YOLOv8 helmet detection wrapper using Ultralytics."""
+"""YOLO (v8/11) detection wrapper using Ultralytics."""
 from dataclasses import dataclass
 from typing import List, Optional
 from pathlib import Path
@@ -6,6 +6,19 @@ import numpy as np
 from ultralytics import YOLO
 
 from app.config import DEVICE, USE_FP16
+from app.cv.inference_worker import model_owner
+from weakref import WeakValueDictionary
+
+_MODELS = WeakValueDictionary()
+
+def _load_model(path):
+    key = str(Path(path).resolve())
+    model = _MODELS.get(key)
+    if model is None:
+        model = YOLO(path)
+        model.to(DEVICE)
+        _MODELS[key] = model
+    return model
 
 
 @dataclass
@@ -30,118 +43,71 @@ class HelmetPlateDetector:
             model_path: Đường dẫn đến file trọng số .pt
             conf_threshold: Ngưỡng confidence tối thiểu (0.0 - 1.0)
         """
-        self.model = YOLO(model_path)
-        self.model.to(DEVICE)
+        self.camera_id = "default"
+        self._tracker = None
+        self.model = model_owner().run("bootstrap", _load_model, model_path)
         print(f"[Detector] {model_path} on device={DEVICE}")
         self.conf_threshold = conf_threshold
         self._class_names = self.model.names
         yaml = getattr(self.model.model, 'yaml', {})
-        nano_v8 = (isinstance(yaml, dict) and yaml.get('depth_multiple') == .33
+        yaml = yaml if isinstance(yaml, dict) else {}
+        nano_v8 = (yaml.get('depth_multiple') == .33
                    and yaml.get('width_multiple') == .25 and 'C2f' in str(yaml))
+        v11 = 'C3k2' in str(yaml.get('backbone', ''))
+        family = ('YOLOv8n' if nano_v8 else f"YOLO11{yaml.get('scale') or ''}" if v11
+                  else 'YOLO (custom)')
         self.profile = {'weights': Path(model_path).name,
-                        'family': 'YOLOv8n' if nano_v8 else 'YOLO (custom)',
+                        'family': family,
                         'device': str(next(self.model.model.parameters()).device)}
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
-        """
-        Phát hiện objects trong frame.
-
-        Args:
-            frame: Ảnh BGR numpy array từ OpenCV (height, width, 3)
-
-        Returns:
-            List[Detection]: Danh sách các detection, mỗi detection gồm:
-                - class_name: tên lớp (str)
-                - confidence: độ tin cậy (float)
-                - bbox: tuple (x1, y1, x2, y2)
-        """
-        # Chạy inference
-        results = self.model(frame, verbose=False, conf=self.conf_threshold, half=USE_FP16)
-
-        detections = []
-        if self._class_names is None:
-            self._class_names = self.model.names
-
-        for result in results:
-            boxes = result.boxes
-            if boxes is None:
-                continue
-
-            for box in boxes:
-                # Lấy thông tin
-                cls_id = int(box.cls.item())
-                conf = float(box.conf.item())
-                xyxy = box.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2)
-
-                # Tên lớp
-                class_name = self._class_names.get(cls_id, f"class_{cls_id}")
-
-                detections.append(Detection(
-                    class_name=class_name,
-                    confidence=conf,
-                    bbox=tuple(int(v) for v in xyxy)
-                ))
-
-        return detections
+        return model_owner().run(self.camera_id, self._infer, frame, False)
 
     def detect_tracked(self, frame: np.ndarray) -> List[Detection]:
-        """
-        UT1: Phát hiện objects CÓ tracking ID xuyên suốt nhiều frame (ByteTrack).
+        return model_owner().run(self.camera_id, self._infer, frame, True)
 
-        Dùng cho person detector (model COCO) — track_id của person giữ ổn định
-        cho cả xe máy/xe đạp vì cùng 1 lần model.track() trả về ID riêng biệt
-        cho mỗi class (person, motorcycle, bicycle).
+    def reset_tracker(self):
+        # Tracker state belongs to this camera, never to the shared predictor.
+        model_owner().run(self.camera_id, self._reset_tracker)
 
-        `box.id` có thể None vài frame đầu tracker chưa confirm → trả track_id=None,
-        các bước sau vẫn chạy bình thường bằng nearest-neighbor cho tới khi có ID.
+    def _reset_tracker(self):
+        if self._tracker is not None:
+            self._tracker.reset()
 
-        Args:
-            frame: Ảnh BGR numpy array từ OpenCV.
-
-        Returns:
-            List[Detection]: danh sách detection với track_id (hoặc None).
-        """
-        results = self.model.track(
-            frame,
-            persist=True,
-            verbose=False,
-            conf=self.conf_threshold,
-            tracker="bytetrack.yaml",
-            half=USE_FP16,
-        )
-
-        detections: List[Detection] = []
-        if self._class_names is None:
-            self._class_names = self.model.names
-
+    def _infer(self, frame, tracked):
+        results = self.model(frame, verbose=False, conf=self.conf_threshold, half=USE_FP16)
+        detections = []
         for result in results:
-            boxes = result.boxes
-            if boxes is None:
+            if result.boxes is None:
                 continue
-
-            for box in boxes:
-                cls_id = int(box.cls.item())
-                conf = float(box.conf.item())
-                xyxy = box.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2)
-
-                # box.id là tensor có thể là None (frame đầu tracker chưa confirm).
-                # Lấy .item() chỉ khi id tensor không None.
-                tid = None
-                if box.id is not None:
-                    try:
-                        tid = int(box.id.item())
-                    except (ValueError, AttributeError):
-                        tid = None
-
-                class_name = self._class_names.get(cls_id, f"class_{cls_id}")
-
-                detections.append(Detection(
-                    class_name=class_name,
-                    confidence=conf,
-                    bbox=tuple(int(v) for v in xyxy),
-                    track_id=tid,
-                ))
-
+            boxes = result.boxes.cpu().numpy()  # one transfer, not 3 per box
+            if tracked:
+                if self._tracker is None:
+                    from ultralytics.trackers.byte_tracker import BYTETracker
+                    from types import SimpleNamespace
+                    # Ultralytics ≥ 8.4 renamed BYTETracker's kwarg `frame_rate`
+                    # to `fps` (and the constructor now takes a single `args`
+                    # namespace only). Older code passed `frame_rate=` as a
+                    # second positional/kwarg, which raised
+                    # `TypeError: __init__() got an unexpected keyword
+                    # argument 'frame_rate'` on every tracked detection —
+                    # making `ai_fps=0` and labels never render on the
+                    # MJPEG stream. Put `fps` on the SimpleNamespace (matches
+                    # what newer Ultralytics expects) and don't pass it as a
+                    # second arg.
+                    tracker_args = SimpleNamespace(track_high_thresh=.5,
+                        track_low_thresh=.1, new_track_thresh=.6, track_buffer=30,
+                        match_thresh=.8, fuse_score=True, fps=30)
+                    self._tracker = BYTETracker(tracker_args)
+                rows = self._tracker.update(boxes, frame)
+                for row in rows:
+                    x1, y1, x2, y2, tid, conf, cls = row[:7]
+                    detections.append(Detection(self._class_names.get(int(cls), f'class_{int(cls)}'),
+                        float(conf), tuple(int(v) for v in (x1,y1,x2,y2)), int(tid)))
+            else:
+                for bbox, conf, cls in zip(boxes.xyxy, boxes.conf, boxes.cls):
+                    detections.append(Detection(self._class_names.get(int(cls), f'class_{int(cls)}'),
+                        float(conf), tuple(int(v) for v in bbox)))
         return detections
 
     @property

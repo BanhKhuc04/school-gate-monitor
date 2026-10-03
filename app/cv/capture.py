@@ -95,6 +95,11 @@ class WebcamStream:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = self.cap.read()
         if not ret:
+            # R2: phân biệt EOF (file video kết thúc, loop=False) khỏi lỗi
+            # mạng/webcam. EOF phải kết thúc run, KHÔNG reconnect — caller
+            # (VideoPipeline._run_loop) nhận EOFError và set _running=False.
+            if self._is_file_or_url and not self._network:
+                raise EOFError("Video file ended")
             raise RuntimeError("Không đọc được frame từ webcam")
 
         return frame
@@ -186,7 +191,12 @@ class LatestFrameCapture:
                 if self._latest is not None and self._latest.seq > after:
                     return self._latest
                 if self._error:
-                    raise RuntimeError(str(self._error)) from self._error
+                    # R2: preserve EOFError để caller phân biệt EOF vs network
+                    # error. Trước đây wrap thành RuntimeError khiến pipeline
+                    # reconnect cho cả file video (vòng lặp vô hạn).
+                    err = self._error
+                    self._error = None
+                    raise err
                 remaining = deadline-time.monotonic()
                 if remaining <= 0:
                     raise RuntimeError('capture frame timeout')

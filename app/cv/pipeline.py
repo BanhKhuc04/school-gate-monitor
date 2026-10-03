@@ -293,7 +293,7 @@ class VideoPipeline:
             POSTURE_TEMPORAL_WINDOW_SEC, POSTURE_TEMPORAL_MIN_SAMPLES,
             POSTURE_TEMPORAL_STATES,
         )
-        self._best_plates = BestPlateStore(PLATE_BEST_REPLACE_MARGIN, PLATE_OCR_MIN_CONFIDENCE)
+        self._best_plates = BestPlateStore(PLATE_BEST_REPLACE_MARGIN, PLATE_OCR_MIN_CONFIDENCE, max_attempts=5)
         # Phase 2: top-N multi-crop consensus — keeps top 3–5 crop từ
         # frame KHÁC NHAU, vote ≥2 đồng thuận. Bổ sung cho BestPlateStore
         # (vẫn giữ 1 crop tốt nhất cho fast-path trigger gần line).
@@ -556,9 +556,19 @@ class VideoPipeline:
         self._stopped: bool = False
         # Exponential-backoff state for camera reconnect — reset khi read OK.
         self._reconnect_failures: int = 0
+        # R2: consecutive read errors và reconnect/backoff threshold lưu ở
+        # instance level để _handle_read_error() truy cập được (test friendly).
+        # Trước đây là local var trong _run_loop, không test được tách rời.
+        self._consecutive_errors: int = 0
+        self._RECONNECT_AFTER: int = 5
+        self._RECONNECT_BACKOFF_SEC: float = 2.0
         self._capture = None
         self._capture_consumed_seq = 0
         self._capture_seq_base = 0
+        self._debug_overlay_enabled = True
+        for detector in (self._person_detector, self._plate_detector, self._helmet_detector):
+            if detector is not None:
+                detector.camera_id = self.camera_id
         # Track có TTL/prune — Phase 1: map crossing/sealed/approach có giới hạn
         # và không hồi sinh lượt cũ gây duplicate. Đếm entry + cuối cùng prune
         # entry quá hạn thay vì chờ dict phình ra vô hạn.
@@ -835,12 +845,12 @@ class VideoPipeline:
             try:
                 # Reuse the latest completed inference without waiting for AI.
                 overlay = getattr(self, '_preview_overlay', None)
-                if (overlay and overlay[0] == self._source_epoch
+                if (getattr(self, '_debug_overlay_enabled', True) and overlay and overlay[0] == self._source_epoch
                         and time.monotonic()-overlay[1] <= 1.0):
                     for det, positive, negative in overlay[2]:
                         self._draw_detection(frame, det, positive, negative)
                 self._draw_roi(frame)
-                if DEBUG_CROSSING:
+                if DEBUG_CROSSING and getattr(self, '_debug_overlay_enabled', True):
                     self._draw_crossing_line_debug(frame)
                 if len(item) == 3:
                     self._publish_frame_jpeg(frame, frame_seq, expected_epoch=epoch)
@@ -1315,9 +1325,9 @@ class VideoPipeline:
             pass
         # Reset ByteTrack của person detector (nếu có)
         try:
-            predictor = getattr(self._person_detector.model, 'predictor', None)
-            for tracker in getattr(predictor, 'trackers', []):
-                tracker.reset()
+            for detector in (self._person_detector, self._plate_detector):
+                if detector is not None:
+                    detector.reset_tracker()
         except Exception:
             pass
         self._start_capture()
@@ -1465,7 +1475,7 @@ class VideoPipeline:
         # với BestPlateStore fast-path). BestPlateStore dùng crop 1 frame
         # để trigger gần line; consensus vote qua nhiều frame.
         if PLATE_CONSENSUS_ENABLED:
-            self._consensus_ingest(tid, result, best)
+            self._consensus_ingest(tid, result, store.completed_candidate(tid) or best)
         if detector and detector.gate_line and best:
             from app.cv.crossing import vehicle_anchor
             from app.cv.crossing import _signed_side_and_projection
@@ -1490,7 +1500,7 @@ class VideoPipeline:
             self._diagnostic('ocr', 'observed', 'best_plate_selected', tid, best_plate=group['_plate_debug'])
         if not detector or not detector.gate_line:
             self._diagnostic('decision', 'pending', 'gate_line_missing', tid)
-        return store.result(tid)
+        return self._consensus_result(tid, store.result(tid))
 
     def _observe_plate_only(self, source_frame, plate_dets):
         """N02 (Post-Video Review): rear/ocr_only hoặc camera chỉ thấy biển
@@ -1517,11 +1527,9 @@ class VideoPipeline:
             except Exception:
                 continue
             x1, y1, x2, y2 = bbox
-            # Quantized centroid → track_id tạm ổn định trong cluster 32x32 px
-            ccx = int(((x1 + x2) / 2) // 32)
-            ccy = int(((y1 + y2) / 2) // 32)
-            # Offset về phạm vi âm để tránh đụng track_id thật (>=0)
-            tid = -(ccx * 10000 + ccy + 1)
+            tid = det.track_id
+            if tid is None:
+                continue  # untracked plate remains preview-only; no location identity
             candidate = make_candidate(original, bbox, det.confidence,
                                        self._frame_seq, time.time())
             if candidate is None:
@@ -1541,8 +1549,8 @@ class VideoPipeline:
                 elif not result.text:
                     self._ocr_health['empty'] += 1
             if PLATE_CONSENSUS_ENABLED:
-                self._consensus_ingest(tid, result, best)
-            read = store.result(tid)
+                self._consensus_ingest(tid, result, store.completed_candidate(tid) or best)
+            read = self._consensus_result(tid, store.result(tid))
             self._diagnostic('ocr', 'error' if read and read.error else 'pending' if read and read.pending else 'review',
                 'ocr_error' if read and read.error else 'ocr_pending' if read and read.pending else 'plate_candidate' if read and read.text else 'plate_not_read',
                 tid, plate_text=read.text if read else '', association='unverified')
@@ -1588,6 +1596,18 @@ class VideoPipeline:
         để không spam `torch.cuda.memory_allocated` mỗi poll."""
         from app.cv.gpu_profiler import get_runtime_config
         cfg = get_runtime_config()
+        from app.cv.inference_worker import model_owner
+        cfg['owner'] = model_owner().status()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                free, total = torch.cuda.mem_get_info()
+                cfg['device_used_mb'] = round((total-free)/1024**2, 1)
+                cfg['torch_reserved_mb'] = round(torch.cuda.memory_reserved()/1024**2, 1)
+                cfg['budget_mb'] = 3276.8
+                cfg['budget_exceeded'] = (total-free) > 3.2*1024**3
+        except Exception:
+            cfg['device_used_mb'] = None
         profiler = getattr(self, '_gpu_profiler', None)
         if profiler is not None:
             profiler.sample()
@@ -1703,6 +1723,15 @@ class VideoPipeline:
         if consensus is None:
             return None, 0.0, 0
         return consensus.decide(tid)
+
+    def _consensus_result(self, tid, single):
+        from app.cv.plate_voter import PlateReadResult
+        text, confidence, count = self.consensus_decide(tid)
+        if text and count >= 2:
+            return PlateReadResult(text=text, confidence=confidence, sample_count=count, is_confident=True)
+        return PlateReadResult(text=getattr(single, 'text', ''), confidence=getattr(single, 'confidence', 0),
+            sample_count=getattr(single, 'sample_count', 0), raw_text=getattr(single, 'raw_text', ''),
+            pending=getattr(single, 'pending', False), error=getattr(single, 'error', None))
 
     def _scan_plate_region(self, source_frame, vehicles, people):
         """Recover small plates with one native-resolution region every .5s.
@@ -1913,6 +1942,55 @@ class VideoPipeline:
         self._capture = LatestFrameCapture(self._webcam, on_frame=received)
         self._capture.start()
 
+    def _handle_read_error(self, error: BaseException) -> bool:
+        """Xử lý lỗi đọc frame từ webcam/capture.
+
+        R2: Tách EOFError (file video kết thúc) khỏi lỗi mạng (RTSP offline).
+        EOF kết thúc run ngay, KHÔNG reconnect; lỗi khác đếm consecutive_errors
+        và reconnect qua backoff khi đạt ngưỡng.
+
+        Trả về True nếu vòng lặp _run_loop nên tiếp tục (đã sleep backoff),
+        False nếu phải break (EOF hoặc _running=False).
+        """
+        # R2: EOFError → kết thúc run. Trước đây nuốt vào 'processing_error'
+        # và reconnect cho cả EOF — sai hành vi với video file ngắn.
+        if isinstance(error, EOFError):
+            print(f"[Pipeline] {self.gate_id}: video file ended — terminating run: {error}")
+            self._diagnostic('camera', 'observed', 'source_eof')
+            try:
+                self._stop_capture()
+            except Exception:
+                pass
+            self._running = False
+            return False
+        print(f"[Pipeline] Error in loop: {error}")
+        self._diagnostic('camera', 'error', 'processing_error')
+        self._consecutive_errors += 1
+        if self._consecutive_errors >= self._RECONNECT_AFTER:
+            print(f"[Pipeline] {self._consecutive_errors} consecutive read failures — reconnecting camera")
+            try:
+                if not self._stop_capture():
+                    raise RuntimeError('capture reader did not stop')
+                self._webcam.release()
+            except Exception:
+                pass
+            try:
+                # Same URL reconnect is a new tracking/source session.
+                self.camera_switch.request(GATES[self.gate_id]['source'], persist=False)
+                self._apply_camera_change()
+                print("[Pipeline] Webcam reconnected")
+            except Exception as reconnect_err:
+                print(f"[Pipeline] Reconnect failed: {reconnect_err}")
+            self._consecutive_errors = 0
+            # Phase 1: exponential backoff thay vì fixed 2s.
+            # Reset về 2s khi reconnect THÀNH CÔNG.
+            backoff = min(2.0 * (2 ** (self._reconnect_failures)), 30.0)
+            self._reconnect_failures += 1
+            time.sleep(backoff)
+        else:
+            time.sleep(0.1)
+        return self._running
+
     def _run_loop(self):
         """Vòng lặp chính của thread nền."""
         gate_config = GATES.get(self.gate_id, {"source": 0, "loop": True, "name": self.gate_id})
@@ -1934,9 +2012,8 @@ class VideoPipeline:
             self._webcam = None
             # Tiếp tục vòng lặp; vòng lặp sẽ thử _apply_camera_change mỗi lần.
 
-        _consecutive_errors = 0
-        _RECONNECT_AFTER = 5
-        _RECONNECT_BACKOFF_SEC = 2.0
+        # R2: _consecutive_errors/_RECONNECT_AFTER/_RECONNECT_BACKOFF_SEC đã là
+        # instance attributes (xem __init__). Local vars đã xóa để tránh shadow.
 
         while self._running:
             frame = None
@@ -1951,15 +2028,15 @@ class VideoPipeline:
                         and getattr(self.camera_switch, 'has_pending', False)):
                     applied = self._apply_camera_change()
                     if applied:
-                        _consecutive_errors = 0
+                        self._consecutive_errors = 0
                     else:
                         # Apply fail — chờ rồi retry ở vòng lặp kế tiếp.
-                        time.sleep(_RECONNECT_BACKOFF_SEC)
+                        time.sleep(self._RECONNECT_BACKOFF_SEC)
                         continue
                 # Webcam chưa sẵn sàng (initial open thất bại, đợi switch) →
                 # backoff rồi quay lại đầu vòng lặp.
                 if self._webcam is None:
-                    time.sleep(_RECONNECT_BACKOFF_SEC)
+                    time.sleep(self._RECONNECT_BACKOFF_SEC)
                     continue
                 # Đọc frame
                 t_read_start = time.perf_counter()
@@ -1977,7 +2054,7 @@ class VideoPipeline:
                 frame = cv2.resize(raw, (round(raw_w*scale), round(raw_h*scale)), interpolation=cv2.INTER_AREA) if scale < 1 else raw.copy()
                 source_frame = frame.copy()
                 self._frame_seq += 1
-                _consecutive_errors = 0
+                self._consecutive_errors = 0
                 self._frame_count += 1
                 self._last_frame_time = time.time()
                 # Phase 0: capture latency chỉ tính phần cv2 read+resize, không
@@ -2070,7 +2147,8 @@ class VideoPipeline:
                     helmet_future = Future()
                     helmet_future.set_result([])
                 if self._plate_detector is not None and self._detect_pool is not None:
-                    plate_future = self._detect_pool.submit(self._plate_detector.detect, detect_frame)
+                    reader = self._plate_detector.detect_tracked if getattr(self, 'profile', 'full') == 'ocr_only' else self._plate_detector.detect
+                    plate_future = self._detect_pool.submit(reader, detect_frame)
                 else:
                     plate_future = Future()
                     plate_future.set_result([])
@@ -2079,11 +2157,12 @@ class VideoPipeline:
                 # Phase 0: detect latency = wall-time từ submit 3 future đến khi
                 # .result() của cái cuối cùng về — đo TOÀN BỘ song song, không
                 # phải tổng tuần tự.
-                self._metrics_detect.add((time.perf_counter() - t_detect_start) * 1000)
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
                 vehicle_dets = [d for d in raw_person_dets if d.class_name.lower() in ('motorcycle', 'bicycle')]
                 helmet_dets = self._rescale_dets(helmet_future.result(), scale_x, scale_y)
                 plate_dets = self._rescale_dets(plate_future.result(), scale_x, scale_y)
+                self._metrics_detect.add((time.perf_counter() - t_detect_start) * 1000)
+                self._fps_ai_window += 1
                 if not plate_dets:
                     plate_dets = self._scan_plate_region(source_frame, vehicle_dets, person_dets)
                 raw_people = list(person_dets)
@@ -2243,7 +2322,6 @@ class VideoPipeline:
                 # chia cho 0 và phản ánh thực tế.
                 if getattr(self, '_capture', None) is None:
                     self._fps_capture_window += 1
-                self._fps_ai_window += 1
                 self._resource_sampler.update()
                 # Resize down before buffering to save RAM (640x360 = ~1/4 of 1280x720)
                 small = cv2.resize(frame, (640, 360))
@@ -2255,36 +2333,11 @@ class VideoPipeline:
                     self._latest_frame = frame
 
             except Exception as e:
-                print(f"[Pipeline] Error in loop: {e}")
-                self._diagnostic('camera', 'error', 'processing_error')
-                _consecutive_errors += 1
-                if _consecutive_errors >= _RECONNECT_AFTER:
-                    print(f"[Pipeline] {_consecutive_errors} consecutive read failures — reconnecting camera")
-                    try:
-                        if not self._stop_capture():
-                            raise RuntimeError('capture reader did not stop')
-                        self._webcam.release()
-                    except Exception:
-                        pass
-                    try:
-                        # Same URL reconnect is a new tracking/source session.
-                        self.camera_switch.request(GATES[self.gate_id]['source'], persist=False)
-                        self._apply_camera_change()
-                        print("[Pipeline] Webcam reconnected")
-                    except Exception as reconnect_err:
-                        print(f"[Pipeline] Reconnect failed: {reconnect_err}")
-                    _consecutive_errors = 0
-                    # Phase 1: exponential backoff thay vì fixed 2s.
-                    # Trước đây reconnect fail → sleep 2s → try lại → spam
-                    # log nếu camera rút. Sau N lần fail liên tiếp, tăng
-                    # backoff lên tối đa 30s để giảm tải cho camera + log.
-                    # Reset về 2s khi reconnect THÀNH CÔNG (counted ở nhánh
-                    # self._webcam = self._open_webcam).
-                    backoff = min(2.0 * (2 ** (self._reconnect_failures)), 30.0)
-                    self._reconnect_failures += 1
-                    time.sleep(backoff)
-                else:
-                    time.sleep(0.1)
+                if not self._handle_read_error(e):
+                    # EOFError hoặc _running đã False → break.
+                    break
+                # else: tiếp tục vòng lặp (đã sleep backoff trong handler)
+                continue
             else:
                 # Reset reconnect_failures + backoff khi read THÀNH CÔNG.
                 if self._reconnect_failures:
@@ -2716,7 +2769,7 @@ class VideoPipeline:
             best = self._best_plates.candidate(tid)
             if best and self._best_plates.trigger(tid, self._ocr_pool, _ocr_task, self._source_epoch):
                 self._ocr_health['submitted'] += 1
-            plate = self._best_plates.result(tid)
+            plate = self._consensus_result(tid, self._best_plates.result(tid))
             future = self._best_plates.future(tid)
             deadline = time.monotonic() + ALERT_MAX_PLATE_WAIT_MS/1000
             original = getattr(self, '_original_source_frame', frame)
@@ -2728,6 +2781,8 @@ class VideoPipeline:
                       'camera_id':self.camera_id, 'frame_seq':self._frame_seq,
                       'observed_at':datetime.datetime.fromtimestamp(now, datetime.timezone.utc).isoformat(),
                       'issues':deepcopy(issues), 'plate':deepcopy(plate), 'future':future, 'deadline':deadline,
+                      'plate_samples':self._plate_consensus.observations(tid) if hasattr(self, '_plate_consensus') else [],
+                      'plate_candidate':deepcopy(best),
                       'plate_frame_id':best.frame_id if best else None,
                       'helmet_status':'no_helmet' if any(i['code']=='NO_HELMET' for i in issues) else 'unknown',
                       'posture_status':'riding' if riding else 'walking_with_bike' if walking else 'unknown'}
@@ -2762,6 +2817,19 @@ class VideoPipeline:
                          and raw.get('completed_monotonic', frozen['deadline']) <= frozen['deadline'])
                 if valid:
                     plate = resolve_plate(raw, PLATE_OCR_MIN_CONFIDENCE)
+                    if 'plate_samples' in frozen:
+                        from app.cv.plate_consensus import PlateConsensusStore, CropRecord
+                        from app.cv.plate_voter import PlateReadResult
+                        votes = PlateConsensusStore(min_confidence=PLATE_OCR_MIN_CONFIDENCE, min_quality=.3)
+                        for record in frozen['plate_samples']:
+                            votes.ingest_offer(1, record)
+                        candidate = frozen.get('plate_candidate')
+                        if candidate:
+                            votes.ingest_offer(1, CropRecord(candidate.frame_id, candidate.timestamp,
+                                plate.text, plate.confidence, candidate.quality_score, raw=raw, error=plate.error))
+                        text, confidence, count = votes.decide(1)
+                        plate = PlateReadResult(text=text or '', confidence=confidence, sample_count=count,
+                            is_confident=bool(text and count >= 2), raw_text=raw.get('full', ''), error=plate.error)
             except TimeoutError:
                 pass
             except Exception as exc:
@@ -3209,12 +3277,9 @@ class VideoPipeline:
         Bổ sung 'posture_status' vào mỗi group dict.
         Hoàn toàn isolated trong try/except để không ảnh hưởng pipeline chính.
 
-        Chạy SONG SONG qua _detect_pool (đã rảnh vào lúc này — 3 future của
-        person/helmet/plate đã .result() xong ở _run_loop) thay vì tuần tự từng
-        người: N person trong khung hình trước đây = N lần inference YOLO-pose
-        nối tiếp nhau, cộng dồn latency tuyến tính theo số người. pose.py dùng
-        model instance riêng theo thread (thread-local) nên gọi đồng thời an
-        toàn, không tranh chấp state giữa các thread như dùng chung 1 instance.
+        Mọi model chạy trên 1 luồng model-owner duy nhất, nên N người = N lượt
+        nối tiếp. Gộp tất cả crop vào 1 lượt batch để chi phí không tăng tuyến
+        tính theo số người.
         """
         try:
             from app.cv.pose import PostureDetector, SideViewRiding, RidingTemporalState
@@ -3246,12 +3311,11 @@ class VideoPipeline:
                     group['posture_status'] = 'unknown'
                     continue
 
-                future = self._detect_pool.submit(detector.detect_pose, person_crop)
-                pending.append((group, (x1, y1), future))
+                pending.append((group, (x1, y1), person_crop))
 
+            batch = detector.detect_pose_batch([crop for _, _, crop in pending]) if pending else []
             pose_data = []
-            for group, offset, future in pending:
-                keypoints = future.result()
+            for (group, offset, _), keypoints in zip(pending, batch):
                 vehicle = group.get('_vehicle')
                 temporal = self._riding_temporal.observe(group.get('track_id'), group.get('vehicle_track_id'),
                     self._source_epoch, group['_person'].bbox, vehicle.bbox, time.monotonic())

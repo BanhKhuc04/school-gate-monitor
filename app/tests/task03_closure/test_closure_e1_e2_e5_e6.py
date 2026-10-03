@@ -21,6 +21,11 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def enable_isolated_collector(monkeypatch):
+    monkeypatch.setenv('TASK3_COLLECTOR_ENABLED', '1')
+
+
 # ----------------------------- Helpers ---------------------------------
 
 def _make_sample(tid: str, *, crop_media_id: str | None = None,

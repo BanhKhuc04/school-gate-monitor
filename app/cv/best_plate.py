@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 
-from app.cv.ocr import normalize_valid_plate
+from app.cv.ocr import normalize_valid_plate, normalize_plate
 from app.cv.plate_voter import PlateReadResult
 
 
@@ -69,7 +69,9 @@ def make_candidate(frame, bbox, confidence, seq, timestamp, corners=None):
 def resolve_plate(raw, min_confidence=.70):
     error = raw.get('error')
     normalized = normalize_valid_plate(raw.get('full', ''), raw.get('top_line', ''), raw.get('bottom_line', ''))
-    confident = bool(normalized and not error and raw.get('confidence', 0) >= min_confidence)
+    observed = normalize_plate((raw.get('top_line', '') + raw.get('bottom_line', '')) or raw.get('full', ''))
+    confident = bool(normalized and normalized == observed and not error and not raw.get('needs_review')
+                     and raw.get('confidence', 0) >= min_confidence)
     return PlateReadResult(text=normalized if confident else '', confidence=raw.get('confidence', 0),
         sample_count=1, is_confident=confident, error=error, raw_text=raw.get('full', ''))
 
@@ -85,14 +87,20 @@ class _Selection:
     raw: dict = field(default_factory=dict)
     seen_at: float = field(default_factory=time.monotonic)
     saved_path: object = None
+    inflight: object = None
+    completed: object = None
+    first_attempt_at: object = None
+    attempted_frames: set = field(default_factory=set)
 
 
 class BestPlateStore:
     MAX_PENDING = 8
 
-    def __init__(self, replace_margin=.05, min_confidence=.70):
+    def __init__(self, replace_margin=.05, min_confidence=.70, max_attempts=1, window_sec=2.0):
         self.replace_margin = replace_margin
         self.min_confidence = min_confidence
+        self.max_attempts = min(5, max_attempts)
+        self.window_sec = window_sec
         self._tracks = OrderedDict()
 
     def reset(self):
@@ -106,7 +114,13 @@ class BestPlateStore:
         entry = self._tracks.get(track)
         if entry:
             entry.seen_at = time.monotonic()
-            if entry.attempts or candidate.frame_id <= entry.best.frame_id or candidate.quality_score < entry.best.quality_score+self.replace_margin:
+            if entry.future is not None or entry.attempts >= self.max_attempts or candidate.frame_id <= entry.best.frame_id:
+                return False
+            if entry.first_attempt_at is not None and candidate.timestamp-entry.first_attempt_at > self.window_sec:
+                return False
+            if not entry.attempts and candidate.quality_score < entry.best.quality_score+self.replace_margin:
+                return False
+            if entry.attempts and (candidate.frame_id-entry.best.frame_id < 2 or candidate.quality_score < .3):
                 return False
             entry.best = candidate
         else:
@@ -117,11 +131,19 @@ class BestPlateStore:
 
     def trigger(self, track, pool, task, epoch):
         entry = self._tracks.get(track)
-        if entry is None or entry.attempts or sum(e.future is not None for e in self._tracks.values()) >= self.MAX_PENDING:
+        if (entry is None or entry.attempts >= self.max_attempts or entry.future is not None
+                or entry.best.frame_id in entry.attempted_frames
+                or sum(e.future is not None for e in self._tracks.values()) >= self.MAX_PENDING):
+            return False
+        if entry.first_attempt_at is None:
+            entry.first_attempt_at = entry.best.timestamp
+        if entry.best.timestamp-entry.first_attempt_at > self.window_sec:
             return False
         entry.epoch = epoch
+        entry.inflight = entry.best
         entry.future = pool.submit(task, entry.best.crop, track, entry.best.frame_id, epoch)
-        entry.attempts = 1
+        entry.attempts += 1
+        entry.attempted_frames.add(entry.best.frame_id)
         return True
 
     def collect(self, track, pool, task, epoch):
@@ -133,13 +155,15 @@ class BestPlateStore:
         except Exception as exc:
             raw = {'error': f'ocr_engine_error:{type(exc).__name__}'}
         entry.future = None
-        if raw.get('source_epoch', epoch) != epoch or raw.get('frame_seq', entry.best.frame_id) != entry.best.frame_id or raw.get('track_id', track) != track:
+        candidate = entry.inflight
+        if raw.get('source_epoch', epoch) != epoch or raw.get('frame_seq', candidate.frame_id) != candidate.frame_id or raw.get('track_id', track) != track:
             raw = {'error': 'ocr_metadata_mismatch'}
         if raw.get('error') and entry.technical_retries < 1 and raw.get('error') != 'ocr_metadata_mismatch':
             entry.technical_retries += 1
-            entry.future = pool.submit(task, entry.best.crop, track, entry.best.frame_id, epoch)
+            entry.future = pool.submit(task, candidate.crop, track, candidate.frame_id, epoch)
             return None
         entry.raw = raw
+        entry.completed = candidate
         entry.result = resolve_plate(raw, self.min_confidence)
         return entry.result
 
@@ -156,6 +180,14 @@ class BestPlateStore:
     def candidate(self, track):
         entry = self._tracks.get(track)
         return entry.best if entry else None
+
+    def completed_candidate(self, track):
+        entry = self._tracks.get(track)
+        return entry.completed if entry else None
+
+    def raw(self, track):
+        entry = self._tracks.get(track)
+        return dict(entry.raw) if entry else {}
 
     def future(self, track):
         entry = self._tracks.get(track)
@@ -178,7 +210,7 @@ class BestPlateStore:
             'quality': round(best.quality_score, 3), 'blur': round(best.blur_score, 2),
             'contrast': round(best.contrast_score, 2), 'size': [best.crop_width, best.crop_height],
             'detector_confidence': best.detector_conf, 'components': best.components,
-            'attempts': entry.attempts, 'max_attempts': 1, 'technical_retries': entry.technical_retries,
+            'attempts': entry.attempts, 'max_attempts': self.max_attempts, 'technical_retries': entry.technical_retries,
             'raw_top': entry.raw.get('top_line', ''), 'raw_bottom': entry.raw.get('bottom_line', ''),
             'normalized': entry.result.text if entry.result else '',
             'status': 'CONFIRMED' if entry.result and entry.result.is_confident else

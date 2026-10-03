@@ -59,16 +59,25 @@ def export_portable_zip(
 
     if output_path is None:
         from app.config import BASE_DIR
-        output_path = str(BASE_DIR / "data" / "training" / "exports" / f"{dataset_id}.zip")
+        root = Path(os.environ.get('TASK3_CONTEXT_PATH') or BASE_DIR / 'data' / 'training')
+        output_path = str(root / "exports" / f"{dataset_id}.zip")
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     manifest = json.loads(Path(meta["manifest_path"]).read_text(encoding="utf-8"))
     samples = manifest.get("samples", [])
+    from app.storage_budget import require_space
+    estimated = sum(Path(s.get('source', {}).get('crop_media_id') or '').stat().st_size
+                    for s in samples if Path(s.get('source', {}).get('crop_media_id') or '').is_file())
+    try:
+        require_space(output_path, expected_bytes=estimated*2+1024**2)
+    except ValueError as exc:
+        raise SchemaError(str(exc)) from exc
 
     # Snapshot path staging (chỉ chứa file trong datasets/training_root)
     if staging_dir is None:
         from app.config import BASE_DIR
-        staging_dir = str(BASE_DIR / "data" / "training" / "exports" / f"_staging_{dataset_id}")
+        root = Path(os.environ.get('TASK3_CONTEXT_PATH') or BASE_DIR / 'data' / 'training')
+        staging_dir = str(root / "exports" / f"_staging_{dataset_id}")
     sdir = Path(staging_dir)
     sdir.mkdir(parents=True, exist_ok=True)
 

@@ -81,5 +81,6 @@ frontend/playwright-report/
 logs_*.log
 logs_*.err
 logs_*.out
+logs_backend.err
 yolo11*.pt
 models/cct/*.onnx

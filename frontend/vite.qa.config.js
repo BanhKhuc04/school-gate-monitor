@@ -22,6 +22,7 @@ export default defineConfig({
       '/guard/video_feed':    { target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true },
       '/guard/ws':            { target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true, ws: true },
       '/guard/audio':         { target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true },
+      '/guard/debug_overlay': { target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true },
       '/guard/recognition_log':{ target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true },
       '/guard/recognition_cards': { target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true },
       '/guard/recognition_image':{ target: `http://${QA_BACKEND_HOST}:${QA_BACKEND_PORT}`, changeOrigin: true },

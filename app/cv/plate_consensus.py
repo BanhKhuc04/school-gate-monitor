@@ -297,6 +297,11 @@ class PlateConsensusStore:
     def discard(self, track: int) -> None:
         self._tracks.pop(track, None)
 
+    def observations(self, track):
+        from copy import deepcopy
+        buf = self._tracks.get(track)
+        return deepcopy(buf.crops) if buf else []
+
     def reset(self) -> None:
         self._tracks.clear()
 

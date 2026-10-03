@@ -175,7 +175,7 @@ class SampleCollector:
         storage_root: str | None = None,
     ) -> None:
         from app.config import BASE_DIR
-        self._task_root = Path(task_context_path or (BASE_DIR / "data" / "training"))
+        self._task_root = Path(task_context_path or os.environ.get('TASK3_CONTEXT_PATH') or (BASE_DIR / "data" / "training"))
         self._cursor_path = self._task_root / CURSOR_FILENAME
         self._metrics_path = self._task_root / METRICS_FILENAME
 

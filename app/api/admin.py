@@ -868,6 +868,14 @@ def _decode_and_save_image(
     # Tên UUID — KHÔNG dùng timestamp (tránh trùng mili giây)
     name = f"{_uuid.uuid4().hex}{ext}"
     full_path = _os.path.join(student_photos_dir, name)
+    # R1 — preflight disk trước khi save (ảnh JPEG ~75% bytes gốc; PNG có thể
+    # lớn hơn; dùng max_bytes làm trần dự báo). require_space raise ValueError
+    # → caller chuyển HTTPException 507.
+    from app.storage_budget import require_space
+    try:
+        require_space(full_path, expected_bytes=max_bytes + 4 * 1024 * 1024)
+    except ValueError as e:
+        raise HTTPException(status_code=507, detail=f"không đủ dung lượng: {e}")
     try:
         img.save(full_path, format=fmt, quality=85, strip=True)
     except OSError as e:

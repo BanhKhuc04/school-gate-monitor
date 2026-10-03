@@ -85,6 +85,9 @@ export default function BBoxEditor({
   const [drag, setDrag] = useState(null); // {mode:'move'|'resize', handle, startMouse, startBBox}
   const [imageSize, setImageSize] = useState({w: 0, h: 0});
   const [imgReady, setImgReady] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => { setImgReady(false); setImageError(false); }, [src]);
 
   useEffect(() => {
     setBBox(normalizeBBox(initialBBox) || defaultBBox());
@@ -118,13 +121,13 @@ export default function BBoxEditor({
 
   const onPointerDown = useCallback(
     (mode, handle = null) => evt => {
-      if (!canEdit) return;
+      if (!canEdit || !imgReady || busy) return;
       evt.preventDefault();
       evt.stopPropagation();
       const rel = getRelXY(evt);
       setDrag({mode, handle, startMouse: rel, startBBox: bbox});
     },
-    [canEdit, bbox, getRelXY]
+    [canEdit, imgReady, busy, bbox, getRelXY]
   );
 
   useEffect(() => {
@@ -169,7 +172,7 @@ export default function BBoxEditor({
 
   const onKeyDown = useCallback(
     evt => {
-      if (!canEdit) return;
+      if (!canEdit || !imgReady || busy) return;
       if (evt.key === 'Escape') {
         setBBox(normalizeBBox(initialBBox) || defaultBBox());
       } else if (evt.key === 'Delete' || evt.key === 'Backspace') {
@@ -198,11 +201,11 @@ export default function BBoxEditor({
         applyBBox([x1, y1, x2, y2]);
       }
     },
-    [canEdit, bbox, initialBBox, onSubmit, applyBBox]
+    [canEdit, imgReady, busy, bbox, initialBBox, onSubmit, applyBBox]
   );
 
   const handleSubmit = () => {
-    if (!onSubmit || !BBoxValid(bbox)) return;
+    if (!onSubmit || !BBoxValid(bbox) || !canEdit || !imgReady || busy) return;
     onSubmit(bbox, 'manual_edit');
   };
 
@@ -225,7 +228,7 @@ export default function BBoxEditor({
       <div
         ref={containerRef}
         className="relative w-full overflow-hidden rounded border border-slate-200 bg-slate-50"
-        style={{aspectRatio: imageSize.w > 1 && imageSize.h > 1 ? `${imageSize.w} / ${imageSize.h}` : '4 / 3', minHeight: '12rem'}}
+        style={{aspectRatio: imageSize.w > 1 && imageSize.h > 1 ? `${imageSize.w} / ${imageSize.h}` : '4 / 3'}}
         tabIndex={0}
         onKeyDown={onKeyDown}
         role="img"
@@ -237,6 +240,7 @@ export default function BBoxEditor({
             src={src}
             alt="bbox target"
             onLoad={onImgLoad}
+            onError={() => { setImgReady(false); setImageError(true); }}
             className="absolute inset-0 h-full w-full select-none object-contain"
             draggable={false}
           />
@@ -263,21 +267,27 @@ export default function BBoxEditor({
               aria-label="BBox drag area"
             />
             {HANDLES.map(h => {
-              if (h.line) {
-                const left = h.ix === 0 ? `${x1 * 100}%` : h.ix === 1 ? `${x2 * 100}%` : `${(x1 + (x2 - x1) * h.ix) * 100}%`;
-                const top = h.iy === 0 ? `${y2 * 100}%` : h.iy === 1 ? `${y1 * 100}%` : `${(y1 + (y2 - y1) * h.iy) * 100}%`;
-                return null;
-              }
+              if (h.line) return null;
               const left = `${(x1 + (x2 - x1) * h.ix) * 100}%`;
               const top = `${(y1 + (y2 - y1) * h.iy) * 100}%`;
               return (
-                <span
+                <button
+                  type="button"
                   key={h.name}
                   data-testid={`bbox-handle-${h.name}`}
                   className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-white bg-emerald-600 shadow"
                   style={{left, top, cursor: canEdit ? h.cursor : 'default'}}
                   onPointerDown={onPointerDown('resize', h)}
-                  role="button"
+                  onKeyDown={event => {
+                    if (!canEdit || busy || !event.key.startsWith('Arrow')) return;
+                    event.preventDefault(); event.stopPropagation();
+                    const next = [...bbox];
+                    const step = event.shiftKey ? .05 : .005;
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') next[h.ix === 0 ? 0 : 2] = clamp01(next[h.ix === 0 ? 0 : 2] + (event.key === 'ArrowLeft' ? -step : step));
+                    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') next[h.iy === 1 ? 1 : 3] = clamp01(next[h.iy === 1 ? 1 : 3] + (event.key === 'ArrowUp' ? -step : step));
+                    applyBBox(next);
+                  }}
+                  disabled={!canEdit || busy}
                   aria-label={`Resize handle ${h.name}`}
                 />
               );
@@ -285,6 +295,7 @@ export default function BBoxEditor({
           </>
         )}
       </div>
+      {imageError && <p role="alert" className="mt-2 text-sm text-rose-700">Không tải được ảnh nguồn. Bổ sung ảnh trước khi sửa bbox.</p>}
       <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-600">
         <div>
           <span data-testid="bbox-coords">
@@ -295,7 +306,7 @@ export default function BBoxEditor({
         {onSubmit && (
           <button
             type="button"
-            disabled={!valid || !canEdit || busy}
+            disabled={!valid || !canEdit || !imgReady || busy}
             onClick={handleSubmit}
             className="rounded bg-emerald-600 px-3 py-1 text-white shadow disabled:cursor-not-allowed disabled:bg-slate-300"
           >

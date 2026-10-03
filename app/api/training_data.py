@@ -16,8 +16,12 @@ Endpoints:
 from __future__ import annotations
 
 from typing import Optional
+from pathlib import Path
+import os
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.auth import get_current_user, require_role
@@ -115,6 +119,29 @@ def list_samples(dataset_id: str,
     return {"items": items, "count": len(items)}
 
 
+@router.get('/datasets/{dataset_id}/samples/{target_id}/image')
+def sample_image(dataset_id: str, target_id: str, user: dict = Depends(require_role('admin'))):
+    from app.config import BASE_DIR, SNAPSHOTS_DIR
+    samples = dataset_repo.list_samples(dataset_id)
+    sample = next((s for s in samples if s.get('target_id') == target_id), None)
+    if sample is None:
+        raise HTTPException(404, 'sample không tồn tại')
+    source = sample.get('source') or {}
+    path = Path(source.get('crop_media_id') or '').resolve()
+    roots = [Path(SNAPSHOTS_DIR).resolve(),
+             Path(os.environ.get('TASK3_CONTEXT_PATH') or BASE_DIR / 'data' / 'training').resolve()]
+    if not any(path.is_relative_to(root) for root in roots):
+        raise HTTPException(400, 'asset ngoài kho dữ liệu đã cấu hình')
+    if not path.is_file() or path.suffix.lower() not in {'.jpg', '.jpeg', '.png', '.webp'}:
+        raise HTTPException(404, 'ảnh mẫu không có sẵn')
+    if path.stat().st_size > 16 * 1024 * 1024:
+        raise HTTPException(413, 'ảnh mẫu vượt giới hạn')
+    expected = source.get('crop_sha256')
+    if expected and hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raise HTTPException(409, 'hash ảnh mẫu đã thay đổi')
+    return FileResponse(path, headers={'Cache-Control': 'private, no-store'})
+
+
 @router.post("/datasets/{dataset_id}/split")
 def run_split(dataset_id: str, payload: SplitIn,
               user: dict = Depends(require_role("admin"))):
@@ -180,7 +207,7 @@ def patch_sample_bbox(dataset_id: str, target_id: str, payload: PatchBBoxIn,
     meta = dataset_repo.get_dataset(dataset_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="dataset không tồn tại")
-    if meta.get("state") == "frozen":
+    if meta.get("freeze_state") == "frozen":
         raise HTTPException(
             status_code=409,
             detail="dataset đã frozen — tạo dataset version mới để sửa bbox",

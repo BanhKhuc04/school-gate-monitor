@@ -259,9 +259,10 @@ class TestP2WorkerDispatchSignature:
         with pytest.raises(SchemaError):
             worker._select_runner("unknown_target")
 
-    def test_worker_module_starts_and_stops_cleanly(self, db_path):
+    def test_worker_module_starts_and_stops_cleanly(self, db_path, monkeypatch):
         """start_training_worker + stop_training_worker — không nhân thread sau lifecycle lặp."""
         from app.training import worker
+        monkeypatch.setenv('TASK3_TRAINING_WORKER_ENABLED', '1')
         w1 = worker.start_training_worker(poll_sec=0.5)
         w2 = worker.start_training_worker(poll_sec=0.5)
         assert w1 is w2, "singleton: gọi 2 lần trả cùng instance"
@@ -491,8 +492,9 @@ class TestP4OperationSeparation:
 
 
 class TestP4WorkerLifespanFunctions:
-    def test_start_training_worker_returns_worker(self):
+    def test_start_training_worker_returns_worker(self, monkeypatch):
         from app.training import worker
+        monkeypatch.setenv('TASK3_TRAINING_WORKER_ENABLED', '1')
         worker.stop_training_worker()
         w = worker.start_training_worker(poll_sec=10.0)
         assert w is not None

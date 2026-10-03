@@ -80,7 +80,7 @@ def normalize_plate_text(text: str) -> str:
         return ""
     nfkd = unicodedata.normalize("NFKD", text)
     plain = "".join(c for c in nfkd if not unicodedata.combining(c))
-    return re.sub(r"[^A-Z0-9]", "", plain.upper())
+    return re.sub(r"[^A-Z0-9]", "", plain.upper().replace("Đ", "D"))
 
 
 def now_iso() -> str:

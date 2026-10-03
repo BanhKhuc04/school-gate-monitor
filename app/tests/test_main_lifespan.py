@@ -16,6 +16,13 @@ import pytest
 import threading
 
 
+@pytest.fixture(autouse=True)
+def enable_workers_for_lifecycle_tests(monkeypatch):
+    # Explicit opt-in in the isolated QA DB; production defaults stay disabled in tests.
+    monkeypatch.setenv('TASK3_TRAINING_WORKER_ENABLED', '1')
+    monkeypatch.setenv('TASK3_COLLECTOR_ENABLED', '1')
+
+
 def test_collector_and_worker_start_on_lifespan(test_app):
     """Lifespan startup gọi start_collector_task + start_training_worker."""
     import app.main as main_module

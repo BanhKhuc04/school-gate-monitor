@@ -298,10 +298,11 @@ class TestR1BehavioralDecoupling:
         print(f"  JPEG count == frame_seq count: {len(jpeg_seqs)}")
 
     def test_detect_block_does_not_prevent_jpeg(self):
-        """Even with 10s detect block, JPEG publishes normally."""
-        detect_block = 10.0
+        """Even with a long detect block, JPEG publishes normally."""
+        from app.config import FRAME_SKIP
+        detect_block = 5.0
         p, webcam = self._make_pipeline(detect_block_sec=detect_block)
-        num_iters = 4  # 4 iterations: 2,4 run detect (FRAME_SKIP=2: even frames only)
+        num_iters = 4
 
         start = time.perf_counter()
         jpeg_seqs, frame_seqs, errors = _simulate_loop_body(
@@ -309,19 +310,19 @@ class TestR1BehavioralDecoupling:
         elapsed = time.perf_counter() - start
 
         assert not errors
-        # FRAME_SKIP=2: detect runs on frame_count 2,4,6... (even)
         # JPEG publishes on ALL frames (including skipped ones)
-        # So 4 iterations → 4 JPEG publishes
         assert len(jpeg_seqs) == num_iters, (
             f"Expected {num_iters} JPEG, got {len(jpeg_seqs)}. "
             f"Preview blocked by detect (R1 FAIL)."
         )
-        # With FRAME_SKIP=2: detect on iterations 2,4 → 2 × 10s = 20s total
-        # JPEG happens BEFORE detect in each iteration, so all 4 JPEG
-        # publish before detect blocks complete. Total time ≈ 20s.
-        assert 18 <= elapsed <= 26, (
-            f"Expected ~20s (2 × 10s detect), got {elapsed:.1f}s. "
-            f"Time suggests JPEG is blocked by detect."
+        # Detect runs only on frames where frame_count % FRAME_SKIP == 0, and
+        # the three detectors run in parallel, so each detect frame costs one
+        # block — not three.
+        detect_frames = num_iters // FRAME_SKIP
+        expected = detect_frames * detect_block
+        assert expected - 2 <= elapsed <= expected + 6, (
+            f"Expected ~{expected:.0f}s ({detect_frames} × {detect_block:.0f}s detect), "
+            f"got {elapsed:.1f}s. Time suggests JPEG is blocked by detect."
         )
         print(f"  JPEG independent: {len(jpeg_seqs)} JPEG in {elapsed:.1f}s "
               f"(detect blocks {detect_block}s on even frames)")

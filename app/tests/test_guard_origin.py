@@ -13,6 +13,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def enable_mocked_cv_endpoints(monkeypatch):
+    monkeypatch.setenv('CV_PIPELINES_ENABLED', '1')
+
+
 def _login_token(client: TestClient, role: str) -> str:
     resp = client.post("/api/auth/login", json={"username": role, "password": "test123"})
     assert resp.status_code == 200, resp.text

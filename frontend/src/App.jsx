@@ -1,234 +1,79 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import LoginPage from './pages/LoginPage';
-import GuardPage from './pages/GuardPage';
-import AdminVehiclesPage from './pages/AdminVehiclesPage';
-import AdminViolationsPage from './pages/AdminViolationsPage';
-import AdminUsersPage from './pages/AdminUsersPage';
-import AdminHealthPage from './pages/AdminHealthPage';
-import AdminRoiPage from './pages/AdminRoiPage';
-import AdminCameraPage from './pages/AdminCameraPage';
-import DashboardPage from './pages/DashboardPage';
-import StudentViolationHistoryPage from './pages/StudentViolationHistoryPage';
-// Task 3 — training data, jobs, candidates, BBox editor (admin only)
-import DatasetManagerPage from './pages/DatasetManagerPage';
-import TrainingJobsPage from './pages/TrainingJobsPage';
-import CandidateComparePage from './pages/CandidateComparePage';
-import BBoxEditorDemoPage from './pages/BBoxEditorDemoPage';
+import SettingsLayout from './components/SettingsLayout';
+import ViolationsLayout from './components/ViolationsLayout';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
 
-function LoginLayout({ children }) {
-  return <>{children}</>;
+const GuardPage = lazy(() => import('./pages/GuardPage'));
+const AdminVehiclesPage = lazy(() => import('./pages/AdminVehiclesPage'));
+const AdminViolationsPage = lazy(() => import('./pages/AdminViolationsPage'));
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const AdminHealthPage = lazy(() => import('./pages/AdminHealthPage'));
+const AdminRoiPage = lazy(() => import('./pages/AdminRoiPage'));
+const AdminCameraPage = lazy(() => import('./pages/AdminCameraPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const StudentViolationHistoryPage = lazy(() => import('./pages/StudentViolationHistoryPage'));
+const DatasetManagerPage = lazy(() => import('./pages/DatasetManagerPage'));
+const TrainingJobsPage = lazy(() => import('./pages/TrainingJobsPage'));
+const CandidateComparePage = lazy(() => import('./pages/CandidateComparePage'));
+const BBoxEditorDemoPage = lazy(() => import('./pages/BBoxEditorDemoPage'));
+const AccountSettingsPage = lazy(() => import('./pages/AccountSettingsPage'));
+const AdvancedAiPage = lazy(() => import('./pages/AdvancedAiPage'));
+const AiReviewPage = lazy(() => import('./pages/AiReviewPage'));
+const KaggleExportPage = lazy(() => import('./pages/KaggleExportPage'));
+
+function LegacyRedirect({ to }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={to + search + hash} replace />;
 }
 
 function AppRoutes() {
   const { user } = useAuth();
-
+  const defaultPage = { admin: '/guard', management: '/guard', security: '/guard', teacher: '/teacher/violations' };
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route element={<RequireRole allow={['security', 'admin', 'management', 'teacher']}><Layout /></RequireRole>}>
+        <Route path="/guard" element={<RequireRole allow={['security', 'admin', 'management']}><GuardPage /></RequireRole>} />
+        <Route path="/admin/vehicles" element={<RequireRole allow={['admin', 'management']}><AdminVehiclesPage /></RequireRole>} />
+        <Route element={<RequireRole allow={['admin', 'management']}><ViolationsLayout /></RequireRole>}>
+          <Route path="/admin/violations" element={<AdminViolationsPage />} />
+          <Route path="/admin/violations/report" element={<DashboardPage />} />
+        </Route>
+        <Route path="/dashboard" element={<RequireRole allow={['admin', 'management']}><LegacyRedirect to="/admin/violations/report" /></RequireRole>} />
+        <Route path="/teacher/violations" element={<RequireRole allow={['teacher']}><AdminViolationsPage /></RequireRole>} />
+        <Route path="/teacher/vehicles" element={<RequireRole allow={['teacher']}><AdminVehiclesPage /></RequireRole>} />
+        <Route path="/admin/students/:vehicleId/violations" element={<RequireRole allow={['admin']}><StudentViolationHistoryPage /></RequireRole>} />
 
-      {/* Guard — security + admin + management (principal can view live camera too) */}
-      <Route
-        element={
-          <RequireRole allow={['security', 'admin', 'management']}>
-            <Layout>
-              <GuardPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/guard" element={null} />
+        <Route path="/settings" element={<SettingsLayout />}>
+          <Route index element={<AccountSettingsPage />} />
+          <Route path="camera" element={<RequireRole allow={['admin']}><AdminCameraPage /></RequireRole>} />
+          <Route path="roi" element={<RequireRole allow={['admin']}><AdminRoiPage /></RequireRole>} />
+          <Route path="storage" element={<RequireRole allow={['admin']}><AdminHealthPage /></RequireRole>} />
+          <Route path="users" element={<RequireRole allow={['admin']}><AdminUsersPage /></RequireRole>} />
+          <Route path="ai" element={<RequireRole allow={['admin']}><AdvancedAiPage /></RequireRole>} />
+          <Route path="ai/reviews" element={<RequireRole allow={['admin']}><AiReviewPage /></RequireRole>} />
+          <Route path="ai/export" element={<RequireRole allow={['admin']}><KaggleExportPage /></RequireRole>} />
+          <Route path="ai/datasets" element={<RequireRole allow={['admin']}><DatasetManagerPage /></RequireRole>} />
+          <Route path="ai/jobs" element={<RequireRole allow={['admin']}><TrainingJobsPage /></RequireRole>} />
+          <Route path="ai/models" element={<RequireRole allow={['admin']}><CandidateComparePage /></RequireRole>} />
+          <Route path="ai/bbox" element={<RequireRole allow={['admin']}><BBoxEditorDemoPage /></RequireRole>} />
+        </Route>
+        {[
+          ['/admin/camera', '/settings/camera'], ['/admin/roi', '/settings/roi'],
+          ['/admin/health', '/settings/storage'], ['/admin/users', '/settings/users'],
+          ['/admin/training/datasets', '/settings/ai/datasets'], ['/admin/training/jobs', '/settings/ai/jobs'],
+          ['/admin/training/candidates', '/settings/ai/models'], ['/admin/training/bbox', '/settings/ai/bbox'],
+        ].map(([from, to]) => <Route key={from} path={from} element={<RequireRole allow={['admin']}><LegacyRedirect to={to} /></RequireRole>} />)}
       </Route>
-
-      {/* Admin + management (read-only view for management — enforced by page-level isAdmin checks + server 403s) */}
-      <Route
-        element={
-          <RequireRole allow={['admin', 'management']}>
-            <Layout>
-              <AdminVehiclesPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/vehicles" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin', 'management']}>
-            <Layout>
-              <AdminViolationsPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/violations" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <AdminUsersPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/users" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['management', 'admin']}>
-            <Layout>
-              <DashboardPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/dashboard" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <AdminHealthPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/health" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <AdminRoiPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/roi" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <AdminCameraPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/camera" element={null} />
-      </Route>
-
-      {/* Feature 9: Teacher routes — reuse admin pages with server-side scope filtering */}
-      <Route
-        element={
-          <RequireRole allow={['teacher']}>
-            <Layout>
-              <AdminViolationsPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/teacher/violations" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['teacher']}>
-            <Layout>
-              <AdminVehiclesPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/teacher/vehicles" element={null} />
-      </Route>
-
-      {/* Feature 2+6: Student violation history */}
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <StudentViolationHistoryPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/students/:vehicleId/violations" element={null} />
-      </Route>
-
-      {/* Task 3 — training data & jobs & candidates (admin only) */}
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <DatasetManagerPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/training/datasets" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <TrainingJobsPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/training/jobs" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <CandidateComparePage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/training/candidates" element={null} />
-      </Route>
-
-      <Route
-        element={
-          <RequireRole allow={['admin']}>
-            <Layout>
-              <BBoxEditorDemoPage />
-            </Layout>
-          </RequireRole>
-        }
-      >
-        <Route path="/admin/training/bbox" element={null} />
-      </Route>
-
-      {/* Default redirect */}
-      <Route
-        path="*"
-        element={<Navigate to={user ? '/dashboard' : '/login'} replace />}
-      />
+      <Route path="*" element={<Navigate to={user ? defaultPage[user.role] || '/login' : '/login'} replace />} />
     </Routes>
   );
 }
 
-function App() {
-  return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
-  );
+export default function App() {
+  return <BrowserRouter><Suspense fallback={<p role="status" className="p-6 text-sm">Đang tải trang…</p>}><AppRoutes /></Suspense></BrowserRouter>;
 }
-
-export default App;

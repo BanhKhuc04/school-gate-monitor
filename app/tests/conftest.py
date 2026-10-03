@@ -13,6 +13,52 @@ from fastapi import FastAPI
 # Ensure the project root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+# Set paths BEFORE any test imports app.config. Never use operational media as
+# the implicit source of a backup test; each run starts with empty fixtures.
+import tempfile
+_QA_ROOT = Path(__file__).resolve().parents[2] / '.qa'
+_QA_ROOT.mkdir(exist_ok=True)
+_QA_RUN = Path(tempfile.mkdtemp(prefix='pytest-', dir=_QA_ROOT))
+for _key, _relative in {
+    'APP_DB_PATH': 'app.db', 'TRAINING_DB_PATH': 'training.db',
+    'SNAPSHOTS_DIR': 'snapshots', 'CLIPS_DIR': 'clips',
+    'STUDENT_PHOTOS_DIR': 'student_photos', 'BACKUP_DIR': 'backups',
+    'CONTINUOUS_RECORDING_DIR': 'recordings',
+    'TASK3_CONTEXT_PATH': 'training',
+}.items():
+    os.environ[_key] = str(_QA_RUN / _relative)
+for _relative in ('snapshots', 'clips', 'student_photos', 'backups', 'recordings', 'training'):
+    (_QA_RUN / _relative).mkdir()
+os.environ.update(QA_MODE='1', CV_PIPELINES_ENABLED='0', BACKUP_ENABLED='0',
+                  CLEANUP_ENABLED='0', TASK3_TRAINING_WORKER_ENABLED='0',
+                  TASK3_SAMPLE_COLLECTOR_ENABLED='0', TASK3_COLLECTOR_ENABLED='0')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def isolated_training_schema():
+    from app.training import dataset_repo
+    dataset_repo.init_db()
+
+
+def pytest_configure(config):
+    if not config.option.basetemp:
+        config.option.basetemp = str(_QA_RUN / 'tmp')
+
+
+def pytest_sessionfinish(session, exitstatus):
+    import json, shutil
+    size = sum(p.stat().st_size for p in _QA_RUN.rglob('*') if p.is_file())
+    (_QA_RUN/'completed.json').write_text(json.dumps({'bytes': size, 'exitstatus': int(exitstatus)}))
+    if size > 1024**3:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        print('QA quota exceeded: run artifacts > 1 GiB')
+    completed = sorted((p for p in _QA_ROOT.glob('pytest-*') if (p/'completed.json').exists()),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in completed[3:]:
+        resolved = old.resolve()
+        if resolved.is_relative_to(_QA_ROOT.resolve()) and not old.is_symlink():
+            shutil.rmtree(resolved)
+
 
 # ─── Per-module app factory ─────────────────────────────────────────────────────
 @pytest.fixture(scope="module")

@@ -91,6 +91,38 @@ def test_incomplete_never_confirms(text):
     assert not resolve_plate({'full': text, 'confidence': 1}).is_confident
 
 
+def test_runtime_gets_two_independent_samples_and_bounds_five_in_two_seconds():
+    from app.cv.plate_consensus import PlateConsensusStore, CropRecord
+    store, pool, votes = BestPlateStore(max_attempts=5), Pool(), PlateConsensusStore()
+    for i in range(5):
+        seq = 1+i*2
+        assert store.offer(7, candidate(seq, .8))
+        assert store.trigger(7, pool, lambda *_: None, 3)
+        assert not store.offer(7, candidate(seq+1, 1))  # pending crop immutable
+        pool.calls[-1][2].set_result({'full': '89F123792', 'confidence': .9,
+                                     'frame_seq': seq, 'source_epoch': 3, 'track_id': 7})
+        result = store.collect(7, pool, lambda *_: None, 3)
+        sample = store.completed_candidate(7)
+        assert sample.frame_id == seq
+        votes.ingest_offer(7, CropRecord(seq, sample.timestamp, result.text, .9, .8))
+        if i == 0:
+            assert votes.decide(7)[0] is None
+        else:
+            assert votes.decide(7)[0] == '89F123792'
+        assert not store.trigger(7, pool, lambda *_: None, 3)  # same frame never a new vote
+    assert not store.offer(7, candidate(12, .9))
+    assert len(pool.calls) == 5
+
+
+def test_crop_after_window_cannot_be_a_new_vote_and_validator_never_invents_characters():
+    store, pool = BestPlateStore(max_attempts=5), Pool()
+    store.offer(7, candidate(1, .8)); store.trigger(7, pool, lambda *_: None, 0)
+    pool.calls[-1][2].set_result({'full': '89F123792', 'confidence': .9})
+    store.collect(7, pool, lambda *_: None, 0)
+    assert not store.offer(7, candidate(30, .9))
+    assert not resolve_plate({'full': '89F12O792', 'confidence': .99}).is_confident
+
+
 def test_position_correction_keeps_letters_and_forces_only_numeric_positions():
     from app.cv.ocr import normalize_valid_plate
     assert normalize_valid_plate('89-S1 2O7.92','89-S1','2O7.92')=='89S120792'

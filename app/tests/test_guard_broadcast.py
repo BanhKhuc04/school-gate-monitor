@@ -1,6 +1,12 @@
 """Bounded gate distribution, using fake pipelines and real async tasks."""
 import asyncio
 from collections import deque
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def enable_mocked_cv_endpoints(monkeypatch):
+    monkeypatch.setenv('CV_PIPELINES_ENABLED', '1')
 
 
 def test_broadcast_two_viewers_and_isolated_gate(monkeypatch):

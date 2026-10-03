@@ -132,7 +132,8 @@ def test_completed_ocr_is_shown_even_when_plate_box_disappears(monkeypatch):
         assert not p._best_plates.pending(7)
         rows = p._recognition_log.snapshot()['items']
         assert any(row.get('plate_text') == '89F165123' for row in rows)
-        assert group['_plate_result'].is_confident  # one high-quality full-format attempt
+        assert not group['_plate_result'].is_confident  # one frame stays review-only
+        assert group['_plate_result'].sample_count == 1
     finally:
         p._ocr_pool.shutdown(wait=True)
 

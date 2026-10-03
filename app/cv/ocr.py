@@ -12,6 +12,7 @@ import easyocr
 import threading
 
 from app.config import DEVICE
+from app.cv.plate_preprocess import enhance_plate, rectify_plate
 
 # Các tham số OCR dùng chung cho mọi lần readtext().
 # allowlist: chỉ nhận diện ký tự biển số VN (số + chữ cái + gạch ngang)
@@ -44,7 +45,7 @@ def _preprocess_plate_crop(crop: np.ndarray) -> np.ndarray:
     """
     try:
         h, w = crop.shape[:2]
-        scale = min(3.0, max(2.0, _OCR_TARGET_WIDTH / max(1, w)))
+        scale = min(3.0, max(2.0, _OCR_TARGET_WIDTH / max(1, w)), 2048 / max(h, w))
         crop = cv2.resize(crop, (max(1, int(w * scale)), max(1, int(h * scale))),
                            interpolation=cv2.INTER_CUBIC)
 
@@ -53,12 +54,18 @@ def _preprocess_plate_crop(crop: np.ndarray) -> np.ndarray:
             gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
-        enhanced = cv2.addWeighted(enhanced, 1.2, cv2.GaussianBlur(enhanced, (3, 3), 0), -.2, 0)
         return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
     except Exception:
         # Ảnh đầu vào bất thường (dtype lạ, corrupted...) — bỏ qua tiền xử lý,
         # để nguyên crop gốc cho EasyOCR (vốn đã tự catch lỗi riêng của nó).
         return crop
+
+
+def plate_variants(crop: np.ndarray):
+    """Two correlated variants at most; never synthesize missing characters."""
+    yield 'original', _preprocess_plate_crop(crop)
+    rectified = rectify_plate(crop)
+    yield 'perspective_contrast' if rectified is not crop else 'bilateral_contrast', enhance_plate(rectified)
 
 
 def is_two_line_plate(crop: np.ndarray) -> bool:
@@ -154,47 +161,22 @@ def normalize_plate(text: str) -> str:
     # Viết hoa
     text = text.upper()
 
+    # Seri xe máy điện "MĐ": Đ phải thành D (OCR không có Đ, đọc ra D), nếu
+    # bị xóa thì biển đăng ký sẽ không bao giờ khớp biển camera đọc được.
+    text = text.replace('Đ', 'D')
+
     # Chỉ giữ A-Z và 0-9
     text = re.sub(r'[^A-Z0-9]', '', text)
 
     return text
 
 
-def normalize_valid_plate(full: str = "", top_line: str = "", bottom_line: str = "") -> str:
-    """Chuẩn hóa biển số từ 1 hoặc 2 dòng OCR.
-
-    Logic: nếu có 2 dòng → ghép (top + bottom); nếu chỉ 1 dòng → dùng trực
-    tiếp. Kết quả được normalize_plate (chỉ giữ A-Z0-9) và validate theo
-    định dạng biển VN (`_PLATE_FORMAT_RE`). Trả chuỗi hợp lệ hoặc "" nếu
-    không khớp format.
-
-    Args:
-        full: Chuỗi OCR đã ghép sẵn (nếu engine trả 1 dòng đầy đủ).
-        top_line: Dòng trên (nếu biển 2 dòng).
-        bottom_line: Dòng dưới (nếu biển 2 dòng).
-
-    Returns:
-        Chuỗi biển đã chuẩn hóa (A-Z0-9), hoặc "" nếu rỗng / sai format.
-    """
-    # Ưu tiên `full` nếu có, fallback ghép 2 dòng
-    raw = (full or "").strip()
-    if not raw and (top_line or bottom_line):
-        raw = f"{top_line or ''} {bottom_line or ''}".strip()
-    if not raw:
-        return ""
-    normalized = normalize_plate(raw)
-    if not normalized:
-        return ""
-    if not _PLATE_FORMAT_RE.match(normalized):
-        return ""
-    return normalized
-
-
 # Biển số VN sau khi normalize_plate (đã bỏ khoảng trắng/gạch ngang, chỉ còn A-Z0-9):
-# 2 số tỉnh + series (chữ, chữ-số hoặc hai chữ) + 4–5 số.
+# 2 số tỉnh + series (chữ, chữ-số, hai chữ, hoặc hai chữ-số như "MĐ1" của
+# xe máy điện) + 4–5 số.
 # Live best-crop recognition requires a complete supported format before DB
 # lookup. Uncommon formats remain unreadable/review rather than guessed.
-_PLATE_FORMAT_RE = re.compile(r'^\d{2}(?:[A-Z]\d?|[A-Z]{2})\d{4,5}$')
+_PLATE_FORMAT_RE = re.compile(r'^\d{2}(?:[A-Z]\d?|[A-Z]{2}\d?)\d{4,5}$')
 
 
 def normalize_valid_plate(text, top='', bottom=''):
@@ -203,7 +185,7 @@ def normalize_valid_plate(text, top='', bottom=''):
     top, bottom = normalize_plate(top), normalize_plate(bottom)
     to_digit = {'O': '0', 'I': '1', 'L': '1', 'Z': '2', 'S': '5', 'B': '8', 'G': '6'}
     to_letter = {'0': 'O', '1': 'I', '2': 'Z', '5': 'S', '8': 'B', '6': 'G'}
-    patterns = ['DD' + series + 'D'*n for series in ('A', 'AD', 'AA') for n in (4, 5)]
+    patterns = ['DD' + series + 'D'*n for series in ('A', 'AD', 'AA', 'AAD') for n in (4, 5)]
     if top and bottom:
         text = top + bottom
         patterns = [p for p in patterns if len(p)-len(bottom) == len(top) and len(bottom) in (4, 5)]
@@ -308,10 +290,26 @@ def read_plate(crop: np.ndarray) -> str:
 
 
 def read_plate_detailed(crop: np.ndarray) -> dict:
+    import os
+    if os.environ.get('PLATE_OCR_ENGINE', 'easyocr') == 'cct':
+        from app.cv.fast_plate_ocr import configured_reader
+        try:
+            return configured_reader().read(crop)
+        except Exception as exc:
+            return {'full': '', 'confidence': 0.0, 'needs_review': True,
+                    'engine': 'FastPlateOCR', 'error': f'ocr_engine_error:{type(exc).__name__}'}
+    from app.cv.inference_worker import model_owner
+    return model_owner().run('ocr', _read_easyocr_locked, crop)
+
+
+def _read_easyocr_locked(crop):
     # Both cameras share EasyOCR's reader; serialize engine access, not capture.
     with _reader_lock:
         try:
-            return _read_plate_detailed(crop)
+            result = _read_plate_detailed(crop)
+            result.update(engine='EasyOCR', raw_text=result.get('full', ''),
+                          normalized_text=normalize_plate(result.get('full', '')), char_confidences=None)
+            return result
         except Exception as exc:
             return {'full': '', 'top_line': '', 'bottom_line': '', 'confidence': 0.0,
                     'error': f'ocr_engine_error:{type(exc).__name__}'}
@@ -336,19 +334,41 @@ def _read_plate_detailed(crop: np.ndarray) -> dict:
     if crop is None or crop.size == 0:
         return {'full': '', 'top_line': '', 'bottom_line': '', 'confidence': 0.0}
 
-    reader = _get_reader()
     h, w = crop.shape[:2]
 
     if h < 20 or w < 40:
         return {'full': '', 'top_line': '', 'bottom_line': '', 'confidence': 0.0}
 
+    reader = _get_reader()
+    attempts = []
+    for name, prepared in plate_variants(crop):
+        result = _read_prepared_plate(reader, prepared)
+        if result.get('error'):
+            return result  # An engine failure is technical, not an unreadable plate.
+        attempts.append((name, result))
+        if len(attempts) == 1 and name == 'original' and normalize_valid_plate(result['full']) and result['confidence'] >= .7:
+            break
+    valid = [(name, result) for name, result in attempts if normalize_valid_plate(result['full'])]
+    name, result = max(valid or attempts, key=lambda item: item[1]['confidence'])
+    result = dict(result, preprocessing=name, preprocessing_attempts=len(attempts))
+    texts = {normalize_valid_plate(item['full']) for _, item in valid}
+    if len(texts) > 1:
+        # Variants are correlated observations of one crop, never extra votes.
+        result.update(confidence=0.0, needs_review=True, candidate_texts=sorted(texts))
+    elif len(attempts) > 1 and len(valid) < 2:
+        # A single newly confident enhancement is insufficient to auto-accept.
+        result.update(confidence=0.0, needs_review=True)
+    return result
+
+
+def _read_prepared_plate(reader, crop: np.ndarray) -> dict:
+    """Read a prepared image without recursively preprocessing/retrying it."""
     # Biển 2 dòng (gần vuông): cắt riêng vùng trên/dưới rồi OCR RIÊNG từng
     # vùng — tránh EasyOCR gộp/lẫn thứ tự ký tự 2 dòng thành 1 chuỗi sai khi
     # biển mờ/nghiêng (lúc đó việc tự tách theo y-position của box detect bên
-    # dưới không đáng tin). Đo tỉ lệ trên crop GỐC trước khi upscale.
+    # dưới không đáng tin). Geometry may change after perspective correction.
     two_line = is_two_line_plate(crop)
-    crop = _preprocess_plate_crop(crop)
-    h, w = crop.shape[:2]  # kích thước có thể đổi sau khi phóng to — dùng để tách dòng trên/dưới
+    h, w = crop.shape[:2]
 
     if two_line:
         top_region, bottom_region = split_two_line_plate(crop)

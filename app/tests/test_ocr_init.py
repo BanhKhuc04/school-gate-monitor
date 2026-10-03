@@ -92,13 +92,15 @@ class TestOcrErrorHandling:
     def test_read_plate_detailed_none_returns_empty(self):
         """read_plate_detailed(None) must return empty dict, not raise."""
         result = read_plate_detailed(None)
-        assert result == {'full': '', 'top_line': '', 'bottom_line': '', 'confidence': 0.0}
+        assert result['full'] == '' and result['confidence'] == 0.0
+        assert result['engine'] == 'EasyOCR' and result['char_confidences'] is None
 
     def test_read_plate_detailed_too_small_returns_empty(self):
         """read_plate_detailed(crop too small) must return empty dict."""
         small = np.zeros((10, 50, 3), dtype=np.uint8)  # h=10 < 20, w=50 >= 40
         result = read_plate_detailed(small)
-        assert result == {'full': '', 'top_line': '', 'bottom_line': '', 'confidence': 0.0}
+        assert result['full'] == '' and result['confidence'] == 0.0
+        assert result['engine'] == 'EasyOCR' and result['char_confidences'] is None
 
     def test_read_plate_corrupted_image_returns_empty(self):
         """read_plate(corrupted image) must return empty string, not crash pipeline."""

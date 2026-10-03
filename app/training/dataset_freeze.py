@@ -28,7 +28,7 @@ def freeze(dataset_id: str, *, output_dir: str | None = None,
 
     if output_dir is None:
         from app.config import BASE_DIR
-        output_dir = str(BASE_DIR / "data" / "training" / "datasets" / dataset_id)
+        output_dir = str(Path(os.environ.get('TASK3_CONTEXT_PATH') or BASE_DIR / 'data' / 'training') / 'datasets' / dataset_id)
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 

@@ -1,0 +1,165 @@
+{
+  "profile": "one local video, CPU, three real detectors + pose + async OCR + JPEG; no viewers",
+  "video": "C:\\Users\\khucv\\Downloads\\tranning\\1790578609446_6349341119162671419_6349341119162671419.mp4",
+  "runs": [
+    {
+      "logging": false,
+      "seconds": 11.555003500005114,
+      "fps": 3.4617038411093772,
+      "frames": 40,
+      "ocr": {
+        "errors": 0,
+        "empty": 1,
+        "submitted": 2,
+        "completed": 2,
+        "stale_dropped": 0,
+        "sync_fallbacks": 0,
+        "duplicate_dropped": 0
+      },
+      "diagnostic_ms": 0.5694999490515329,
+      "diagnostic_share_percent": 0.004928600402858215,
+      "buffer_rows": 0,
+      "last_reasons": []
+    },
+    {
+      "logging": true,
+      "seconds": 12.876322999996773,
+      "fps": 3.106476903383833,
+      "frames": 40,
+      "ocr": {
+        "errors": 0,
+        "empty": 1,
+        "submitted": 2,
+        "completed": 2,
+        "stale_dropped": 0,
+        "sync_fallbacks": 0,
+        "duplicate_dropped": 0
+      },
+      "diagnostic_ms": 4.9355999726685695,
+      "diagnostic_share_percent": 0.038330818298591966,
+      "buffer_rows": 87,
+      "last_reasons": [
+        "bicycle_exempt",
+        "camera_connected",
+        "head_not_observed",
+        "helmet_association_ambiguous",
+        "helmet_observed",
+        "no_helmet_observed",
+        "no_objects",
+        "objects_detected",
+        "ocr_empty",
+        "ocr_pending",
+        "plate_not_detected",
+        "vehicle_not_associated"
+      ]
+    },
+    {
+      "logging": false,
+      "seconds": 11.996348699998634,
+      "fps": 3.3343478920385627,
+      "frames": 40,
+      "ocr": {
+        "errors": 0,
+        "empty": 1,
+        "submitted": 2,
+        "completed": 2,
+        "stale_dropped": 0,
+        "sync_fallbacks": 0,
+        "duplicate_dropped": 0
+      },
+      "diagnostic_ms": 0.8059999672695994,
+      "diagnostic_share_percent": 0.006718710729621349,
+      "buffer_rows": 0,
+      "last_reasons": []
+    },
+    {
+      "logging": true,
+      "seconds": 12.539132800004154,
+      "fps": 3.190013267902127,
+      "frames": 40,
+      "ocr": {
+        "errors": 0,
+        "empty": 1,
+        "submitted": 2,
+        "completed": 2,
+        "stale_dropped": 0,
+        "sync_fallbacks": 0,
+        "duplicate_dropped": 0
+      },
+      "diagnostic_ms": 4.95750003028661,
+      "diagnostic_share_percent": 0.03953622718059871,
+      "buffer_rows": 85,
+      "last_reasons": [
+        "bicycle_exempt",
+        "camera_connected",
+        "head_not_observed",
+        "helmet_association_ambiguous",
+        "helmet_observed",
+        "no_helmet_observed",
+        "no_objects",
+        "objects_detected",
+        "ocr_empty",
+        "ocr_pending",
+        "plate_not_detected",
+        "vehicle_not_associated"
+      ]
+    },
+    {
+      "logging": false,
+      "seconds": 11.364635700003419,
+      "fps": 3.5196904727872593,
+      "frames": 40,
+      "ocr": {
+        "errors": 0,
+        "empty": 1,
+        "submitted": 2,
+        "completed": 2,
+        "stale_dropped": 0,
+        "sync_fallbacks": 0,
+        "duplicate_dropped": 0
+      },
+      "diagnostic_ms": 0.48000002425396815,
+      "diagnostic_share_percent": 0.004223628780760863,
+      "buffer_rows": 0,
+      "last_reasons": []
+    },
+    {
+      "logging": true,
+      "seconds": 11.064093400003912,
+      "fps": 3.6152984753351642,
+      "frames": 40,
+      "ocr": {
+        "errors": 0,
+        "empty": 1,
+        "submitted": 2,
+        "completed": 2,
+        "stale_dropped": 0,
+        "sync_fallbacks": 0,
+        "duplicate_dropped": 0
+      },
+      "diagnostic_ms": 4.874600017501507,
+      "diagnostic_share_percent": 0.04405783502785491,
+      "buffer_rows": 85,
+      "last_reasons": [
+        "bicycle_exempt",
+        "camera_connected",
+        "head_not_observed",
+        "helmet_association_ambiguous",
+        "helmet_observed",
+        "no_helmet_observed",
+        "no_objects",
+        "objects_detected",
+        "ocr_empty",
+        "ocr_pending",
+        "plate_not_detected",
+        "vehicle_not_associated"
+      ]
+    }
+  ],
+  "video_sha256": "8b414af3f332ae2abac54b4ac4807d1b999f2adc7a5866fa9fd5d904aba20099",
+  "helmet_model_sha256": "c8eb324e365cf4faeab491d9cc301535ec745171b55e8b1acadea62be5101a9d",
+  "median_off_sec": 11.555003500005114,
+  "median_on_sec": 12.539132800004154,
+  "median_overhead_percent": 8.516910444887404,
+  "limitations": "Does not certify two-camera FPS, LAN latency, UI overhead or recognition precision."
+}

@@ -57,7 +57,7 @@ def normalize_plate(plate: str) -> str | None:
     if not plate:
         return None
     import re
-    plate = plate.upper()
+    plate = plate.upper().replace('Đ', 'D')
     plate = re.sub(r'[^A-Z0-9]', '', plate)
     return plate if len(plate) >= 4 else None
 

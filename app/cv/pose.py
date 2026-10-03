@@ -23,13 +23,9 @@ import numpy as np
 if TYPE_CHECKING:
     from ultralytics import YOLO
 
-# Model instance theo từng thread (thread-local), KHÔNG dùng 1 instance dùng
-# chung nữa — pose detection giờ chạy song song cho nhiều person trong cùng 1
-# frame (xem VideoPipeline._run_posture_detection), và ultralytics YOLO không
-# đảm bảo thread-safe khi nhiều thread gọi CÙNG 1 instance đồng thời (internal
-# predictor state có thể bị race). Mỗi worker thread tự load model riêng (nhẹ,
-# ~6MB, chỉ load 1 lần/thread) để chạy đồng thời an toàn.
-_pose_local = threading.local()
+# One pose instance; all model access runs on the shared owner thread.
+from app.cv.inference_worker import model_owner
+_pose_model = None
 
 # Keypoint indices (COCO 17-keypoint format used by YOLOv8-pose)
 KP_LEFT_HIP, KP_RIGHT_HIP = 11, 12
@@ -39,18 +35,15 @@ KP_LEFT_ANKLE, KP_RIGHT_ANKLE = 15, 16
 
 
 def _get_pose_model() -> "YOLO":
-    """Get or initialize the YOLO pose model for the CURRENT thread."""
-    model = getattr(_pose_local, "model", None)
-    if model is None:
-        from ultralytics import YOLO
-        from app.config import DEVICE
-        print(f"[Pose] Loading yolov8n-pose.pt on thread {threading.current_thread().name} (device={DEVICE})...")
-        # Download + cache automatically (first run ~6MB)
-        model = YOLO("yolov8n-pose.pt")
-        model.to(DEVICE)
-        _pose_local.model = model
-        print("[Pose] Pose model loaded")
-    return model
+    def load():
+        global _pose_model
+        if _pose_model is None:
+            from ultralytics import YOLO
+            from app.config import DEVICE, POSE_MODEL_PATH
+            _pose_model = YOLO(POSE_MODEL_PATH)
+            _pose_model.to(DEVICE)
+        return _pose_model
+    return model_owner().run('pose', load)
 
 
 def angle_between_vectors(v1: Tuple[float, float], v2: Tuple[float, float]) -> float:
@@ -388,12 +381,7 @@ class PostureDetector:
         keypoints = detector.detect_pose(person_crop)  # returns list of keypoints dicts
         posture = classify_posture(keypoints)
 
-    Một instance CÓ THỂ được dùng đồng thời từ nhiều thread (pipeline submit
-    detector.detect_pose() cho nhiều person song song qua ThreadPoolExecutor).
-    Vì vậy KHÔNG cache model vào self ở đây — self là state DÙNG CHUNG giữa các
-    thread, cache vào đó sẽ làm thread thứ 2 trở đi vô tình dùng lại model của
-    thread đầu tiên thay vì model thread-local của chính nó. `model` luôn gọi
-    thẳng `_get_pose_model()`, nơi cache thật sự nằm ở threading.local().
+    Model dùng chung 1 instance, mọi lượt chạy đi qua luồng model-owner.
     """
 
     @property
@@ -409,38 +397,42 @@ class PostureDetector:
             [{x, y, confidence}, ...]  (17 items)
         Returns empty list if no person/keypoints detected.
         """
-        if person_crop is None or (hasattr(person_crop, 'size') and person_crop.size == 0):
-            return []
+        return self.detect_pose_batch([person_crop])[0]
+
+    def detect_pose_batch(self, person_crops: List[np.ndarray]) -> List[List[dict]]:
+        """One model call for all crops; result i belongs to crop i.
+
+        Batching N riders costs ~1.4x one rider instead of Nx (measured on
+        RTX 3050: 3 crops 74ms -> 43ms, 5 crops 127ms -> 61ms).
+        """
+        out: List[List[dict]] = [[] for _ in person_crops]
+        valid = [i for i, c in enumerate(person_crops)
+                 if c is not None and getattr(c, 'size', 0) > 0]
+        if not valid:
+            return out
+        crops = [person_crops[i] for i in valid]
         try:
             from app.config import POSE_CONF_THRESHOLD, USE_FP16
-            results = self.model(person_crop, verbose=False, conf=POSE_CONF_THRESHOLD, half=USE_FP16)
+            results = model_owner().run(getattr(self, 'camera_id', 'pose'), lambda: self.model(
+                crops, verbose=False, conf=POSE_CONF_THRESHOLD, half=USE_FP16))
         except Exception as e:
             print(f"[Pose] Error during pose detection: {e}")
-            return []
+            return out
+        for index, result in zip(valid, results or []):
+            out[index] = _primary_keypoints(result)
+        return out
 
-        if not results or not results[0].keypoints:
-            return []
 
-        kpts = results[0].keypoints
-        if kpts.data is None or len(kpts.data) == 0:
-            return []
-        if len(kpts.data[0]) == 0:
-            return []
-
-        # Get first person (highest confidence)
-        # kpts.data shape: (num_persons, 17, 3) → x, y, conf
-        person_kpts = kpts.data[0].cpu().numpy()  # (17, 3)
-
-        # kpts.conf can be None or have wrong shape — fall back to person_kpts[:, 2]
-        conf_array = person_kpts[:, 2] if kpts.conf is None else kpts.conf[0].cpu().numpy()
-
-        result = []
-        for i in range(17):
-            x, y = float(person_kpts[i, 0]), float(person_kpts[i, 1])
-            conf = float(conf_array[i]) if i < len(conf_array) else 0.0
-            result.append({"x": x, "y": y, "confidence": conf})
-
-        return result
+def _primary_keypoints(result) -> List[dict]:
+    kpts = getattr(result, 'keypoints', None)
+    if not kpts or kpts.data is None or len(kpts.data) == 0 or len(kpts.data[0]) == 0:
+        return []
+    # kpts.data shape: (num_persons, 17, 3); first person is highest confidence.
+    person_kpts = kpts.data[0].cpu().numpy()
+    conf_array = person_kpts[:, 2] if kpts.conf is None else kpts.conf[0].cpu().numpy()
+    return [{"x": float(person_kpts[i, 0]), "y": float(person_kpts[i, 1]),
+             "confidence": float(conf_array[i]) if i < len(conf_array) else 0.0}
+            for i in range(17)]
 
 
 def detect_pose_keypoints(person_crop: np.ndarray) -> List[dict]:

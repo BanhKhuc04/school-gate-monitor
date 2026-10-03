@@ -18,6 +18,22 @@ from app.api.audio_lease import router as audio_router, owns_audio
 router.include_router(audio_router, prefix='')
 
 
+@router.get('/debug_overlay')
+def debug_overlay(gate: str = 'main', user: dict = Depends(require_role('admin', 'management'))):
+    pipeline = _recognition_pipeline(gate)
+    return {'enabled': getattr(pipeline, '_debug_overlay_enabled', True), 'scope': 'camera'}
+
+
+@router.post('/debug_overlay')
+def set_debug_overlay(enabled: bool, gate: str = 'main',
+                      user: dict = Depends(require_role('admin', 'management'))):
+    pipeline = _recognition_pipeline(gate)
+    if pipeline is None:
+        raise HTTPException(409, 'camera chưa chạy')
+    pipeline._debug_overlay_enabled = enabled
+    return {'enabled': enabled, 'scope': 'camera'}
+
+
 @router.get('/audio/config')
 def audio_config(current_user: dict = Depends(require_role('admin', 'security', 'management'))):
     from app.config import TTS_SPEECH_RATE, TTS_VOLUME, DEBUG_ALERT
@@ -133,6 +149,8 @@ async def _pump_gate_alerts(gate):
     """One queue consumer per gate; each viewer gets its own bounded copy."""
     from app.cv.pipeline import get_pipeline
     try:
+        if os.environ.get('CV_PIPELINES_ENABLED', '1') == '0':
+            raise RuntimeError('CV pipelines disabled')
         pipeline = get_pipeline(gate_id=gate)
         while _gate_clients.get(gate):
             alert = pipeline.get_alert()
@@ -199,6 +217,9 @@ async def video_feed(
 
     import cv2
     from app.cv.pipeline import get_pipeline
+
+    if os.environ.get('CV_PIPELINES_ENABLED', '1') == '0':
+        raise HTTPException(503, 'Camera runtime đang tắt')
 
     return StreamingResponse(
         mjpeg_frames(get_pipeline(gate_id=gate)),

@@ -85,12 +85,23 @@ def _safe_extract(zf: zipfile.ZipFile, dest: Path, *,
     """
     dest.mkdir(parents=True, exist_ok=True)
     real_dest = dest.resolve()
-    count = 0
+    # R1 — pre-scan để preflight disk space (total uncompressed + slack overhead).
+    # Đếm count và tính tổng bytes trước khi ghi bất kỳ file nào ra đĩa.
     total = 0
+    count = 0
     for info in zf.infolist():
         count += 1
-        if count > max_files:
-            raise ImportBlockedError(f"ZIP chứa quá nhiều file (>{max_files})")
+        total += info.file_size
+    if count > max_files:
+        raise ImportBlockedError(f"ZIP chứa quá nhiều file (>{max_files})")
+    if total > max_bytes:
+        raise ImportBlockedError(f"ZIP uncompressed quá lớn (> {max_bytes} bytes)")
+    from app.storage_budget import require_space
+    try:
+        require_space(real_dest, expected_bytes=total + 4 * 1024 * 1024)
+    except ValueError as exc:
+        raise ImportBlockedError(f"không đủ dung lượng để giải nén: {exc}") from exc
+    for info in zf.infolist():
         # Symlink: chỉ khi mode bits == 0o120000 (S_IFLNK). create_system=3 là
         # Unix (file, dir, symlink đều có thể đó). KHÔNG dùng create_system.
         unix_mode = (info.external_attr >> 16) & 0xFFFF
@@ -112,9 +123,6 @@ def _safe_extract(zf: zipfile.ZipFile, dest: Path, *,
             target.relative_to(real_dest)
         except ValueError:
             raise ImportBlockedError(f"ZIP path traversal: {name!r}")
-        total += info.file_size
-        if total > max_bytes:
-            raise ImportBlockedError(f"ZIP uncompressed quá lớn (> {max_bytes} bytes)")
         if info.is_dir():
             target.mkdir(parents=True, exist_ok=True)
             continue

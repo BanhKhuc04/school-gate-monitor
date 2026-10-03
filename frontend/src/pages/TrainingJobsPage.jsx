@@ -9,6 +9,7 @@ export default function TrainingJobsPage() {
   const [jobs, setJobs] = useState([]);
   const [datasets, setDatasets] = useState([]);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ dataset_id: '', target: 'plate_ocr' });
 
@@ -25,8 +26,8 @@ export default function TrainingJobsPage() {
   const refreshDatasets = useCallback(async () => {
     try {
       const items = await listDatasets();
-      setDatasets(items.filter(d => d.freeze_state === 'frozen'));
-    } catch (e) { /* ignored */ }
+      setDatasets(items.filter(d => d.freeze_state === 'frozen' && d.engine === 'plate_ocr'));
+    } catch (e) { setError(e.response?.data?.detail || 'Không tải được bộ dữ liệu đóng băng.'); }
   }, []);
 
   useEffect(() => { refresh(); refreshDatasets(); }, [refresh, refreshDatasets]);
@@ -35,14 +36,15 @@ export default function TrainingJobsPage() {
     e.preventDefault();
     if (!form.dataset_id) return;
     setBusy(true);
+    setNotice('');
     try {
       const result = await createJob({
         dataset_id: form.dataset_id,
         target: form.target,
-        config: { epochs: 1 },
+        config: { operation: 'evaluate_baseline' },
       });
-      setError(`Đã tạo job ${result.job_id} — chờ resource.`);
       await refresh();
+      setNotice(`Đã tạo đánh giá ${result.job_id} — chờ worker xử lý.`);
     } catch (e) {
       setError(e.response?.data?.detail || 'Tạo job thất bại.');
     } finally {
@@ -77,14 +79,15 @@ export default function TrainingJobsPage() {
   return (
     <section aria-label="Training jobs" className="p-6 space-y-4">
       <header>
-        <h1 className="text-xl font-bold">Training Jobs (Task 3.5)</h1>
+        <h1 className="text-xl font-bold">Đánh giá baseline & Lịch sử job</h1>
         <p className="text-xs opacity-70">
-          Một job GPU một thời điểm. Job ở trạng thái waiting_resource khi GPU bận —
-          không tự dừng process Task 1.
+          Đánh giá model hiện có trên bộ dữ liệu đã đóng băng. Huấn luyện nặng thực hiện trên Kaggle;
+          đánh giá baseline không tạo weights mới.
         </p>
       </header>
 
       {error && <div role="alert" className="rounded bg-red-100 text-red-900 p-3 text-sm">{error}</div>}
+      {notice && <p role="status" className="text-sm text-primary">{notice}</p>}
 
       <form onSubmit={onSubmit} className="flex flex-wrap items-center gap-2 text-sm"
         data-testid="new-job-form">
@@ -100,18 +103,18 @@ export default function TrainingJobsPage() {
           </select>
         </label>
         <label className="flex items-center gap-2">
-          Target:
+          Tác vụ:
           <select value={form.target} onChange={e => setForm({...form, target: e.target.value})}
             className="rounded bg-primary-container text-on-primary-container px-2 py-1">
             <option value="plate_ocr">plate_ocr</option>
-            <option value="plate_detector">plate_detector</option>
-            <option value="helmet">helmet</option>
+            <option value="plate_detector" disabled>Plate Detector — chưa hỗ trợ local</option>
+            <option value="helmet" disabled>Helmet — chưa hỗ trợ local</option>
           </select>
         </label>
         <button type="submit" disabled={busy || !form.dataset_id}
           className="rounded bg-emerald-600 text-white px-3 py-1 disabled:opacity-50"
           data-testid="submit-job">
-          Tạo job
+          Đánh giá baseline
         </button>
       </form>
 
@@ -121,6 +124,7 @@ export default function TrainingJobsPage() {
             <th className="text-left py-1">Job ID</th>
             <th className="text-left py-1">Dataset</th>
             <th className="text-left py-1">Target</th>
+            <th className="text-left py-1">Loại công việc</th>
             <th className="text-left py-1">State</th>
             <th className="text-left py-1">Created</th>
             <th className="text-left py-1">Finished</th>
@@ -133,6 +137,7 @@ export default function TrainingJobsPage() {
               <td className="py-1 font-mono">{j.id.slice(-12)}</td>
               <td className="py-1 font-mono">{j.dataset_id.slice(-12)}</td>
               <td className="py-1">{j.target}</td>
+              <td className="py-1">{j.operation === 'train' ? 'Huấn luyện' : 'Đánh giá baseline'}</td>
               <td className="py-1">
                 <span className={`text-xs rounded px-2 py-0.5 ${STATE_COLORS[j.state] || 'bg-slate-100'}`}>
                   {j.state}
@@ -145,14 +150,14 @@ export default function TrainingJobsPage() {
                   <button type="button" onClick={() => onCancel(j.id)}
                     className="rounded bg-rose-700 text-white px-2 py-0.5"
                     data-testid={`cancel-${j.id.slice(-12)}`}>
-                    Cancel
+                    Hủy
                   </button>
                 )}
               </td>
             </tr>
           ))}
           {!jobs.length && (
-            <tr><td colSpan={7} className="py-2 text-center opacity-70">
+            <tr><td colSpan={8} className="py-2 text-center opacity-70">
               Chưa có job nào.
             </td></tr>
           )}

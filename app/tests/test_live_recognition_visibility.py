@@ -53,9 +53,9 @@ def test_plate_only_collects_finished_ocr_when_crop_does_not_improve():
     p._ocr_pool = CompletedPool()
     p._frame_seq = 1
     frame = np.random.default_rng(5).integers(30, 225, (180, 240, 3), dtype=np.uint8)
-    plate = Detection('plate', .99, (20, 40, 170, 130))
+    plate = Detection('plate', .99, (20, 40, 170, 130), track_id=7)
     candidate = make_candidate(frame, plate.bbox, plate.confidence, 1, time.time())
-    track = -(int(95//32)*10000+int(85//32)+1)
+    track = 7
     p._best_plates.offer(track, candidate)
     p._best_plates.trigger(track, p._ocr_pool, None, 0)
     p._frame_seq = 2

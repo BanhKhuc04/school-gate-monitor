@@ -89,10 +89,11 @@ async def lifespan(app: FastAPI):
         # Pipelines - requires CV libs
         try:
             from app.cv.pipeline import start_all_pipelines, stop_all_pipelines
-            start_all_pipelines()
-            _stop_pipelines = stop_all_pipelines
-            _pipeline_started = True
-            print("[App] Pipeline threads started.")
+            if os.environ.get('CV_PIPELINES_ENABLED', '1') == '1':
+                start_all_pipelines()
+                _stop_pipelines = stop_all_pipelines
+                _pipeline_started = True
+                print("[App] Pipeline threads started.")
         except ImportError as e:
             print(f"[App] CV libs not available, skipping pipelines: {e}")
 

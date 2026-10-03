@@ -19,6 +19,11 @@ from starlette.websockets import WebSocketDisconnect
 ROLE_PASSWORD = "test123"
 
 
+@pytest.fixture(autouse=True)
+def enable_mocked_cv_endpoints(monkeypatch):
+    monkeypatch.setenv('CV_PIPELINES_ENABLED', '1')
+
+
 def _login(client: TestClient, username: str) -> str:
     resp = client.post("/api/auth/login", json={"username": username, "password": ROLE_PASSWORD})
     assert resp.status_code == 200, f"Login failed for {username}: {resp.json()}"

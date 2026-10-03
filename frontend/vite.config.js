@@ -23,6 +23,7 @@ export default defineConfig({
       },
       // Guard APIs also use the frontend origin; keep /guard itself for React Router.
       '/guard/audio': { target: 'http://localhost:8000', changeOrigin: true },
+      '/guard/debug_overlay': { target: 'http://localhost:8000', changeOrigin: true },
       '/guard/recognition_log': { target: 'http://localhost:8000', changeOrigin: true },
       '/guard/recognition_cards': { target: 'http://localhost:8000', changeOrigin: true },
       '/guard/recognition_image': { target: 'http://localhost:8000', changeOrigin: true },
