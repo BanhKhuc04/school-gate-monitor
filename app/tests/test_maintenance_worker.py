@@ -20,6 +20,28 @@ import threading
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def enable_cleanup(monkeypatch):
+    monkeypatch.setattr('app.background.CLEANUP_ENABLED', True)
+
+
+def test_restart_does_not_copy_media_again(client, tmp_path, monkeypatch):
+    import app.background as bg
+    from datetime import datetime, timezone
+    monkeypatch.setattr(bg, 'BACKUP_ENABLED', True)
+    monkeypatch.setattr(bg, 'BACKUP_INTERVAL_HOURS', 24)
+    monkeypatch.setattr(bg, 'list_backup_sets', lambda _: [
+        {'mtime_iso': datetime.now(timezone.utc).isoformat()}])
+    calls = []
+    worker = bg.MaintenanceWorker()
+    monkeypatch.setattr(worker, '_backup_job', lambda: calls.append('backup'))
+    monkeypatch.setattr(worker, '_cleanup_job', lambda: None)
+    monkeypatch.setattr(worker, '_sleep_interruptible', lambda _: setattr(worker, '_running', False))
+    worker._running = True
+    worker._run_loop()
+    assert calls == []
+
+
 # ─── Test hàm DB (log/list) ────────────────────────────────────────────────────
 
 def test_log_maintenance_run_writes_success_row(client):

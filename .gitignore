@@ -22,17 +22,11 @@ data/app.db
 # Snapshots
 data/snapshots/
 
-# Models — yolov8n*.pt/.onnx (COCO/pose pretrained) tự tải lại khi chạy, không
-# commit. helmet_best.pt/plate_best.pt là model ĐÃ FINE-TUNE riêng cho dự án
-# (plate_best.pt fine-tune trên 8259 ảnh biển số VN thật, xem commit d631432) —
-# không có bản thay thế công khai tương đương, PHẢI commit để máy khác chạy
-# đúng (không phải tải lại từ link HuggingFace gốc trong README cũ, đã lỗi thời).
+# Models
 models/*.pt
 models/*.pt.bak
 models/*.onnx
 models/*.onnx.data
-!models/helmet_best.pt
-!models/plate_best.pt
 yolov8n.pt
 yolov8n-pose.pt
 yolov8n.onnx
@@ -57,7 +51,6 @@ graphify-out/
 # IDE
 .vscode/
 .idea/
-.serena/
 
 # Embedded tools (external)
 tools/OmniRoute/
@@ -65,3 +58,28 @@ tools/OmniRoute/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime/private data and generated QA copies
+data/backups/
+data/clips/
+data/student_photos/
+data/recordings/
+data/training/
+data/*.db*
+tests_v*/
+tests_full_reg/
+tests_run*/
+tests_regression/
+qa_logs/
+.qa/
+.pytest_cache/
+tasks/**/pytest*/
+tasks/**/qa/
+tasks/**/codex-*-recheck-*/
+frontend/test-results/
+frontend/playwright-report/
+logs_*.log
+logs_*.err
+logs_*.out
+yolo11*.pt
+models/cct/*.onnx

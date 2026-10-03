@@ -24,7 +24,7 @@ from app.config import (
 )
 from app.db import (
     clear_violation_snapshot_paths, log_maintenance_run,
-    backup_database, list_backup_files,
+    backup_database, list_backup_files, list_backup_sets,
 )
 
 
@@ -56,6 +56,8 @@ class MaintenanceWorker:
         # Job lock: blocking=False để khi lock bận thì lần wake-up sau skip,
         # không xếp hàng. Đây là CỐ TÝNH khác với hành vi queue mặc định của Lock.
         self._job_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._next_backup_at = 0.0
 
     # ─── Lifecycle (giống VideoPipeline.start/stop) ─────────────────────────────
 
@@ -64,6 +66,7 @@ class MaintenanceWorker:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run_loop, daemon=True, name="MaintenanceWorker",
         )
@@ -80,6 +83,7 @@ class MaintenanceWorker:
         if not self._running:
             return
         self._running = False
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=timeout)
         self._thread = None
@@ -102,7 +106,11 @@ class MaintenanceWorker:
           - Recording cleanup (Bước 7) chạy MỖI `recording_every_n_loops` lần lặp,
             tương tự backup (tách retention policy vì recording không có DB record).
         """
-        backup_every_n_loops = max(1, -(-BACKUP_INTERVAL_HOURS // max(CLEANUP_INTERVAL_HOURS, 1)))
+        # Complete markers persist the schedule across restart/reload.
+        sets = list_backup_sets(BACKUP_DIR)
+        latest = max((datetime.fromisoformat(s['mtime_iso']).timestamp()
+                      for s in sets if s.get('mtime_iso')), default=0)
+        self._next_backup_at = latest + BACKUP_INTERVAL_HOURS * 3600
         # Recording cleanup interval mặc định 6h (4 lần/ngày) — không cần thường
         # vì recording chỉ xóa file cũ hơn retention_days (mặc định 7 ngày).
         _RECORDING_CLEANUP_INTERVAL_HOURS = 6
@@ -110,11 +118,13 @@ class MaintenanceWorker:
         loop_count = 0
         recording_loop_count = 0
         while self._running:
-            self._run_job_safely(self._cleanup_job)
+            if CLEANUP_ENABLED:
+                self._run_job_safely(self._cleanup_job)
             loop_count += 1
-            if loop_count >= backup_every_n_loops:
+            if BACKUP_ENABLED and time.time() >= self._next_backup_at:
                 loop_count = 0
                 self._run_job_safely(self._backup_job)
+                self._next_backup_at = time.time() + max(60, BACKUP_INTERVAL_HOURS * 3600)
             recording_loop_count += 1
             if recording_loop_count >= recording_every_n_loops:
                 recording_loop_count = 0
@@ -122,7 +132,8 @@ class MaintenanceWorker:
                 # log rỗng khi chưa bật CONTINUOUS_RECORDING_ENABLED)
                 if CONTINUOUS_RECORDING_ENABLED:
                     self._run_job_safely(self._cleanup_recordings_job)
-            self._sleep_interruptible(CLEANUP_INTERVAL_HOURS * 3600)
+            self._sleep_interruptible(max(.05, min(CLEANUP_INTERVAL_HOURS,
+                                                  BACKUP_INTERVAL_HOURS) * 3600))
 
     def _sleep_interruptible(self, seconds: float) -> None:
         """
@@ -242,6 +253,13 @@ class MaintenanceWorker:
         )
         photos_arg = student_photos_dir if os.path.isdir(student_photos_dir) else None
 
+        from app.storage_budget import require_space
+        expected = sum(os.path.getsize(os.path.join(root, name))
+                       for root in (SNAPSHOTS_DIR, student_photos_dir)
+                       if os.path.isdir(root) for name in os.listdir(root)
+                       if os.path.isfile(os.path.join(root, name)))
+        require_space(BACKUP_DIR, expected + 16 * 1024**2)
+
         # 1. Tạo bộ backup (DB + media + manifest + complete marker)
         try:
             result = _db.create_backup_set(
@@ -250,6 +268,7 @@ class MaintenanceWorker:
                 student_photos_dir=photos_arg,
                 include_media=True,  # R3: media là phần bắt buộc của bộ
                 label="hourly",
+                cancel_event=self._stop_event,
             )
             db_size_mb = round(
                 sum(f["size_bytes"] for f in result["files"]
@@ -272,7 +291,7 @@ class MaintenanceWorker:
             raise
 
         # 2. Dọn bộ backup cũ (giữ BACKUP_KEEP_COUNT bộ gần nhất)
-        deleted_sets = _db.prune_backup_sets(BACKUP_DIR, keep_count=BACKUP_KEEP_COUNT)
+        deleted_sets = _db.prune_backup_sets(BACKUP_DIR, keep_count=max(2, BACKUP_KEEP_COUNT))
         remaining = _db.list_backup_sets(BACKUP_DIR)
 
         detail = {

@@ -1950,6 +1950,7 @@ def create_backup_set(
     student_photos_dir: str | None = None,
     include_media: bool = True,
     label: str | None = None,
+    cancel_event=None,
 ) -> dict:
     """Tạo 1 bộ backup DB + media + manifest trong `backup_root`.
 
@@ -2017,6 +2018,9 @@ def create_backup_set(
 
         if media_dir_path and os.path.isdir(snapshots_dir):
             for entry in os.listdir(snapshots_dir):
+                if cancel_event is not None and cancel_event.is_set():
+                    paths_failed.append({"path": media_dir_name, "reason": "shutdown_cancelled"})
+                    break
                 src = os.path.join(snapshots_dir, entry)
                 if not os.path.isfile(src):
                     continue
@@ -2050,6 +2054,9 @@ def create_backup_set(
                 paths_failed.append({"path": "student_photos", "reason": f"mkdir: {e}"})
             else:
                 for entry in os.listdir(student_photos_dir):
+                    if cancel_event is not None and cancel_event.is_set():
+                        paths_failed.append({"path": "student_photos", "reason": "shutdown_cancelled"})
+                        break
                     src = os.path.join(student_photos_dir, entry)
                     if not os.path.isfile(src):
                         continue
@@ -2114,6 +2121,7 @@ def create_backup_set(
     complete_marker = os.path.join(set_dir, "complete")
     complete = (
         db_integrity_ok
+        and not (cancel_event is not None and cancel_event.is_set())
         and len(paths_failed) == 0
         and len(files_meta) > 0
     )

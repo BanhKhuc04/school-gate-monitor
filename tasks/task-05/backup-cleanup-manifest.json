@@ -1,0 +1,186 @@
+[
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124222_189885_hourly",
+    "files": 4782,
+    "bytes": 1948529761.0,
+    "last_write": "2026-10-03T19:42:22.2052624+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124340_088007_hourly",
+    "files": 3656,
+    "bytes": 1425798096.0,
+    "last_write": "2026-10-03T19:43:40.100733+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124418_463223_hourly",
+    "files": 1276,
+    "bytes": 321937191.0,
+    "last_write": "2026-10-03T19:44:18.4804792+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124434_786056_hourly",
+    "files": 8091,
+    "bytes": 3482895677.0,
+    "last_write": "2026-10-03T19:44:34.8011078+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124621_021649_hourly",
+    "files": 8380,
+    "bytes": 3617128280.0,
+    "last_write": "2026-10-03T19:46:21.0451237+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124807_588529_hourly",
+    "files": 6566,
+    "bytes": 2775272111.0,
+    "last_write": "2026-10-03T19:49:19.0927505+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_124922_319967_hourly",
+    "files": 3554,
+    "bytes": 1378311765.0,
+    "last_write": "2026-10-03T19:49:22.3362179+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125001_835036_hourly",
+    "files": 1448,
+    "bytes": 401565113.0,
+    "last_write": "2026-10-03T19:50:01.8532314+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125017_063162_hourly",
+    "files": 3255,
+    "bytes": 1239990301.0,
+    "last_write": "2026-10-03T19:50:17.0733331+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125054_153089_hourly",
+    "files": 1166,
+    "bytes": 270871392.0,
+    "last_write": "2026-10-03T19:50:54.1651149+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125109_803988_hourly",
+    "files": 1284,
+    "bytes": 325845876.0,
+    "last_write": "2026-10-03T19:51:09.8140766+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125335_938572_hourly",
+    "files": 2395,
+    "bytes": 841094265.0,
+    "last_write": "2026-10-03T19:53:36.0300047+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125414_476313_hourly",
+    "files": 7934,
+    "bytes": 3409898553.0,
+    "last_write": "2026-10-03T19:54:14.492065+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125558_972089_hourly",
+    "files": 2371,
+    "bytes": 829777301.0,
+    "last_write": "2026-10-03T19:55:58.9940983+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125637_550408_hourly",
+    "files": 9040,
+    "bytes": 3923261892.0,
+    "last_write": "2026-10-03T19:56:37.5761203+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125821_152994_hourly",
+    "files": 5657,
+    "bytes": 2354387382.0,
+    "last_write": "2026-10-03T19:58:21.1680211+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_125934_853587_hourly",
+    "files": 4067,
+    "bytes": 1616893548.0,
+    "last_write": "2026-10-03T19:59:34.8837196+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_130431_478007_hourly",
+    "files": 9331,
+    "bytes": 4058056293.0,
+    "last_write": "2026-10-03T20:04:31.4935824+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_130645_764429_hourly",
+    "files": 852,
+    "bytes": 195868035.0,
+    "last_write": "2026-10-03T20:06:45.7952605+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_130700_575118_hourly",
+    "files": 1034,
+    "bytes": 224397269.0,
+    "last_write": "2026-10-03T20:07:00.5985404+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_130713_973330_hourly",
+    "files": 7635,
+    "bytes": 3271585281.0,
+    "last_write": "2026-10-03T20:07:13.9899607+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_130857_140597_hourly",
+    "files": 743,
+    "bytes": 125095704.0,
+    "last_write": "2026-10-03T20:08:57.157808+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  },
+  {
+    "path": "D:\\Work\\Project_motorbike\\data\\backups\\20261003_130911_441629_hourly",
+    "files": 8637,
+    "bytes": 3736616722.0,
+    "last_write": "2026-10-03T20:09:11.4571803+07:00",
+    "action": "delete-abandoned-incomplete-backup",
+    "complete": false
+  }
+]
