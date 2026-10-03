@@ -149,6 +149,40 @@ class RecognitionCards:
                           'timestamp': datetime.fromtimestamp(best_debug.get('timestamp', now), timezone.utc).isoformat()}
             self._pending[key] = self._pool.submit(self._encode, key, epoch, frame_seq, timestamp, crops, plate_meta)
 
+    def observe_plate(self, track, best, result, debug, frame_seq, epoch, now=None):
+        """Show an independent plate observation without inventing a person/vehicle."""
+        now = time.time() if now is None else now
+        key = f'plate:{track}'
+        timestamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
+        text = (result.text or getattr(result, 'raw_text', '')) if result else ''
+        state = ('error' if result and result.error else 'reading' if result and result.pending
+                 else 'candidate' if result and result.text else 'partial' if text
+                 else 'unreadable' if result and result.sample_count else 'review')
+        with self._lock:
+            if epoch != self.source_epoch:
+                return
+            old = self._cards.get(key, {})
+            self._cards[key] = {'card_id': f'{self.run_id}:{epoch}:{key}', 'kind': 'plate',
+                'track_id': None, 'vehicle_track_id': None, 'ocr_track_id': track,
+                'camera_id': self.camera_id, 'gate_id': self.gate_id, 'source_epoch': epoch,
+                'frame_seq': frame_seq, 'last_seen': timestamp, '_seen_at': now,
+                'plate': {'state': state, 'text': text, 'association': 'unverified',
+                          'samples': result.sample_count if result else 0, 'required_samples': 1},
+                'plate_debug': debug, 'reasons': ['vehicle_not_associated'],
+                'images': old.get('images', {}), 'images_state': old.get('images_state', 'pending'),
+                '_image_at': old.get('_image_at', 0)}
+            self._cards.move_to_end(key)
+            self._prune(now)
+            self._pending = {k: f for k, f in self._pending.items() if not f.done()}
+            can_encode = now-old.get('_image_at', 0) >= .5 and key not in self._pending and len(self._pending) < 2
+            if can_encode:
+                self._cards[key]['_image_at'] = now
+        if can_encode:
+            meta = {'frame_seq': best.frame_id,
+                    'timestamp': datetime.fromtimestamp(best.timestamp, timezone.utc).isoformat()}
+            self._pending[key] = self._pool.submit(self._encode, key, epoch, frame_seq, timestamp,
+                                                 {'plate': best.crop.copy()}, meta)
+
     def _encode(self, key, epoch, seq, timestamp, crops, plate_meta=None):
         encoded = {}
         for kind, crop in crops.items():

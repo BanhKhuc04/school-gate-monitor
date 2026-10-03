@@ -67,7 +67,7 @@ export default function RecognitionLogPanel({gate}) {
     {info?.models?.helmet?.status==='error' && <div role="alert" className="rounded bg-red-100 text-red-900 p-3 text-sm">Nhận diện mũ chưa khả dụng: model chưa hợp lệ.</div>}
     {info?.status==='not_started' && <p role="status">Pipeline chưa khởi động.</p>}
     {info?.status==='stopped' && <p role="status" className="text-amber-200">Pipeline đã dừng; ảnh dưới là quan sát cuối.</p>}
-    {info?.gate_line_configured===false && <p role="status" className="rounded bg-amber-100 text-amber-900 p-3 text-xs">Chưa cấu hình vạch cổng: hệ thống chọn ảnh biển nhưng chưa chốt OCR/cảnh báo. <a href="/admin/roi" className="underline">Cấu hình vùng và vạch cổng</a></p>}
+    {info?.gate_line_configured===false && <p role="status" className="rounded bg-amber-100 text-amber-900 p-3 text-xs">Chưa cấu hình vạch cổng: vẫn hiển thị nhận diện; OCR của xe đã ghép và cảnh báo qua cổng đang chờ vạch. <a href="/admin/roi" className="underline">Cấu hình vùng và vạch cổng</a></p>}
     {error && <div role="alert" className="rounded bg-red-100 text-red-900 p-3 text-sm">{error} <button className="underline" onClick={()=>setRetry(v=>v+1)}>Thử lại</button></div>}
     <div className="flex flex-wrap gap-2 text-xs">
       <input aria-label="Lọc track" placeholder="ID người hoặc xe" value={track} onChange={e=>setTrack(e.target.value)} className="rounded bg-primary-container text-on-primary-container px-2 py-2 w-32"/>
@@ -78,7 +78,8 @@ export default function RecognitionLogPanel({gate}) {
     <div className="space-y-3 overflow-y-auto max-h-[70vh] pr-1" data-testid="recognition-cards">
       {!visible.length && <p role="status" className="text-sm bg-primary-container text-on-primary-container rounded p-3">{!info && !error?'Đang tải nhận diện…':track?'Không có thẻ phù hợp bộ lọc.':'Chưa có đối tượng mới trong vùng nhận diện.'}</p>}
       {visible.map(card=><article key={card.card_id} data-testid="recognition-card" className="rounded-xl bg-primary-container text-on-primary-container p-3 space-y-3 border border-white/15">
-        <header className="flex justify-between gap-2"><div><p className="font-semibold">Người #{card.track_id ?? 'chưa có ID'}</p><p className="text-[11px] opacity-70">{card.camera_id}{card.vehicle_track_id!=null && ` · Xe #${card.vehicle_track_id}`}</p></div><time className="text-xs">{new Date(card.last_seen).toLocaleTimeString('vi-VN',{hour12:false})}</time></header>
+        <header className="flex justify-between gap-2"><div><p className="font-semibold">{card.kind==='plate' ? 'Biển số chưa ghép xe' : `Người #${card.track_id ?? 'chưa có ID'}`}</p><p className="text-[11px] opacity-70">{card.camera_id}{card.vehicle_track_id!=null && ` · Xe #${card.vehicle_track_id}`}</p></div><time className="text-xs">{new Date(card.last_seen).toLocaleTimeString('vi-VN',{hour12:false})}</time></header>
+        {card.kind==='plate' ? <Crop image={card.images?.plate} label="Biển số" className="h-[150px]"/> : <>
         <div className="grid grid-cols-[.8fr_1.2fr] gap-2">
           <Crop image={card.images?.person} label="Người" className="row-span-2 h-[218px]"/>
           <Crop image={card.images?.head} label="Đầu / mũ" className="h-[105px]"/>
@@ -86,6 +87,7 @@ export default function RecognitionLogPanel({gate}) {
         </div>
         <Samples label="Theo dõi người" result={card.person}/>
         <Samples label={HEAD[card.helmet.value] || HEAD.unknown} result={card.helmet}/>
+        </>}
         <div className={`rounded-lg px-3 py-2 text-xs ${card.plate.state==='confirmed'?COLORS.confirmed:card.plate.state==='error'?COLORS.error:COLORS.review}`}>
           <p className="font-semibold">{PLATE[card.plate.state] || 'Biển cần kiểm tra'}</p>
           {card.plate.text && <p className="font-mono text-lg mt-1 tracking-wide">{card.plate.text}</p>}
@@ -95,7 +97,7 @@ export default function RecognitionLogPanel({gate}) {
             <p>Chất lượng crop: {card.plate_debug.quality} · độ nét: {card.plate_debug.blur}</p>
             <p>Confidence box: {card.plate_debug.detector_confidence} · tương phản: {card.plate_debug.contrast}</p>
             <p>Trạng thái: {card.plate_debug.status}{card.plate_debug.technical_retries>0 && ` · thử lại do lỗi kỹ thuật: ${card.plate_debug.technical_retries}`}</p>
-            <a href={`/guard/plate_best/${card.vehicle_track_id}?gate=${encodeURIComponent(gate)}&epoch=${card.source_epoch}`} className="underline" download>Tải ảnh biển đã chọn</a>
+            <a href={`/guard/plate_best/${card.ocr_track_id ?? card.vehicle_track_id}?gate=${encodeURIComponent(gate)}&epoch=${card.source_epoch}`} className="underline" download>Tải ảnh biển đã chọn</a>
             <details><summary className="cursor-pointer">Chi tiết OCR</summary>
               <p>Dòng trên: {card.plate_debug.raw_top || '—'}</p><p>Dòng dưới: {card.plate_debug.raw_bottom || '—'}</p>
               <p>Toàn biển: {card.plate_debug.normalized || 'Chưa đọc đủ'}</p>

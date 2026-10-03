@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import AlertBanner from '../components/AlertBanner';
+import RecognitionLogPanel from '../components/RecognitionLogPanel';
+import PlateReviewPanel from '../components/PlateReviewPanel';
 import client, { API_BASE_URL } from '../api/client';
 import { VIOLATION_LABELS } from '../utils/violationLabels';
 
 const MAX_LOG_ITEMS = 12;
 
 export default function GuardPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [health, setHealth] = useState(null);
   const [alertLog, setAlertLog] = useState([]);
+  const [logTab, setLogTab] = useState('recognition');
   const [activeGate, setActiveGate] = useState('main');
   const [viewMode, setViewMode] = useState('single'); // 'single' | 'split'
   const idCounter = useRef(0);
@@ -18,6 +21,7 @@ export default function GuardPage() {
   const gates = health?.gates ?? null;
   const showGateSelector = gates !== null && gates.length > 1;
   const activeGateName = gates?.find(g => g.id === activeGate)?.name ?? 'Cổng Chính';
+  const activePipeline = gates?.find(g => g.id === activeGate)?.pipeline;
   const isSplit = showGateSelector && viewMode === 'split';
 
   // Độ trễ khung hình hiển thị trên video panel — cùng API health mà trang admin dùng.
@@ -114,9 +118,9 @@ export default function GuardPage() {
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 LIVE
               </div>
-              {health?.pipeline?.last_frame_age_sec != null && (
+              {activePipeline?.last_frame_age_sec != null && (
                 <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">
-                  Độ trễ khung hình: {health.pipeline.last_frame_age_sec.toFixed(1)}s
+                  Độ trễ khung hình: {activePipeline.last_frame_age_sec.toFixed(1)}s
                 </div>
               )}
               <img
@@ -131,6 +135,14 @@ export default function GuardPage() {
 
         {/* Alert log panel */}
         <div className="flex flex-col min-h-0">
+          <div role="tablist" aria-label="Nhật ký trực tiếp" className="flex flex-wrap gap-2 mb-3">
+            <button role="tab" aria-selected={logTab==='recognition'} onClick={()=>setLogTab('recognition')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Nhận diện trực tiếp</button>
+            <button role="tab" aria-selected={logTab==='plate-review'} onClick={()=>setLogTab('plate-review')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Duyệt biển</button>
+            <button role="tab" aria-selected={logTab==='alerts'} onClick={()=>setLogTab('alerts')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Cảnh báo</button>
+          </div>
+          <div hidden={logTab!=='recognition'}><RecognitionLogPanel key={activeGate} gate={activeGate}/></div>
+          {logTab==='plate-review' && <PlateReviewPanel key={activeGate} gate={activeGate} role={user?.role}/>}
+          <div hidden={logTab!=='alerts'}>
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-sm font-bold uppercase tracking-wider text-on-primary-container">
               Cảnh báo gần đây
@@ -170,6 +182,7 @@ export default function GuardPage() {
                 </div>
               ))
             )}
+          </div>
           </div>
         </div>
       </div>

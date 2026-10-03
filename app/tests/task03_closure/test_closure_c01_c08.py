@@ -395,14 +395,16 @@ class TestC08WorkerConnected:
         assert hasattr(worker, "stop_training_worker")
         assert hasattr(worker, "TrainingWorker")
 
-    def test_worker_selects_ocr(self):
-        from app.training import worker
+    def test_worker_selects_ocr(self, tmp_path):
+        from app.training import worker, dataset_repo
+        training_db = str(tmp_path / "runner.db")
+        dataset_repo.init_db(db_path=training_db)
         r = worker._select_runner("plate_ocr")
         assert callable(r)
         # runner có thể là wrapper; kiểm tra target phân giải đúng qua việc gọi
-        result = r({"id": "x", "target": "plate_ocr", "dataset_id": "d"}, db_path=None)
+        result = r({"id": "x", "target": "plate_ocr", "dataset_id": "d"}, db_path=training_db)
         assert isinstance(result, dict)
-        assert "state" in result
+        assert result["state"] == "pending_data"
 
     def test_worker_rejects_unknown(self):
         from app.training import worker

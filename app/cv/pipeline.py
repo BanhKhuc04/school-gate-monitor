@@ -820,6 +820,15 @@ class VideoPipeline:
             except queue.Empty:
                 continue
             try:
+                # Reuse the latest completed inference without waiting for AI.
+                overlay = getattr(self, '_preview_overlay', None)
+                if (overlay and overlay[0] == self._source_epoch
+                        and time.monotonic()-overlay[1] <= 1.0):
+                    for det, positive, negative in overlay[2]:
+                        self._draw_detection(frame, det, positive, negative)
+                self._draw_roi(frame)
+                if DEBUG_CROSSING:
+                    self._draw_crossing_line_debug(frame)
                 self._publish_frame_jpeg(frame, frame_seq)
             except Exception:
                 pass
@@ -1497,11 +1506,11 @@ class VideoPipeline:
                                        self._frame_seq, time.time())
             if candidate is None:
                 continue
-            if not store.offer(tid, candidate):
+            store.offer(tid, candidate)
+            best = store.candidate(tid)
+            if best is None:
                 continue
-            if candidate.quality_score < PLATE_BEST_MIN_QUALITY:
-                continue
-            if store.trigger(tid, self._ocr_pool, _ocr_task, self._source_epoch):
+            if best.quality_score >= PLATE_BEST_MIN_QUALITY and store.trigger(tid, self._ocr_pool, _ocr_task, self._source_epoch):
                 self._ocr_health['submitted'] += 1
             # Collect kết quả OCR nếu đã về
             result = store.collect(tid, self._ocr_pool, _ocr_task, self._source_epoch)
@@ -1511,9 +1520,15 @@ class VideoPipeline:
                     self._ocr_health['errors'] += 1
                 elif not result.text:
                     self._ocr_health['empty'] += 1
-            best = store.candidate(tid)
             if PLATE_CONSENSUS_ENABLED:
                 self._consensus_ingest(tid, result, best)
+            read = store.result(tid)
+            self._diagnostic('ocr', 'error' if read and read.error else 'pending' if read and read.pending else 'review',
+                'ocr_error' if read and read.error else 'ocr_pending' if read and read.pending else 'plate_candidate' if read and read.text else 'plate_not_read',
+                tid, plate_text=read.text if read else '', association='unverified')
+            cards = getattr(self, '_recognition_cards', None)
+            if cards is not None:
+                cards.observe_plate(tid, best, read, store.debug(tid), self._frame_seq, self._source_epoch)
 
     def _consensus_ingest(self, tid: int, best_plate_result, best_candidate) -> None:
         """Phase 2 (Task 1): nhận kết quả OCR từ BestPlateStore + best crop
@@ -2027,6 +2042,11 @@ class VideoPipeline:
                 if getattr(self, '_helmet_health', {}).get('status') == 'error':
                     self._diagnostic('model', 'error', self._helmet_health['reason'])
 
+                # Publish the completed boxes even when only a vehicle/plate is visible.
+                preview_dets = tuple((d, COLOR_PERSON, COLOR_PERSON) for d in person_dets+vehicle_dets)
+                preview_dets += tuple((d, COLOR_PLATE, COLOR_PLATE) for d in plate_dets)
+                self._preview_overlay = (self._source_epoch, time.monotonic(), preview_dets)
+
                 # Không có person nào → bỏ qua toàn bộ frame (helmet/plate detect
                 # phía trên vẫn chạy xong nhưng kết quả không dùng tới, chấp nhận
                 # được vì tổng thời gian không tăng — chạy song song mà).
@@ -2053,6 +2073,12 @@ class VideoPipeline:
                 # matched_helmet_dets: chỉ helmet nằm trong vùng đầu của 1 person
                 # cụ thể — dùng để VẼ, loại trừ detection lạc (gương xe, tay lái...)
                 groups, matched_helmet_dets = self._group_by_person(person_dets, helmet_dets, plate_dets, vehicle_dets)
+                associated_plates = {id(d) for group in groups for d in group.get('plate_dets', [])}
+                unassociated_plates = [d for d in plate_dets if id(d) not in associated_plates]
+                if unassociated_plates:
+                    self._observe_plate_only(source_frame, unassociated_plates)
+                self._preview_overlay = (self._source_epoch, time.monotonic(), preview_dets +
+                    tuple((d, COLOR_HELMET, COLOR_NO_HELMET) for d in matched_helmet_dets))
 
                 # Cập nhật cache để nhánh skip vẽ box mượt — helmet dùng bản đã
                 # lọc theo vùng đầu (matched_helmet_dets), không dùng raw helmet_dets
