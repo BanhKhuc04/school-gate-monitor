@@ -34,14 +34,19 @@ KP_LEFT_KNEE, KP_RIGHT_KNEE = 13, 14
 KP_LEFT_ANKLE, KP_RIGHT_ANKLE = 15, 16
 
 
+# Person crops are rarely taller than 320 px; letterboxing each to 640x640
+# made a crowded gate frame cost up to ~0.6 s.
+POSE_IMGSZ = 320
+POSE_MAX_BATCH = 8
+
+
 def _get_pose_model() -> "YOLO":
     def load():
         global _pose_model
         if _pose_model is None:
-            from ultralytics import YOLO
-            from app.config import DEVICE, POSE_MODEL_PATH
-            _pose_model = YOLO(POSE_MODEL_PATH)
-            _pose_model.to(DEVICE)
+            from app.config import POSE_MODEL_PATH
+            from app.cv.detector import load_yolo
+            _pose_model = load_yolo(POSE_MODEL_PATH, POSE_IMGSZ)
         return _pose_model
     return model_owner().run('pose', load)
 
@@ -455,11 +460,14 @@ class PostureDetector:
         crops = [person_crops[i] for i in valid]
         try:
             from app.config import POSE_CONF_THRESHOLD, USE_FP16
-            results = model_owner().run(getattr(self, 'camera_id', 'pose'), lambda: self.model(
-                crops, verbose=False, conf=POSE_CONF_THRESHOLD, quantize=16 if USE_FP16 else None,
-                # Person crops are rarely taller than 320 px; letterboxing each
-                # to 640x640 made a crowded gate frame cost up to ~0.6 s.
-                imgsz=320))
+
+            def run():
+                # The TensorRT engine takes at most POSE_MAX_BATCH crops a call.
+                return [r for start in range(0, len(crops), POSE_MAX_BATCH)
+                        for r in self.model(crops[start:start+POSE_MAX_BATCH], verbose=False,
+                                            conf=POSE_CONF_THRESHOLD,
+                                            quantize=16 if USE_FP16 else None, imgsz=POSE_IMGSZ)]
+            results = model_owner().run(getattr(self, 'camera_id', 'pose'), run)
         except Exception as e:
             print(f"[Pose] Error during pose detection: {e}")
             return out

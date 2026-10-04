@@ -38,6 +38,10 @@ except ImportError:
 # pose. Tắt tự động trên CPU (PyTorch không hỗ trợ half trên CPU).
 USE_FP16 = DEVICE == "cuda"
 
+# TensorRT: detectors load `<weights>-<imgsz>.engine` when it exists and is newer
+# than the .pt (build: scripts/export_tensorrt.py). USE_TENSORRT=0 = PyTorch only.
+USE_TENSORRT = os.environ.get("USE_TENSORRT", "1") == "1"
+
 # Camera
 CAMERA_INDEX = 1  # OBS Virtual Camera (index 0 la webcam vat ly, xac nhan qua probe)
 

@@ -2310,11 +2310,6 @@ class VideoPipeline:
                     # dùng được .result() mà không phải branch nhiều chỗ.
                     person_future = Future()
                     person_future.set_result([])
-                if self._helmet_detector is not None and self._detect_pool is not None:
-                    helmet_future = self._detect_pool.submit(self._helmet_detector.detect, detect_frame)
-                else:
-                    helmet_future = Future()
-                    helmet_future.set_result([])
                 if self._plate_detector is not None and self._detect_pool is not None:
                     reader = self._plate_detector.detect_tracked if getattr(self, 'profile', 'full') == 'ocr_only' else self._plate_detector.detect
                     plate_future = self._detect_pool.submit(reader, detect_frame)
@@ -2323,6 +2318,16 @@ class VideoPipeline:
                     plate_future.set_result([])
 
                 raw_person_dets = self._rescale_dets(person_future.result(), scale_x, scale_y)
+                # All models share one GPU owner thread, so they run one after
+                # another anyway. Helmets only count on a person's head: with no
+                # person in frame the helmet pass was pure waste.
+                has_person = any(d.class_name.lower() == 'person' for d in raw_person_dets)
+                if (self._helmet_detector is not None and self._detect_pool is not None
+                        and (has_person or self._person_detector is None)):
+                    helmet_future = self._detect_pool.submit(self._helmet_detector.detect, detect_frame)
+                else:
+                    helmet_future = Future()
+                    helmet_future.set_result([])
                 # Phase 0: detect latency = wall-time từ submit 3 future đến khi
                 # .result() của cái cuối cùng về — đo TOÀN BỘ song song, không
                 # phải tổng tuần tự.
