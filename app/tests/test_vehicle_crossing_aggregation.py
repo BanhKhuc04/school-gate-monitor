@@ -123,8 +123,11 @@ def test_actual_observation_crops_source_pixels_before_display_resize(pipeline):
     g=group();g['plate_dets']=[Detection('plate',.9,(20,30,60,70))]
     p._observe_best_plate(np.zeros((100,100,3),np.uint8),g)
     best=p._best_plates.candidate(7)
-    assert best.crop.shape==(80,120,3)
-    assert np.array_equal(best.crop,p._original_source_frame[60:140,60:180])
+    # Source box (60,60)-(180,140), plus the OCR margin on every side.
+    from app.config import PLATE_BEST_CROP_PAD as pad
+    x1,y1,x2,y2=int(60-120*pad),int(60-80*pad),int(180+120*pad),int(140+80*pad)
+    assert best.crop.shape==(y2-y1,x2-x1,3)
+    assert np.array_equal(best.crop,p._original_source_frame[y1:y2,x1:x2])
     assert p._best_plates.debug(7)['attempts']==0
 
 

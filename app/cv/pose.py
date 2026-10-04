@@ -203,6 +203,9 @@ class SideViewRiding:
 
         bx1, by1, bx2, by2 = bike_bbox
         bw, bh = bx2 - bx1, by2 - by1
+        from app.config import RIDING_FRONTAL_MAX_ASPECT
+        if bw / bh < RIDING_FRONTAL_MAX_ASPECT:
+            return _frontal_riding(keypoints, bike_bbox, offset, threshold, features)
         hip = _keypoint_center(keypoints, (KP_LEFT_HIP, KP_RIGHT_HIP), threshold, offset)
         shoulder = _keypoint_center(keypoints, (KP_LEFT_SHOULDER, KP_RIGHT_SHOULDER), threshold, offset)
         angle = avg_leg_angle(keypoints, threshold)
@@ -256,6 +259,45 @@ class SideViewRiding:
             # bike pair. Low riding score or missing legs never means walking.
             state = "WALKING_WITH_BIKE"
         return SideViewRidingResult(state, max(0.0, min(1.0, score)), features)
+
+
+def _frontal_riding(keypoints, bike_bbox, offset, threshold, features) -> SideViewRidingResult:
+    """Bike seen head-on or from behind (box taller than wide).
+
+    The side-view cues (hip over the seat, torso above the bike) hold for a
+    person walking just behind a frontal bike too: on the 04/10 gate video
+    178/304 walking frames came out RIDING. Seen frontally, a rider straddles
+    the bike — knees/ankles spread across its width with the hips on its
+    centre line — while a person pushing it walks beside it, hips off-centre
+    and legs together. Measured there: knee spread riding p10 0.31 vs walking
+    p50 0.28 (of bike width), hip offset riding |x| <= 0.10 vs walking 0.12-0.30.
+    """
+    bx1, by1, bx2, by2 = bike_bbox
+    bw = bx2 - bx1
+    hip = _keypoint_center(keypoints, (KP_LEFT_HIP, KP_RIGHT_HIP), threshold, offset)
+    if hip is None:
+        return SideViewRidingResult("UNKNOWN", 0.0, features)
+
+    def spread(left, right):
+        a = _keypoint_center(keypoints, (left,), threshold, offset)
+        b = _keypoint_center(keypoints, (right,), threshold, offset)
+        return abs(a[0] - b[0]) / bw if a and b else None
+
+    knees, ankles = spread(KP_LEFT_KNEE, KP_RIGHT_KNEE), spread(KP_LEFT_ANKLE, KP_RIGHT_ANKLE)
+    hip_x = (hip[0] - (bx1 + bx2) / 2) / bw
+    straddle = (knees is not None and knees >= 0.40) or (ankles is not None and ankles >= 0.45)
+    together = (knees is not None and knees < 0.33) or (ankles is not None and ankles < 0.30)
+    features["hip"] = _band_score(hip_x, -0.12, 0.12, -0.30, 0.30)
+    leg = max(v for v in (knees, ankles, 0.0) if v is not None)
+    features["leg"] = max(0.0, min(1.0, leg / 0.45))
+    score = (features["hip"] + features["leg"]) / 2
+    if abs(hip_x) <= 0.12 and straddle:
+        state = "RIDING"
+    elif (abs(hip_x) >= 0.12 and not straddle) or (together and abs(hip_x) >= 0.08):
+        state = "WALKING_WITH_BIKE"
+    else:
+        state = "UNKNOWN"
+    return SideViewRidingResult(state, score, features)
 
 
 @dataclass(frozen=True)

@@ -35,16 +35,21 @@ class Detection:
 class HelmetPlateDetector:
     """Bọc ultralytics.YOLO, cung cấp method detect()."""
 
-    def __init__(self, model_path: str, conf_threshold: float = 0.25):
+    def __init__(self, model_path: str, conf_threshold: float = 0.25,
+                 class_conf: Optional[dict] = None):
         """
         Khởi tạo detector.
 
         Args:
             model_path: Đường dẫn đến file trọng số .pt
             conf_threshold: Ngưỡng confidence tối thiểu (0.0 - 1.0)
+            class_conf: ngưỡng riêng theo tên lớp, vd {'motorcycle': .2}. Các lớp
+                này có tracker riêng với ngưỡng tạo track thấp tương ứng.
         """
         self.camera_id = "default"
         self._tracker = None
+        self._class_tracker = None
+        self.class_conf = dict(class_conf or {})
         self.model = model_owner().run("bootstrap", _load_model, model_path)
         print(f"[Detector] {model_path} on device={DEVICE}")
         self.conf_threshold = conf_threshold
@@ -71,8 +76,24 @@ class HelmetPlateDetector:
         model_owner().run(self.camera_id, self._reset_tracker)
 
     def _reset_tracker(self):
-        if self._tracker is not None:
-            self._tracker.reset()
+        for tracker in (self._tracker, self._class_tracker):
+            if tracker is not None:
+                tracker.reset()
+
+    @staticmethod
+    def _new_tracker(high, low, new):
+        from ultralytics.trackers.byte_tracker import BYTETracker
+        from types import SimpleNamespace
+        # Ultralytics ≥ 8.4 takes a single args namespace with `fps` (the old
+        # `frame_rate=` kwarg raised TypeError on every tracked detection).
+        return BYTETracker(SimpleNamespace(track_high_thresh=high, track_low_thresh=low,
+            new_track_thresh=new, track_buffer=30, match_thresh=.8, fuse_score=True, fps=30))
+
+    def _track(self, tracker, boxes, frame, detections):
+        for row in tracker.update(boxes, frame):
+            x1, y1, x2, y2, tid, conf, cls = row[:7]
+            detections.append(Detection(self._class_names.get(int(cls), f'class_{int(cls)}'),
+                float(conf), tuple(int(v) for v in (x1,y1,x2,y2)), int(tid)))
 
     def _infer(self, frame, tracked):
         # Explicit imgsz: helmet_best.pt was trained at 224 and Ultralytics
@@ -80,38 +101,36 @@ class HelmetPlateDetector:
         # it found 54 helmets on 90 gate frames instead of 213 at 640.
         # quantize replaces the deprecated half=, which logged a warning on
         # every single inference call.
-        results = self.model(frame, verbose=False, conf=self.conf_threshold,
+        # A ridden motorcycle is half hidden by its rider: COCO scores it
+        # 0.2-0.4, under the person threshold, so it was dropped and the rider
+        # was never paired with a bike (270/472 riding frames on gate video).
+        floor = min([self.conf_threshold, *self.class_conf.values()])
+        results = self.model(frame, verbose=False, conf=floor,
                              quantize=16 if USE_FP16 else None, imgsz=DETECT_WIDTH)
         detections = []
         for result in results:
             if result.boxes is None:
                 continue
             boxes = result.boxes.cpu().numpy()  # one transfer, not 3 per box
+            special = {i for i, n in self._class_names.items() if n in self.class_conf}
+            in_class = np.isin(boxes.cls.astype(int), list(special))
+            minimum = np.array([self.class_conf.get(self._class_names.get(int(c)), self.conf_threshold)
+                                for c in boxes.cls])
+            keep = boxes.conf >= minimum
             if tracked:
                 if self._tracker is None:
-                    from ultralytics.trackers.byte_tracker import BYTETracker
-                    from types import SimpleNamespace
-                    # Ultralytics ≥ 8.4 renamed BYTETracker's kwarg `frame_rate`
-                    # to `fps` (and the constructor now takes a single `args`
-                    # namespace only). Older code passed `frame_rate=` as a
-                    # second positional/kwarg, which raised
-                    # `TypeError: __init__() got an unexpected keyword
-                    # argument 'frame_rate'` on every tracked detection —
-                    # making `ai_fps=0` and labels never render on the
-                    # MJPEG stream. Put `fps` on the SimpleNamespace (matches
-                    # what newer Ultralytics expects) and don't pass it as a
-                    # second arg.
-                    tracker_args = SimpleNamespace(track_high_thresh=.5,
-                        track_low_thresh=.1, new_track_thresh=.6, track_buffer=30,
-                        match_thresh=.8, fuse_score=True, fps=30)
-                    self._tracker = BYTETracker(tracker_args)
-                rows = self._tracker.update(boxes, frame)
-                for row in rows:
-                    x1, y1, x2, y2, tid, conf, cls = row[:7]
-                    detections.append(Detection(self._class_names.get(int(cls), f'class_{int(cls)}'),
-                        float(conf), tuple(int(v) for v in (x1,y1,x2,y2)), int(tid)))
+                    # BYTETracker() resets the global track-id counter, so both
+                    # trackers are built before either hands out an id; after
+                    # that they share the counter and ids never collide.
+                    self._tracker = self._new_tracker(.5, .1, .6)
+                    if special:
+                        floor_c = min(self.class_conf.values())
+                        self._class_tracker = self._new_tracker(floor_c, .1, floor_c + .05)
+                self._track(self._tracker, boxes[keep & ~in_class], frame, detections)
+                if self._class_tracker is not None:
+                    self._track(self._class_tracker, boxes[keep & in_class], frame, detections)
             else:
-                for bbox, conf, cls in zip(boxes.xyxy, boxes.conf, boxes.cls):
+                for bbox, conf, cls in zip(boxes.xyxy[keep], boxes.conf[keep], boxes.cls[keep]):
                     detections.append(Detection(self._class_names.get(int(cls), f'class_{int(cls)}'),
                         float(conf), tuple(int(v) for v in bbox)))
         return detections

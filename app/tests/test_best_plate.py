@@ -160,3 +160,13 @@ def test_two_line_engine_exception_is_technical_not_empty(monkeypatch):
 
 def test_clipped_box_cannot_extract_unrelated_negative_index_pixels():
     assert make_candidate(np.zeros((100,100,3),np.uint8),(-20,10,-1,30),.9,1,0) is None
+
+
+def test_plate_crop_box_is_padded_inside_the_frame():
+    """A tight detector box clips edge characters; the OCR crop gets a margin
+    (rear-camera video: 47 -> 95 of 105 boxes read correctly), never past the frame."""
+    from app.cv.pipeline import VideoPipeline
+    from app.config import PLATE_BEST_CROP_PAD as pad
+    assert VideoPipeline._padded_plate_box((100, 100, 200, 160), 1000, 1000) == (
+        100 - 100 * pad, 100 - 60 * pad, 200 + 100 * pad, 160 + 60 * pad)
+    assert VideoPipeline._padded_plate_box((0, 0, 50, 40), 55, 42) == (0, 0, 55, 42)

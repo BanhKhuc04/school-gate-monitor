@@ -212,6 +212,9 @@ HELMET_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho helmet detection
 HELMET_NO_HELMET_MIN_CONF = float(os.environ.get("HELMET_NO_HELMET_MIN_CONF", "0.5"))
 PLATE_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho plate detection
 PERSON_CONF_THRESHOLD = 0.4  # Ngưỡng confidence cho person detection (COCO)
+# Xe máy/xe đạp CÓ NGƯỜI NGỒI bị che nửa nên COCO chỉ cho 0.2-0.4: ở ngưỡng 0.4
+# của person, 270/472 khung đang ngồi xe (video cổng 04/10) không ghép được xe.
+VEHICLE_CONF_THRESHOLD = float(os.environ.get("VEHICLE_CONF_THRESHOLD", "0.2"))
 # Hạ từ 0.5 xuống 0.3 (2026-09-29) — người ở xa/bị che một phần trong crop nhỏ
 # thường không đạt 0.5, khiến pose model bỏ qua hoàn toàn (không trả khớp nào),
 # posture_status rơi về 'unknown'. Đánh đổi: dễ bắt khớp sai hơn khi ảnh mờ/nhiễu.
@@ -232,6 +235,11 @@ RIDING_NO_LEG_KEYPOINTS_MEANS_WALKING = False
 # Bật để vẽ overlay debug (state + leg angle + hip dx/dy) lên video — dùng để
 # soi số liệu thật trên camera thực tế rồi chỉnh 2 ngưỡng trên cho khớp.
 DEBUG_RIDING = os.environ.get("DEBUG_RIDING", "0") == "1"
+# Box xe hẹp hơn tỉ lệ này (rộng/cao) = xe nhìn chính diện/từ sau -> phân loại
+# ngồi xe/dắt xe theo dạng chân hai bên xe + hông giữa xe (pose._frontal_riding).
+# Video cổng 04/10: xe chính diện 0.52-0.94, tới 0.98 khi bị mép khung cắt;
+# nhìn ngang thường > 1.2.
+RIDING_FRONTAL_MAX_ASPECT = float(os.environ.get("RIDING_FRONTAL_MAX_ASPECT", "1.0"))
 
 # Chở quá số người quy định — xe máy chở nhiều hơn số này bị bắt lỗi TOO_MANY_RIDERS
 MAX_RIDERS_PER_MOTORCYCLE = 2
@@ -297,6 +305,11 @@ PLATE_MIN_CONFIDENCE_SINGLE = 0.55  # HOẶC 1 lần đọc confidence >= ngư�
 # sát ký tự, cắt thêm biên để không mất nét rìa.
 PLATE_CROP_PAD_X = 0.10  # 10% bề rộng bbox
 PLATE_CROP_PAD_Y = 0.12  # 12% chiều cao bbox
+# Lề thêm quanh box biển trước khi cắt ảnh gốc cho OCR (BestPlateStore). Box
+# detector ôm sát/hụt vài px làm mất ký tự mép: video camera sau 04/10 (biển
+# 89-F1 237.92, 105 box) đọc đúng & chắc chắn 47 lần với lề 0, 95 lần với 0.15,
+# 0 lần đọc sai ở mọi mức lề.
+PLATE_BEST_CROP_PAD = float(os.environ.get("PLATE_BEST_CROP_PAD", "0.15"))
 
 # Crop quá mờ thì bỏ qua, KHÔNG gửi OCR — đỡ tốn 1 lượt OCR vô ích và đỡ đưa
 # text rác vào vote. Đo bằng variance of Laplacian (càng thấp càng mờ).

@@ -21,11 +21,12 @@ from typing import Optional
 from app.config import (
     GATES, HELMET_MODEL_PATH, PLATE_MODEL_PATH, PERSON_MODEL_PATH,
     HELMET_CONF_THRESHOLD, HELMET_NO_HELMET_MIN_CONF, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
+    VEHICLE_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, DETECT_WIDTH, DETECT_HEIGHT, RECOGNITION_LOG_ENABLED,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
-    PLATE_CROP_PAD_X, PLATE_CROP_PAD_Y, PLATE_MIN_BLUR_SCORE, DEBUG_PLATE_OCR,
+    PLATE_CROP_PAD_X, PLATE_CROP_PAD_Y, PLATE_BEST_CROP_PAD, PLATE_MIN_BLUR_SCORE, DEBUG_PLATE_OCR,
     CROSSING_EDGE_MARGIN, CROSSING_MIN_FRAMES_PER_SIDE, CROSSING_REARM_DISTANCE,
     CROSSING_COOLDOWN_SEC, CROSSING_ALLOWED_DIRECTION, DEBUG_CROSSING,
     CROSSING_MIN_FRAMES_EXIT_SIDE, CROSSING_MAX_TRANSITION_SEC,
@@ -260,7 +261,8 @@ class VideoPipeline:
             print(f"[Pipeline] Person model skipped: profile={self.profile} (no person detection)")
         else:
             self._person_detector = HelmetPlateDetector(
-                PERSON_MODEL_PATH, conf_threshold=PERSON_CONF_THRESHOLD
+                PERSON_MODEL_PATH, conf_threshold=PERSON_CONF_THRESHOLD,
+                class_conf={'motorcycle': VEHICLE_CONF_THRESHOLD, 'bicycle': VEHICLE_CONF_THRESHOLD}
             )
             print("[Pipeline] Person model loaded:", self._person_detector.class_names)
 
@@ -700,6 +702,13 @@ class VideoPipeline:
         return frame[y1:y2, x1:x2]
 
     @staticmethod
+    def _padded_plate_box(bbox: tuple, frame_w: int, frame_h: int) -> tuple:
+        """Plate box grown by PLATE_BEST_CROP_PAD each side, kept inside the frame."""
+        x1, y1, x2, y2 = bbox
+        px, py = (x2 - x1) * PLATE_BEST_CROP_PAD, (y2 - y1) * PLATE_BEST_CROP_PAD
+        return (max(0, x1 - px), max(0, y1 - py), min(frame_w, x2 + px), min(frame_h, y2 + py))
+
+    @staticmethod
     def _plate_aspect_ok(bbox: tuple, min_ratio: float = 1.5,
                          max_ratio: float = 6.0) -> bool:
         """R5: bbox có w/h nằm ngoài [1.5, 6.0] → loại."""
@@ -979,7 +988,9 @@ class VideoPipeline:
         threshold = threshold_map.get(attr, 0.25)
 
         try:
-            new_detector = HelmetPlateDetector(model_path, conf_threshold=threshold)
+            # Keep a person model's vehicle thresholds across the swap.
+            extra = {'class_conf': old_detector.class_conf} if getattr(old_detector, 'class_conf', None) else {}
+            new_detector = HelmetPlateDetector(model_path, conf_threshold=threshold, **extra)
         except Exception as exc:
             result["message"] = f"Failed to load {model_path!r}: {exc}"
             return result
@@ -1060,7 +1071,9 @@ class VideoPipeline:
             return result
 
         try:
-            new_detector = HelmetPlateDetector(model_path, conf_threshold=threshold_map[engine])
+            current = getattr(getattr(self, attr_map[engine], None), 'class_conf', None)
+            extra = {'class_conf': current} if current else {}
+            new_detector = HelmetPlateDetector(model_path, conf_threshold=threshold_map[engine], **extra)
         except Exception as exc:
             result["message"] = f"Failed to load baseline {model_path!r}: {exc}"
             return result
@@ -1516,7 +1529,7 @@ class VideoPipeline:
             original = getattr(self, '_original_source_frame', frame)
             sh, sw = original.shape[:2]
             dh, dw = frame.shape[:2]
-            bbox = self._rescale_bbox(det.bbox, sw/dw, sh/dh)
+            bbox = self._padded_plate_box(self._rescale_bbox(det.bbox, sw/dw, sh/dh), sw, sh)
             candidate = make_candidate(original, bbox, det.confidence, self._frame_seq, time.time())
             store.offer(tid, candidate)
         best = store.candidate(tid)
@@ -1581,7 +1594,7 @@ class VideoPipeline:
             tid = det.track_id
             if tid is None:
                 continue  # untracked plate remains preview-only; no location identity
-            candidate = make_candidate(original, bbox, det.confidence,
+            candidate = make_candidate(original, self._padded_plate_box(bbox, sw, sh), det.confidence,
                                        self._frame_seq, time.time())
             if candidate is None:
                 continue

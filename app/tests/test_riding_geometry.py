@@ -261,3 +261,38 @@ def test_temporal_memory_is_bounded_and_expires_old_pairs():
     assert features.temporal_score < 0.65
     state.discard_vehicle(4)
     assert state.pair_count == 0
+
+
+def _frontal_pose(hip_x, knee_spread, ankle_spread):
+    """Bike seen head-on: box (40,40)-(100,160), 60 wide x 120 tall."""
+    from app.cv.pose import KP_LEFT_HIP, KP_RIGHT_HIP, KP_LEFT_KNEE, KP_RIGHT_KNEE, KP_LEFT_ANKLE, KP_RIGHT_ANKLE
+    kps = [_kp(0, 0, 0.0) for _ in range(17)]
+    kps[KP_LEFT_HIP] = kps[KP_RIGHT_HIP] = _kp(hip_x, 70)
+    kps[KP_LEFT_KNEE], kps[KP_RIGHT_KNEE] = _kp(hip_x - knee_spread / 2, 100), _kp(hip_x + knee_spread / 2, 100)
+    kps[KP_LEFT_ANKLE], kps[KP_RIGHT_ANKLE] = _kp(hip_x - ankle_spread / 2, 150), _kp(hip_x + ankle_spread / 2, 150)
+    return kps
+
+
+FRONTAL_BIKE = (40, 40, 100, 160)
+
+
+def test_frontal_straddle_on_centre_is_riding():
+    from app.cv.pose import SideViewRiding
+    result = SideViewRiding().evaluate(_frontal_pose(70, 36, 40), bike_bbox=FRONTAL_BIKE)
+    assert result.state == "RIDING"
+
+
+def test_frontal_person_beside_bike_with_legs_together_is_walking():
+    """Pushing a bike seen head-on: hips off the centre line, legs together.
+    The side-view rules called this RIDING (hips 'over the seat')."""
+    from app.cv.pose import SideViewRiding
+    result = SideViewRiding().evaluate(_frontal_pose(84, 10, 8), bike_bbox=FRONTAL_BIKE,
+                                       temporal_score=1.0)
+    assert result.state == "WALKING_WITH_BIKE"
+
+
+def test_frontal_centered_without_legs_stays_unknown():
+    from app.cv.pose import SideViewRiding, KP_LEFT_HIP, KP_RIGHT_HIP
+    kps = [_kp(0, 0, 0.0) for _ in range(17)]
+    kps[KP_LEFT_HIP] = kps[KP_RIGHT_HIP] = _kp(70, 70)
+    assert SideViewRiding().evaluate(kps, bike_bbox=FRONTAL_BIKE).state == "UNKNOWN"
