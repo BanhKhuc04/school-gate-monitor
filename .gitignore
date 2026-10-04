@@ -35,6 +35,8 @@ models/*.onnx.data
 !models/plate_best.pt
 yolov8n.pt
 yolov8n-pose.pt
+# yolov8s.pt — model người/xe khi có GPU, tự tải lần đầu
+yolov8s.pt
 yolov8n.onnx
 yolov8n-pose.onnx
 
