@@ -188,7 +188,13 @@ CAMERA_PRESETS = _camera_presets_from_env()
 CAMERA_LOOP = _gate_cfgs["main"]["loop"]
 
 # Model paths
-HELMET_MODEL_PATH = os.environ.get("HELMET_MODEL_PATH") or str(BASE_DIR / "models" / "helmet_best.pt")
+# helmet_new_best.pt = YOLO11n 640 (notebooks/kaggle_helmet_train.ipynb, EdgeVision + đầu
+# camera cổng duyệt tay, 2026-10-04): val ảnh thật mAP50 0.354 -> 0.745 ("có mũ" 0.18 ->
+# 0.71). Video camera trước 04/10 (đầu trần): gọi "có mũ" khi thấy rõ đầu 68 -> 0 lần.
+# Quay về model cũ: env HELMET_MODEL_PATH=models/helmet_best.pt.
+_HELMET_NEW = BASE_DIR / "models" / "helmet_new_best.pt"
+HELMET_MODEL_PATH = os.environ.get("HELMET_MODEL_PATH") or str(
+    _HELMET_NEW if _HELMET_NEW.exists() else BASE_DIR / "models" / "helmet_best.pt")
 # plate_real_best.pt = plate_best.pt fine-tune thêm ảnh camera thật đã duyệt tay
 # (notebooks/kaggle_plate_real_finetune.ipynb, 2026-10-04). Video không có trong
 # train: camera sau sáng 04/10 bắt biển 266 khung (cũ 105), đọc đúng 211 (cũ 95),
