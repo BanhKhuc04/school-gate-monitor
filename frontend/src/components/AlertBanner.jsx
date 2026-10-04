@@ -48,7 +48,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
           osc.frequency.value = code === 'RIDING_THROUGH_GATE' ? 520
             : code === 'TOO_MANY_RIDERS' ? 460
             : code === 'NO_HELMET' ? 600 : 800;
-          gain.gain.value = 0.3;
+          gain.gain.value = 0.7;
           osc.connect(gain);
           gain.connect(ctx.destination);
           osc.start();
@@ -70,7 +70,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
         clipPlayback.current.then(ok => { if (!ok) speakVietnamese(text, opts); });
       },
       cancel: () => { clipPlayback.current?.stop(); stopSpeech(); },
-      config: { rate: 1.25, volume: 1, debug: false },
+      config: { rate: 1.45, volume: 1, debug: false },
     });
     return () => {
       audioRef.current?.dispose?.();

@@ -73,6 +73,23 @@ def trim(path, pad_start=.04, pad_end=.08):
         tmp.unlink(missing_ok=True)
 
 
+# +8 dB then a limiter at ~-1 dBFS: gate PCs drive small speakers in a noisy
+# yard; the raw voice sat at -16..-19 dB mean and was hard to hear.
+LOUDNESS_FILTER = 'volume=8dB,alimiter=limit=0.89:level=disabled'
+
+
+def louden(path):
+    if not shutil.which('ffmpeg'):
+        return
+    tmp = path.with_suffix('.tmp.mp3')
+    done = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(path), '-af', LOUDNESS_FILTER,
+                           '-b:a', '64k', str(tmp)])
+    if done.returncode == 0 and tmp.stat().st_size > 500:
+        tmp.replace(path)
+    else:
+        tmp.unlink(missing_ok=True)
+
+
 async def synth(key, text, sem):
     path = OUT / f'{key}.mp3'
     if path.exists() and path.stat().st_size > 500:
@@ -83,6 +100,7 @@ async def synth(key, text, sem):
                 await edge_tts.Communicate(text, VOICE).save(str(path))
                 if path.stat().st_size > 500:
                     trim(path)
+                    louden(path)
                     return key, 'ok'
             except Exception:
                 pass
@@ -106,4 +124,10 @@ async def main():
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    import sys
+    if '--louden-existing' in sys.argv:  # one-off for packs built before LOUDNESS_FILTER
+        for clip in sorted(OUT.glob('*.mp3')):
+            louden(clip)
+        print('loudened', len(list(OUT.glob('*.mp3'))), 'clips')
+    else:
+        asyncio.run(main())
