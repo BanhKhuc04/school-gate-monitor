@@ -11,11 +11,14 @@ export function buildAlertMessage(data) {
     ['TOO_MANY_RIDERS','Mời kiểm tra số người trên xe.'],['PLATE_NOT_REGISTERED','Mời kiểm tra đăng ký xe.']]) {
     if(codes.has(code))parts.push(text);
   }
-  if(!parts.length && !codes.has('PLATE_UNREADABLE'))return '';
+  // A gate pass (no violation) still announces its plate: one sentence per
+  // bike, plate first, then whatever is wrong.
+  const pass=data.type==='gate_pass';
+  if(!parts.length && !codes.has('PLATE_UNREADABLE') && !pass)return '';
   const match=(data.plate_read || '').match(/^(\d{2})([A-Z]\d?|[A-Z]{2})(\d{4,5})$/);
   const plateValid=data.plate_status==='CONFIRMED' || (data.plate_status==null && data.plate_format_valid===true);
   if(match && plateValid)parts.unshift(`${match[1]} ${match[2]} ${match[3].slice(0,-2)} ${match[3].slice(-2)}.`);
-  else if(codes.has('PLATE_UNREADABLE'))parts.unshift('Không đọc được biển số.');
+  else parts.unshift('Không đọc được biển số.');
   return parts.join(' ');
 }
 
@@ -37,7 +40,8 @@ export function createAlertAudio({beep, speak, cancel, config={rate:1.30,volume:
       const ts=Date.parse(data.confirmed_at || data.timestamp);
       if(Number.isFinite(ts) && now()-ts>5000)return;
       const codes=speakableIssues(data);
-      if(!codes.length)return;
+      const pass=data.type==='gate_pass' && data.audio_authorized!==false;
+      if(!codes.length && !pass)return;
       const key=keyFor(data);
       if(spoken.has(key))return;
       if(batches.has(key)) {
@@ -58,7 +62,7 @@ export function createAlertAudio({beep, speak, cancel, config={rate:1.30,volume:
         if(!text)return;
         spoken.add(key);
         while(spoken.size>4096)spoken.delete(spoken.values().next().value);
-        const delay=beep(speakableIssues(batch.data)[0]) || 0;
+        const delay=beep(speakableIssues(batch.data)[0] || 'GATE_PASS') || 0;
         if(settings.debug)console.debug('[Alert]',{event:key,plate:batch.data.plate_read,
           issues:speakableIssues(batch.data),message:text,beep_calls:1,tts_calls:0,stage:'beep_requested'});
         schedule(()=>{

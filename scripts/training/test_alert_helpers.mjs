@@ -3,7 +3,7 @@
 // Load alertFilter.js + alertPriority.js + alertAudio.js directly via node ESM.
 import { speakableIssues, isSilentAlert } from '../../frontend/src/utils/alertFilter.js';
 import { getAlertPriority } from '../../frontend/src/utils/alertPriority.js';
-import { buildAlertMessage } from '../../frontend/src/utils/alertAudio.js';
+import { buildAlertMessage, createAlertAudio } from '../../frontend/src/utils/alertAudio.js';
 
 let ok = 0, fail = 0;
 function eq(name, got, want) {
@@ -54,7 +54,7 @@ const helmet_msg = buildAlertMessage({
   audio_authorized: true,
   issues: [{code: 'NO_HELMET', status: 'confirmed'}],
 });
-eq('helmet msg', helmet_msg, 'Vui lòng đội mũ.');
+eq('helmet msg', helmet_msg, 'Không đọc được biển số. Vui lòng đội mũ.');
 
 // 7) buildAlertMessage — helmet + riding
 const both_msg = buildAlertMessage({
@@ -66,7 +66,7 @@ const both_msg = buildAlertMessage({
     {code: 'RIDING_THROUGH_GATE', status: 'confirmed'},
   ],
 });
-eq('helmet+riding msg', both_msg, 'Không đội mũ, vui lòng dắt xe.');
+eq('helmet+riding msg', both_msg, 'Không đọc được biển số. Không đội mũ, vui lòng dắt xe.');
 
 // 8) buildAlertMessage — with confirmed plate → insert "59 Z1 23 45."
 const plate_msg = buildAlertMessage({
@@ -109,6 +109,25 @@ const none_msg = buildAlertMessage({
   issues: [{code: 'PLATE_OBSCURED', status: 'confirmed'}],
 });
 eq('no speakable → empty', none_msg, '');
+
+// 11) gate pass (no violation): plate only, or "cannot read"; silent without the speaker lease
+eq('pass with plate', buildAlertMessage({type: 'gate_pass', plate_read: '89F123792', plate_status: 'CONFIRMED',
+  audio_authorized: true, alert_finalized: true, issues: []}), '89 F1 237 92.');
+eq('pass unread', buildAlertMessage({type: 'gate_pass', plate_status: 'UNREADABLE', audio_authorized: true,
+  alert_finalized: true, issues: []}), 'Không đọc được biển số.');
+{
+  const spoken = [];
+  const timers = [];
+  const audio = createAlertAudio({beep: () => 0, speak: t => spoken.push(t), cancel() {},
+    setTimer: f => (timers.push(f), timers.length), clearTimer() {}});
+  const base = {type: 'gate_pass', plate_read: '89F123792', plate_status: 'CONFIRMED', alert_finalized: true,
+    issues: [], timestamp: new Date().toISOString(), crossing_event_id: 'c1', vehicle_track_id: 3};
+  audio.accept({...base, audio_authorized: false});
+  audio.accept({...base, audio_authorized: true});
+  audio.accept({...base, audio_authorized: true});  // same crossing: once
+  while (timers.length) timers.shift()();
+  eq('pass spoken once with lease', spoken, ['89 F1 237 92.']);
+}
 
 // Offline voice: every sentence the app can speak maps to recorded clips.
 {

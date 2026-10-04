@@ -26,7 +26,10 @@ from collections import deque
 
 WINDOW_SEC = max(1.0, float(os.environ.get('PAIRING_WINDOW_SEC', '8')))
 LINE_WINDOW_SEC = max(.5, float(os.environ.get('PAIRING_LINE_WINDOW_SEC', '2.5')))
-PAIRING_WAIT_SEC = max(0., float(os.environ.get('PAIRING_WAIT_SEC', '2.0')))
+# Hard cap from the front crossing to the spoken alert: the guard wants the
+# announcement within 1.5 s of the bike's nose touching the front line. A
+# plate arriving later is still attached to the saved event (no re-speak).
+PAIRING_WAIT_SEC = max(0., float(os.environ.get('PAIRING_WAIT_SEC', '1.5')))
 SAME_PLATE_SIMILARITY = 0.8
 MIN_OFFSET_SAMPLES = 5
 
@@ -54,8 +57,8 @@ def record_event(gate_id, event_ts):
 
 
 def wait_budget():
-    """How long a front event should wait for the rear plate crossing."""
-    return min(WINDOW_SEC, max(PAIRING_WAIT_SEC, offset() + LINE_WINDOW_SEC))
+    """How long a front event may wait for the rear plate crossing."""
+    return min(WINDOW_SEC, PAIRING_WAIT_SEC)
 
 
 def _learn(gate_id, plate, crossing_ts):

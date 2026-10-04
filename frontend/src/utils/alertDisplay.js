@@ -19,6 +19,12 @@ export function describeAlert(data) {
     }
     return { tone: 'warning', title: `Biển số chưa đăng ký: ${plate}`, detail: 'Không có trong danh sách xe của trường' };
   }
+  if (data?.type === 'gate_pass') {
+    const plate = data.plate_read ? formatPlate(data.plate_read) : '';
+    return plate
+      ? { tone: 'info', title: `Xe qua cổng: ${plate}`, detail: data.student_name || 'Không vi phạm' }
+      : { tone: 'warning', title: 'Xe qua cổng', detail: 'Không đọc được biển số' };
+  }
   if (data?.type === 'plate_paired') {
     const plate = formatPlate(data.plate_read);
     const who = [data.student_name, data.student_class && `Lớp ${data.student_class}`].filter(Boolean).join(' · ');

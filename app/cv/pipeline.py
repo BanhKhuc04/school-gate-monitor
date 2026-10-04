@@ -3073,10 +3073,9 @@ class VideoPipeline:
             # line, so the one spoken alert already carries the plate.
             # Bounded by a poll count, not the clock alone, so a stalled or
             # stubbed clock can never hold the crossing worker forever.
-            # Only an event that will be spoken waits; a clean crossing pairs
-            # with what is there now and frees the worker for the next bike.
-            needs_alert = any(i.get('status') == 'confirmed' for i in frozen.get('issues', []))
-            budget = gate_pairing.wait_budget() if needs_alert else 0.
+            # Every entering bike is announced with its plate (violation or
+            # not), so every front crossing waits for the rear plate.
+            budget = gate_pairing.wait_budget()
             polls = int(min(budget, max(0., event_ts + budget - time.time())) / .1) + 1
             for _ in range(polls):
                 text, conf, pairing, method = gate_pairing.pair_detail(event_ts, self.gate_id)
@@ -3101,6 +3100,8 @@ class VideoPipeline:
                 event['issues'].append({'code':'PLATE_NOT_REGISTERED','status':'confirmed','sample_count':1})
         confirmed = [i for i in event['issues'] if i['status'] == 'confirmed']
         if not confirmed:
+            if front:
+                self._push_gate_pass(frozen, event, matched)
             return True
         filename = f'{uuid.uuid4().hex}.jpg'
         if DEBUG_ALERT:
@@ -3120,6 +3121,25 @@ class VideoPipeline:
             gate_pairing.wait_for_plate(frozen.get('observed_ts', time.time()), self.gate_id,
                 lambda text, conf, status: self._attach_late_plate(eid, text, conf, status))
         return saved
+
+    def _push_gate_pass(self, frozen, event, matched):
+        """A clean entering crossing: one spoken line with the plate (or
+        'cannot read'); nothing is stored as a violation."""
+        alerts = getattr(self, '_alert_queue', None)
+        if alerts is None:
+            return
+        vehicle = get_vehicle_by_plate(event['plate_read']) if event.get('plate_read') else None
+        message = {'type': 'gate_pass', 'gate_id': self.gate_id, 'camera_id': frozen['camera_id'],
+                   'source_epoch': frozen['source_epoch'], 'vehicle_track_id': frozen['vehicle_track_id'],
+                   'crossing_event_id': event['crossing_event_id'], 'alert_finalized': True,
+                   'plate_read': event['plate_read'] or None, 'plate_status': event['plate_status'],
+                   'plate_matched': matched, 'registered': vehicle is not None,
+                   'student_name': vehicle.get('student_name') if vehicle else None,
+                   'issues': [], 'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        try:
+            alerts.put_nowait(message)
+        except queue.Full:
+            pass
 
     def _attach_late_plate(self, eid, text, confidence, status):
         """Write a plate paired after the event was saved; one UI notice, no

@@ -78,7 +78,7 @@ def test_front_camera_walked_bike_with_unread_plate_raises_nothing(pipeline,monk
     p._crossing_detector._tracks[7]=SimpleNamespace(has_crossed=True,crossed_at=5,rearmed=False)
     p._process_vehicle_crossings(frame,groups)
     for f in p._crossing_jobs.values():
-        f.result(timeout=2)
+        f.result(timeout=5)  # waits up to the pairing budget for a rear plate
     p._persist_violation.assert_not_called()
 
 

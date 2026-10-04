@@ -137,7 +137,7 @@ def test_camera_delay_is_learned_from_unique_pairs():
     assert abs(gp.offset() - 3.5) < 1e-9
     gp.record_plate('secondary', '29B12345', .9, ts=2003.6, crossing_ts=2003.6)
     assert gp.pair_detail(2000, 'main')[::2] == ('29B12345', 'paired')
-    assert gp.wait_budget() >= 3.5 + gp.LINE_WINDOW_SEC - 1e-9
+    assert gp.wait_budget() == gp.PAIRING_WAIT_SEC == 1.5  # alert never later than 1.5 s
 
 
 def test_rear_pipeline_reports_the_wall_time_a_plate_crosses_its_line(monkeypatch):
@@ -198,3 +198,23 @@ def test_rear_plate_notice_only_after_it_crossed_the_line(monkeypatch):
     p._plate_crossed_wall = {5: 123.0}
     p._announce_plate(5, None)
     assert p._alert_queue.get_nowait()['plate_read'] == '89F123792'
+
+
+def test_clean_crossing_is_announced_with_its_plate_but_not_stored(monkeypatch):
+    import queue as _q
+    from app.cv import pipeline as module
+    from app.cv.plate_voter import PlateReadResult
+    p = module.VideoPipeline.__new__(module.VideoPipeline)
+    p.role, p.gate_id, p._source_epoch = 'front', 'main', 0
+    p._alert_queue = _q.Queue()
+    p._persist_violation = MagicMock()
+    monkeypatch.setattr(module, 'get_vehicle_by_plate', lambda plate: {'plate_number': plate, 'student_name': 'An'})
+    now = module.time.time()
+    gp.record_plate('secondary', '89F123792', .9, crossing_ts=now)
+    frozen = {'event_id': 'e2', 'vehicle_track_id': 9, 'source_epoch': 0, 'camera_id': 'main', 'frame_seq': 1,
+              'observed_at': 'x', 'observed_ts': now, 'issues': [], 'plate': PlateReadResult(), 'future': None,
+              'deadline': 0, 'helmet_status': 'unknown', 'posture_status': 'walking_with_bike'}
+    assert p._finish_crossing_event(frozen, np.zeros((4, 4, 3), np.uint8), None, [])
+    p._persist_violation.assert_not_called()
+    msg = p._alert_queue.get_nowait()
+    assert (msg['type'], msg['plate_read'], msg['plate_status'], msg['student_name']) == ('gate_pass', '89F123792', 'CONFIRMED', 'An')
