@@ -158,11 +158,15 @@ VIDEO_HEIGHT = 720
 # OCR/vẽ box/lưu snapshot đều dùng ảnh gốc nét — đây là fix thật cho lỗi OCR
 # đọc rỗng dù box detect đúng 85%: đã đo thật, cùng 1 ảnh đọc đúng "188888" ở
 # độ phân giải gốc nhưng đọc rỗng khi resize xuống 640x480 trước khi OCR.
-# Có GPU: detect ở 960x544 (biển số/mũ nhỏ ở xa lớn gấp ~1.5 lần → bắt được
-# nhiều hơn rõ rệt). CPU giữ 640x480 như cũ để không tụt FPS.
-DETECT_WIDTH = int(os.environ.get("DETECT_WIDTH") or (960 if DEVICE == "cuda" else 640))
-DETECT_HEIGHT = int(os.environ.get("DETECT_HEIGHT") or (544 if DEVICE == "cuda" else 480))
-DETECT_IMGSZ = int(os.environ.get("DETECT_IMGSZ") or (960 if DEVICE == "cuda" else 640))
+# Có GPU: detect ở NGUYÊN độ phân giải 1280x720 (không thu nhỏ). Đo thật trên 9
+# biển số xe máy thật dán vào khung 1280x720 (scripts/prepare_demo.py dùng lại
+# ảnh này): biển cao 32px — detect ở 640 bắt được 1/10, ở 960 được 8/10, ở 1280
+# được 10/10; biển cao 24px — 640: 0/10, 1280: 5/10. GPU dư sức chạy 1280.
+# CPU giữ 640x480 như cũ để không tụt FPS (đặt DETECT_IMGSZ=960 + DETECT_WIDTH=960
+# + DETECT_HEIGHT=544 trong .env nếu CPU khỏe — bắt biển nhỏ tốt hơn hẳn, chậm ~40%).
+DETECT_WIDTH = int(os.environ.get("DETECT_WIDTH") or (1280 if DEVICE == "cuda" else 640))
+DETECT_HEIGHT = int(os.environ.get("DETECT_HEIGHT") or (720 if DEVICE == "cuda" else 480))
+DETECT_IMGSZ = int(os.environ.get("DETECT_IMGSZ") or (1280 if DEVICE == "cuda" else 640))
 
 # Violation cooldown (seconds)
 VIOLATION_COOLDOWN = 60  # Không cảnh báo lại cùng biển số trong 60 giây (cho DB)

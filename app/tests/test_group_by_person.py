@@ -47,3 +47,20 @@ def test_no_vehicle_nearby_stays_pedestrian():
     person = _det("person", (100, 100, 200, 300))
     groups = _pipeline()._group_by_person([person], [], [], [])
     assert groups[0]["vehicle_type"] is None
+
+
+def test_rider_detected_by_plate_when_motorcycle_missed():
+    """COCO bỏ sót xe máy (bị che) nhưng có biển số ngay dưới người → vẫn là
+    người đi xe máy, không bị coi là người đi bộ (mất hết vi phạm)."""
+    person = _det("person", (100, 100, 200, 400))
+    plate = _det("plate", (130, 380, 170, 410))   # dưới chân, trong bề ngang người
+    groups = _pipeline()._group_by_person([person], [], [plate], [])
+    assert groups[0]["vehicle_type"] == "motorcycle"
+
+
+def test_plate_far_above_person_does_not_make_rider():
+    """Biển số ở tận phía trên đầu người (xe khác ở xa) → vẫn là người đi bộ."""
+    person = _det("person", (100, 300, 200, 600))
+    plate = _det("plate", (130, 100, 170, 130))
+    groups = _pipeline()._group_by_person([person], [], [plate], [])
+    assert groups[0]["vehicle_type"] is None

@@ -266,3 +266,14 @@ def test_run_loop_end_to_end_two_plateless_vehicles(test_app, tmp_path, monkeypa
     assert len(new_items) == 2, [dict(i) for i in new_items]
     assert all(i["violation_type"] == "NO_PLATE" for i in new_items)
     assert pipeline.get_status()["helmet_model_ok"] is True
+
+
+def test_confident_plate_not_reread_every_frame(db_calls):
+    """Đã đọc biển chắc chắn cho 1 xe → các khung sau không OCR lại (tiết kiệm CPU)."""
+    pipeline = _make_pipeline()
+    plate = [MagicMock(bbox=(10, 10, 70, 45))]
+    with patch("app.cv.pipeline.read_plate_detailed", return_value={"full": "29A12345", "confidence": 0.9}) as ocr:
+        for _ in range(6):
+            _step(pipeline, track_id=20, plate_dets=plate)
+    assert ocr.call_count == 1
+    assert db_calls.call_args.kwargs["plate_read"] == "29A12345"

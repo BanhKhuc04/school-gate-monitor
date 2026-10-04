@@ -52,7 +52,14 @@ class WebcamStream:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-        self._realtime = realtime and self._is_file_or_url and os.path.isfile(source)
+        is_local_file = self._is_file_or_url and os.path.isfile(source)
+        if not is_local_file:
+            # Camera trực tiếp: giữ hàng đợi 1 khung — máy xử lý chậm hơn camera thì
+            # luôn lấy khung MỚI NHẤT thay vì khung cũ dồn lại (video trễ dần).
+            # Backend không hỗ trợ thì lệnh này bị bỏ qua, không lỗi.
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        self._realtime = realtime and is_local_file
         fps = self.cap.get(cv2.CAP_PROP_FPS) if self._realtime else 0
         self._fps = fps if fps and 1 <= fps <= 240 else 25.0
         self._clock_start = None

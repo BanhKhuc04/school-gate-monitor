@@ -99,20 +99,28 @@ class VideoPipeline:
         
         # Khởi tạo detectors
         print("[Pipeline] Loading helmet model...")
-        self._helmet_detector = HelmetPlateDetector(
-            HELMET_MODEL_PATH, conf_threshold=HELMET_CONF_THRESHOLD, imgsz=DETECT_IMGSZ
-        )
-        print("[Pipeline] Helmet model loaded:", self._helmet_detector.class_names)
         # Model mũ bảo hiểm PHẢI có lớp có mũ / không mũ. Bản trong repo từng bị
         # ghi đè nhầm bằng 1 model biển số (lớp duy nhất 'plate') → hệ thống không
         # bao giờ phát hiện được lỗi không đội mũ mà không báo gì. Giờ kiểm tra
-        # ngay lúc khởi động, báo lỗi rõ ràng + hiện cảnh báo trên trang Sức khỏe.
-        self._helmet_model_classes = [str(n) for n in self._helmet_detector.class_names.values()]
+        # ngay lúc khởi động: thiếu file / sai model → báo lỗi rõ ràng, hiện cảnh
+        # báo trên trang Sức khỏe, các phần khác (biển số, người, xe) vẫn chạy.
+        self._helmet_detector = None
+        self._helmet_model_classes: list[str] = []
+        if os.path.exists(HELMET_MODEL_PATH):
+            try:
+                self._helmet_detector = HelmetPlateDetector(
+                    HELMET_MODEL_PATH, conf_threshold=HELMET_CONF_THRESHOLD, imgsz=DETECT_IMGSZ
+                )
+                self._helmet_model_classes = [str(n) for n in self._helmet_detector.class_names.values()]
+                print("[Pipeline] Helmet model loaded:", self._helmet_detector.class_names)
+            except Exception as e:
+                print(f"[Pipeline] Không nạp được model mũ bảo hiểm: {e}")
         self._helmet_model_ok = any(helmet_state(n) for n in self._helmet_model_classes)
         if not self._helmet_model_ok:
+            reason = (f"KHÔNG phải model mũ bảo hiểm (các lớp: {self._helmet_model_classes})"
+                      if self._helmet_model_classes else "không tồn tại hoặc không đọc được")
             print("=" * 78)
-            print(f"[Pipeline] LỖI: {HELMET_MODEL_PATH} KHÔNG phải model mũ bảo hiểm "
-                  f"(các lớp: {self._helmet_model_classes}).")
+            print(f"[Pipeline] LỖI: {HELMET_MODEL_PATH} {reason}.")
             print("[Pipeline] → Tắt phát hiện mũ bảo hiểm. Sửa: chạy  python scripts/prepare_demo.py")
             print("=" * 78)
 
@@ -415,9 +423,15 @@ class VideoPipeline:
                 # tốc độ detect vì detect vẫn chạy trên ảnh nhỏ như cũ.
                 t0 = time.perf_counter()
                 frame_h, frame_w = frame.shape[:2]
-                detect_frame = cv2.resize(frame, (DETECT_WIDTH, DETECT_HEIGHT))
-                scale_x = frame_w / DETECT_WIDTH
-                scale_y = frame_h / DETECT_HEIGHT
+                if frame_w <= DETECT_WIDTH and frame_h <= DETECT_HEIGHT:
+                    # Khung đã nhỏ hơn/bằng cỡ detect (GPU detect nguyên ảnh, hoặc
+                    # webcam độ phân giải thấp) — không resize/phóng to vô ích
+                    detect_frame = frame
+                    scale_x = scale_y = 1.0
+                else:
+                    detect_frame = cv2.resize(frame, (DETECT_WIDTH, DETECT_HEIGHT))
+                    scale_x = frame_w / DETECT_WIDTH
+                    scale_y = frame_h / DETECT_HEIGHT
 
                 # Chạy person/helmet/plate song song (3 luồng) thay vì tuần tự —
                 # cả 3 chỉ cần đúng 1 input là detect_frame, không phụ thuộc lẫn
@@ -711,6 +725,19 @@ class VideoPipeline:
                     vehicle_type = v.class_name.lower()
                     matched_vehicle = v
 
+            # Dự phòng: COCO bỏ sót xe máy (xe bị người/xe khác che, góc khuất)
+            # nhưng có BIỂN SỐ nằm ngay phần dưới người này → chắc chắn đang đi
+            # xe máy (người đi bộ không mang biển số). Trước đây người này bị coi
+            # là người đi bộ → mất hết vi phạm của xe đó. Điều kiện thận trọng:
+            # tâm biển nằm trong bề ngang người, từ giữa thân xuống tới dưới chân
+            # thêm 30% chiều cao người (biển sau xe nằm thấp hơn chỗ ngồi).
+            if vehicle_type is None and group_plates:
+                bx1, by1, bx2, by2 = group_plates[0].bbox
+                bcx, bcy = (bx1 + bx2) / 2, (by1 + by2) / 2
+                p_height = py2 - py1
+                if px1 <= bcx <= px2 and pcy <= bcy <= py2 + 0.3 * p_height:
+                    vehicle_type = 'motorcycle'
+
             groups.append({
                 '_person': person,
                 '_vehicle': matched_vehicle,
@@ -823,7 +850,11 @@ class VideoPipeline:
         frame_plate_text = ""
         frame_plate_conf = None
         frame_plate_confident = False
-        if plate_dets:
+        already_confident = (state is not None and state['best_plate'] is not None
+                             and state['best_plate'][2])
+        if plate_dets and not already_confident:
+            # (Đã đọc được biển chắc chắn cho người/xe này rồi thì không OCR lại
+            # mỗi khung hình nữa — OCR tốn ~0.4s/lần trên CPU, để dành cho xe khác)
             best_plate = plate_dets[0]  # Đã được gán ở _group_by_person
             vote_key = ('track', track_id) if state is not None else None
             plate_result = self._read_plate_voted(frame, best_plate, key=vote_key)
