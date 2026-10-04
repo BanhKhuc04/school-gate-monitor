@@ -322,7 +322,9 @@ def test_run_loop_survives_failing_job_and_runs_next_job(client, monkeypatch):
     # _run_job_safely là `job_fn.__name__` (ở đây = "flaky_cleanup" do monkeypatch),
     # còn job_name trong nhánh success là "_cleanup_job" (do real_cleanup gọi).
     # Hai tên khác nhau có CHỦ ĐÍCH: audit log phản ánh đúng hàm thực sự chạy.
-    rows = list_maintenance_log(limit=10)
+    # limit lớn: với interval=0 vòng lặp chạy rất nhanh — trên máy nhanh, dòng lỗi
+    # (lần chạy đầu tiên) bị hàng chục dòng success đẩy ra khỏi 10 dòng mới nhất.
+    rows = list_maintenance_log(limit=100000)
     failed = [r for r in rows if r["success"] == 0]
     success = [r for r in rows if r["success"] == 1]
     assert len(failed) >= 1, f"Expected at least 1 failure log, got rows: {rows}"

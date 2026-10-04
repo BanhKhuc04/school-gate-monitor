@@ -64,11 +64,19 @@ class PlateVoter:
         # Bỏ mẫu đã quá cũ (ngoài window) trước khi đọc mẫu mới
         history[:] = [s for s in history if now - s.ts < self.window_sec]
 
+        # Nới box thêm 6% mỗi phía: box detect thường cắt sát mép, làm mất nét
+        # chữ ở rìa biển số (ký tự đầu/cuối bị đọc sai hoặc mất hẳn).
         x1, y1, x2, y2 = plate_det.bbox
+        pad_x = round((x2 - x1) * 0.06)
+        pad_y = round((y2 - y1) * 0.06)
+        frame_h, frame_w = frame.shape[:2]
+        x1, y1 = max(0, x1 - pad_x), max(0, y1 - pad_y)
+        x2, y2 = min(frame_w, x2 + pad_x), min(frame_h, y2 + pad_y)
         crop = frame[y1:y2, x1:x2]
         text = ""
         confidence = 0.0
-        if crop.size > 0 and crop.shape[0] > 20 and crop.shape[1] > 40:
+        # Biển nhỏ (xe ở xa) vẫn được đọc — OCR tự phóng to crop trước khi đọc
+        if crop.size > 0 and crop.shape[0] >= 12 and crop.shape[1] >= 20:
             result = ocr_fn(crop)
             text = result.get('full', '') or ''
             confidence = result.get('confidence', 0.0) or 0.0

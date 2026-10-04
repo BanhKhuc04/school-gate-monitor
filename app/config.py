@@ -91,9 +91,14 @@ CAMERA_LOOP = _gate_cfgs["main"]["loop"]
 # Model paths
 HELMET_MODEL_PATH = str(BASE_DIR / "models" / "helmet_best.pt")
 PLATE_MODEL_PATH = str(BASE_DIR / "models" / "plate_best.pt")
+# Model đọc từng ký tự biển số (YOLO) — chỉ dùng khi file tồn tại (train bằng
+# scripts/train_all.py), không có thì OCR tự dùng EasyOCR như trước.
+PLATE_OCR_MODEL_PATH = os.environ.get("PLATE_OCR_MODEL_PATH") or str(BASE_DIR / "models" / "plate_ocr_best.pt")
 # yolov8n.pt/yolov8n-pose.pt COCO - ultralytics tự tải khi khởi tạo, không cần đặt vào models/
-PERSON_MODEL_PATH = "yolov8n.pt"
-POSE_MODEL_PATH = "yolov8n-pose.pt"
+# Có GPU: dùng bản "s" (lớn hơn ~3x, bắt người/xe ở xa tốt hơn rõ rệt) — GPU dư sức
+# chạy. CPU giữ bản "n" để không tụt FPS. Đè bằng env PERSON_MODEL_PATH nếu muốn.
+PERSON_MODEL_PATH = os.environ.get("PERSON_MODEL_PATH") or ("yolov8s.pt" if DEVICE == "cuda" else "yolov8n.pt")
+POSE_MODEL_PATH = os.environ.get("POSE_MODEL_PATH") or "yolov8n-pose.pt"
 
 # ponytail: đã thử export ONNX + benchmark thật (scripts/export_onnx.py,
 # scripts/benchmark_inference.py) — chậm hơn .pt trên CPU này (0.3x-1.0x), không
