@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import client, { API_BASE_URL } from '../api/client';
 import { formatDate } from '../utils/format';
-import { VIOLATION_LABELS } from '../utils/violationLabels';
+import { VIOLATION_LABELS, violationDetailList, violationText } from '../utils/violationLabels';
 import { speakVietnamese } from '../utils/speak';
 import { useAuth } from '../auth/AuthContext';
 import StudentAutocomplete from '../components/StudentAutocomplete';
@@ -124,12 +124,21 @@ function CorrelationBadge({ status, onClick }) {
   );
 }
 
-function ViolationBadge({ type }) {
-  const colors = VIOLATION_COLORS[type] || VIOLATION_COLORS.NO_HELMET;
+function ViolationBadge({ type, details }) {
+  // Nhiều lỗi: hiện từng lỗi cụ thể thay vì chỉ ghi chung chung "Nhiều lỗi"
+  const list = details ? violationDetailList({ violation_type: type, violation_details: details }) : [type];
+  if (list.length > 1) {
+    return (
+      <span className="inline-flex flex-wrap gap-1">
+        {list.map(t => <ViolationBadge key={t} type={t} />)}
+      </span>
+    );
+  }
+  const colors = VIOLATION_COLORS[list[0]] || VIOLATION_COLORS.NO_HELMET;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold font-mono border ${colors.bg} ${colors.text} ${colors.border}`}>
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
-      {colors.label}
+      {VIOLATION_COLORS[list[0]] ? colors.label : (VIOLATION_LABELS[list[0]] || list[0])}
     </span>
   );
 }
@@ -148,7 +157,7 @@ function buildSummaryText(v) {
   const plate = v.plate_matched || v.plate_read;
   const who = v.student_name ? `học sinh ${v.student_name}, lớp ${v.student_class}` : 'chưa xác định danh tính';
   const plateText = plate ? `biển số ${plate}` : 'không đọc được biển số';
-  const label = VIOLATION_LABELS[v.violation_type] || v.violation_type;
+  const label = violationText(v);
   const time = new Date(v.timestamp).toLocaleTimeString('vi-VN', { hour12: false });
   return `Vi phạm lúc ${time}. ${plateText}. ${who}. Lỗi: ${label}.`;
 }
@@ -226,7 +235,7 @@ function ViolationDetailModal({ violation, onClose, onUpdate, linkedViolation, o
         <div className="p-5 space-y-3">
           {/* Feature 10: Badges */}
           <div className="flex items-center gap-2 flex-wrap">
-            <ViolationBadge type={v.violation_type} />
+            <ViolationBadge type={v.violation_type} details={v.violation_details} />
             <StatusBadge status={v.status || 'pending'} />
             {/* Đợt 2, Bước 3: badge ghép 2 camera */}
             <CorrelationBadge
@@ -670,7 +679,7 @@ export default function AdminViolationsPage() {
                         )}
                       </td>
                       <td className="py-3 px-2">
-                        <ViolationBadge type={v.violation_type} />
+                        <ViolationBadge type={v.violation_type} details={v.violation_details} />
                       </td>
                       <td className="py-3 px-2">
                         <StatusBadge status={v.status || 'pending'} />

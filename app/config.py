@@ -125,8 +125,20 @@ MAX_RIDERS_PER_MOTORCYCLE = 2
 # Tính theo % kích thước khung hình để không phụ thuộc độ phân giải camera.
 FRAME_EDGE_MARGIN_RATIO = 0.03
 
-# Frame processing
-FRAME_SKIP = 2  # Xử lý cách 1 frame để giảm tải CPU (1 = mọi frame, 2 = cách 1 frame)
+# Frame processing — có GPU thì xử lý MỌI frame (GPU dư sức), CPU thì cách 1 frame.
+# Đè bằng env FRAME_SKIP nếu máy yếu bị giật (1 = mọi frame, 2 = cách 1 frame).
+FRAME_SKIP = max(1, int(os.environ.get("FRAME_SKIP") or (1 if DEVICE == "cuda" else 2)))
+
+# Video FILE (không áp dụng webcam/RTSP) phát đúng tốc độ thật: xử lý chậm hơn
+# video thì bỏ bớt frame để bắt kịp, nhanh hơn thì chờ — giống hệt camera thật.
+# Tắt (=0) thì đọc file nhanh nhất có thể như trước (video bị tua nhanh/chậm
+# tùy tốc độ máy).
+VIDEO_FILE_REALTIME = os.environ.get("VIDEO_FILE_REALTIME", "1") == "1"
+
+# Theo dõi người qua nhiều khung hình (app/cv/tracker.py): mỗi người/xe chỉ được
+# kết luận vi phạm sau khi đã thấy ở ít nhất N lần detect — gom đủ bằng chứng
+# (biển số rõ hơn, mũ/tư thế ổn định) thay vì kết luận vội từ 1 khung hình.
+TRACK_MIN_FRAMES = max(1, int(os.environ.get("TRACK_MIN_FRAMES", "3")))
 
 # Database
 DB_PATH = str(BASE_DIR / "data" / "app.db")
@@ -146,8 +158,11 @@ VIDEO_HEIGHT = 720
 # OCR/vẽ box/lưu snapshot đều dùng ảnh gốc nét — đây là fix thật cho lỗi OCR
 # đọc rỗng dù box detect đúng 85%: đã đo thật, cùng 1 ảnh đọc đúng "188888" ở
 # độ phân giải gốc nhưng đọc rỗng khi resize xuống 640x480 trước khi OCR.
-DETECT_WIDTH = 640
-DETECT_HEIGHT = 480
+# Có GPU: detect ở 960x544 (biển số/mũ nhỏ ở xa lớn gấp ~1.5 lần → bắt được
+# nhiều hơn rõ rệt). CPU giữ 640x480 như cũ để không tụt FPS.
+DETECT_WIDTH = int(os.environ.get("DETECT_WIDTH") or (960 if DEVICE == "cuda" else 640))
+DETECT_HEIGHT = int(os.environ.get("DETECT_HEIGHT") or (544 if DEVICE == "cuda" else 480))
+DETECT_IMGSZ = int(os.environ.get("DETECT_IMGSZ") or (960 if DEVICE == "cuda" else 640))
 
 # Violation cooldown (seconds)
 VIOLATION_COOLDOWN = 60  # Không cảnh báo lại cùng biển số trong 60 giây (cho DB)

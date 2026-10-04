@@ -53,12 +53,17 @@ class PlateVoter:
         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
         return (cx // self.grid_px, cy // self.grid_px)
 
-    def read(self, frame, plate_det, ocr_fn: Callable[[object], dict]) -> PlateReadResult:
+    def read(self, frame, plate_det, ocr_fn: Callable[[object], dict], key=None) -> PlateReadResult:
         """
         ocr_fn(crop) -> {'full': str, 'confidence': float} — thường là
         app.cv.ocr.read_plate_detailed, tiêm từ ngoài vào (xem docstring module).
+
+        key: khóa gom phiếu — pipeline truyền ID theo dõi của xe (app/cv/tracker.py)
+        để gom được phiếu của xe ĐANG CHẠY (vị trí đổi ô lưới liên tục). Không
+        truyền thì gom theo ô lưới vị trí như cũ.
         """
-        key = self._key(plate_det.bbox)
+        if key is None:
+            key = self._key(plate_det.bbox)
         now = time.time()
         history = self._samples.setdefault(key, [])
         # Bỏ mẫu đã quá cũ (ngoài window) trước khi đọc mẫu mới

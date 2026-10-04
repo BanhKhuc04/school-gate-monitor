@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import client, { API_BASE_URL } from '../api/client';
-import { formatDate } from '../utils/format';
 import { VIOLATION_LABELS } from '../utils/violationLabels';
-import ViolationTimeline from '../components/ViolationTimeline';
 
 /**
  * Feature 2+6: Violation history page for a specific student's vehicle.

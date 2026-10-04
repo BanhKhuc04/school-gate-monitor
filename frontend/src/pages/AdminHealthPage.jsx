@@ -128,8 +128,31 @@ export default function AdminHealthPage() {
                   </svg>
                   Pipeline · {gate.name}
                 </h2>
-                <span className="font-mono text-[10px] text-[#6b7280]">{gate.id.toUpperCase()}</span>
+                <span className="font-mono text-[10px] text-[#6b7280]">
+                  {gp.device && (
+                    <span className={`mr-2 px-1.5 py-0.5 rounded ${gp.device === 'cuda' ? 'bg-[#d1fae5] text-[#065f46]' : 'bg-[#fef3c7] text-[#92400e]'}`}>
+                      {gp.device === 'cuda' ? 'GPU' : 'CPU'}
+                    </span>
+                  )}
+                  {gate.id.toUpperCase()}
+                </span>
               </div>
+              {gp.helmet_model_ok === false && (
+                <div className="bg-[#f8d7dc] border border-[#f0aab3] text-[#7a1422] px-4 py-3 rounded-xl mb-4 text-[12px]">
+                  <b>Model mũ bảo hiểm SAI</b> (các lớp: {(gp.helmet_model_classes || []).join(', ') || '—'}) — hệ thống
+                  đang KHÔNG phát hiện được lỗi không đội mũ. Sửa: chạy <code className="font-mono">python scripts/prepare_demo.py</code> rồi khởi động lại.
+                </div>
+              )}
+              {gp.camera_error && (
+                <div className="bg-[#f8d7dc] border border-[#f0aab3] text-[#7a1422] px-4 py-3 rounded-xl mb-4 text-[12px]">
+                  <b>Lỗi camera:</b> {gp.camera_error} — hệ thống tự thử lại mỗi 3 giây. Đổi nguồn tại mục "Cấu hình Camera".
+                </div>
+              )}
+              {gp.device && (
+                <p className="text-[11px] font-mono text-[#6b7280] mb-3">
+                  Model người/xe: {gp.person_model} · ảnh detect {gp.detect_size} · xử lý {gp.frame_skip === 1 ? 'mọi frame' : `1/${gp.frame_skip} frame`}
+                </p>
+              )}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                 <StatCell label="FPS" value={gp.fps != null ? gp.fps.toFixed(1) : '—'} unit="fps" />
                 <StatCell label="Độ trễ xử lý" value={gp.avg_process_latency_ms != null ? gp.avg_process_latency_ms : '—'} unit="ms" color="text-[#f59e0b]" />

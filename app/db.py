@@ -147,6 +147,12 @@ def init_db():
             cursor.execute("ALTER TABLE violation_events ADD COLUMN posture_status TEXT")
         except sqlite3.OperationalError:
             pass
+        # Danh sách lỗi cụ thể (vd. "NO_HELMET,PLATE_NOT_REGISTERED") — violation_type
+        # chỉ ghi "MULTIPLE" khi có nhiều lỗi, cột này để giao diện hiện rõ từng lỗi
+        try:
+            cursor.execute("ALTER TABLE violation_events ADD COLUMN violation_details TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         try:
             cursor.execute("ALTER TABLE violation_events ADD COLUMN plate_format_valid INTEGER")
@@ -406,7 +412,8 @@ def add_violation_event(timestamp: str, plate_read: str = None,
                        clip_path: str = None,
                        plate_confidence: Optional[float] = None,
                        gate_id: str = None,
-                       status: str = 'pending') -> int:
+                       status: str = 'pending',
+                       violation_details: Optional[str] = None) -> int:
     """
     Thêm sự kiện vi phạm.
 
@@ -423,6 +430,8 @@ def add_violation_event(timestamp: str, plate_read: str = None,
         plate_confidence: độ tin cậy đọc biển số 0.0-1.0 (đợt 2, Bước 1 — PlateVoter)
         gate_id: camera nào tạo ra bản ghi này (đợt 2, Bước 1 — cần cho Bước 3 ghép 2 camera)
         status: 'pending' (mặc định) | 'needs_review' (AI không chắc chắn — Bước 1)
+        violation_details: danh sách lỗi cụ thể, phân cách bằng dấu phẩy (khi
+            violation_type='MULTIPLE' — để giao diện hiện rõ từng lỗi)
 
     Returns:
         ID của sự kiện mới
@@ -433,11 +442,11 @@ def add_violation_event(timestamp: str, plate_read: str = None,
             cursor = conn.cursor()
             cursor.execute(
                 '''INSERT INTO violation_events
-                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path, plate_confidence, gate_id, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path, plate_confidence, gate_id, status, violation_details)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status,
                  None if plate_format_valid is None else int(plate_format_valid), clip_path,
-                 plate_confidence, gate_id, status)
+                 plate_confidence, gate_id, status, violation_details)
             )
             conn.commit()
             return cursor.lastrowid
@@ -486,8 +495,9 @@ def list_violations(
             conditions.append('ve.timestamp <= ?')
             params.append(date_to)
         if violation_type:
-            conditions.append('ve.violation_type = ?')
-            params.append(violation_type)
+            # Lọc "Không đội mũ" cũng phải ra cả bản ghi MULTIPLE có lỗi đó
+            conditions.append("(ve.violation_type = ? OR ',' || COALESCE(ve.violation_details, '') || ',' LIKE ?)")
+            params.extend([violation_type, f'%,{violation_type},%'])
         if plate:
             conditions.append('(ve.plate_read LIKE ? OR ve.plate_matched LIKE ?)')
             like_val = f'%{plate}%'

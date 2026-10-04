@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import AlertBanner from '../components/AlertBanner';
 import client, { API_BASE_URL } from '../api/client';
-import { VIOLATION_LABELS } from '../utils/violationLabels';
+import { violationText } from '../utils/violationLabels';
 
 const MAX_LOG_ITEMS = 12;
 
@@ -151,7 +151,7 @@ export default function GuardPage() {
                 <div key={a._id} className="bg-primary-container rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-error text-on-error">
-                      {VIOLATION_LABELS[a.violation_type] || a.violation_type}
+                      {violationText(a)}
                     </span>
                     <span className="font-mono text-[10px] text-on-primary-container">
                       {new Date(a.timestamp).toLocaleTimeString('vi-VN', { hour12: false })}

@@ -13,10 +13,6 @@ import StudentViolationHistoryPage from './pages/StudentViolationHistoryPage';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
 
-function LoginLayout({ children }) {
-  return <>{children}</>;
-}
-
 function AppRoutes() {
   const { user } = useAuth();
 

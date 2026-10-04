@@ -317,9 +317,11 @@ def export_violations_csv(
         'Học sinh', 'Lớp', 'Tư thế',
     ])
     for row in result['items']:
+        # MULTIPLE → liệt kê rõ từng lỗi (violation_details), không chỉ "Nhiều vi phạm"
+        types = [t for t in (row.get('violation_details') or '').split(',') if t] or [row.get('violation_type', '')]
         writer.writerow([
             row.get('timestamp', ''),
-            VIOLATION_TYPE_LABELS.get(row.get('violation_type'), row.get('violation_type', '')),
+            ' + '.join(VIOLATION_TYPE_LABELS.get(t, t) for t in types),
             row.get('plate_read') or '',
             row.get('plate_matched') or '',
             row.get('student_name') or '',

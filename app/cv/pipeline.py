@@ -25,11 +25,13 @@ from app.config import (
     CONTINUOUS_RECORDING_ENABLED, CONTINUOUS_RECORDING_SEGMENT_MINUTES,
     CONTINUOUS_RECORDING_FPS, CONTINUOUS_RECORDING_WIDTH, CONTINUOUS_RECORDING_HEIGHT,
     CONTINUOUS_RECORDING_DIR, FRAME_EDGE_MARGIN_RATIO,
+    DETECT_IMGSZ, VIDEO_FILE_REALTIME, TRACK_MIN_FRAMES, DEVICE,
 )
 from app.cv.capture import WebcamStream
-from app.cv.detector import HelmetPlateDetector, Detection
-from app.cv.ocr import read_plate_detailed, validate_plate_format
+from app.cv.detector import HelmetPlateDetector, Detection, helmet_state
+from app.cv.ocr import read_plate_detailed, validate_plate_format, warm_up as warm_up_ocr
 from app.cv.plate_voter import PlateVoter
+from app.cv.tracker import IouTracker
 from app.cv.event_correlator import find_correlation_candidate
 from app.cv.roi import to_pixel_polygon, filter_by_roi
 from app.db import (
@@ -44,6 +46,23 @@ COLOR_HELMET = (0, 255, 0)      # Xanh lá - có mũ
 COLOR_NO_HELMET = (0, 0, 255)   # Đỏ - không mũ
 COLOR_PLATE = (255, 255, 0)     # Cyan - biển số
 COLOR_PERSON = (255, 128, 0)    # Cam - người (COCO)
+COLOR_OK = (60, 170, 60)        # Xanh lá - xe đã đăng ký, không lỗi
+COLOR_VIOLATION = (40, 40, 220) # Đỏ - có vi phạm
+COLOR_REVIEW = (200, 80, 160)   # Tím - biển số cần người kiểm tra
+COLOR_PENDING = (0, 160, 230)   # Cam - đang gom bằng chứng
+COLOR_PEDESTRIAN = (140, 140, 140)
+
+# Nhãn KHÔNG DẤU vẽ lên video (cv2.putText không hiển thị được tiếng Việt có dấu)
+VIOLATION_SHORT_LABELS = {
+    'NO_HELMET': 'KHONG MU',
+    'PLATE_NOT_REGISTERED': 'BIEN LA',
+    'NO_PLATE': 'KHONG BIEN',
+    'PLATE_OBSCURED': 'BIEN MO',
+    'PLATE_LOW_CONFIDENCE': 'CAN KIEM TRA',
+    'RIDING_THROUGH_GATE': 'CHAY XE QUA CONG',
+    'TOO_MANY_RIDERS': 'CHO QUA NGUOI',
+}
+_PLATE_MISSING_TYPES = {'NO_PLATE', 'PLATE_OBSCURED'}
 THICKNESS = 2
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -76,23 +95,37 @@ class VideoPipeline:
         
         # Khởi tạo webcam
         self._webcam: Optional[WebcamStream] = None
+        self._camera_error: Optional[str] = None
         
         # Khởi tạo detectors
         print("[Pipeline] Loading helmet model...")
         self._helmet_detector = HelmetPlateDetector(
-            HELMET_MODEL_PATH, conf_threshold=HELMET_CONF_THRESHOLD
+            HELMET_MODEL_PATH, conf_threshold=HELMET_CONF_THRESHOLD, imgsz=DETECT_IMGSZ
         )
         print("[Pipeline] Helmet model loaded:", self._helmet_detector.class_names)
-        
+        # Model mũ bảo hiểm PHẢI có lớp có mũ / không mũ. Bản trong repo từng bị
+        # ghi đè nhầm bằng 1 model biển số (lớp duy nhất 'plate') → hệ thống không
+        # bao giờ phát hiện được lỗi không đội mũ mà không báo gì. Giờ kiểm tra
+        # ngay lúc khởi động, báo lỗi rõ ràng + hiện cảnh báo trên trang Sức khỏe.
+        self._helmet_model_classes = [str(n) for n in self._helmet_detector.class_names.values()]
+        self._helmet_model_ok = any(helmet_state(n) for n in self._helmet_model_classes)
+        if not self._helmet_model_ok:
+            print("=" * 78)
+            print(f"[Pipeline] LỖI: {HELMET_MODEL_PATH} KHÔNG phải model mũ bảo hiểm "
+                  f"(các lớp: {self._helmet_model_classes}).")
+            print("[Pipeline] → Tắt phát hiện mũ bảo hiểm. Sửa: chạy  python scripts/prepare_demo.py")
+            print("=" * 78)
+
         print("[Pipeline] Loading plate model...")
         self._plate_detector = HelmetPlateDetector(
-            PLATE_MODEL_PATH, conf_threshold=PLATE_CONF_THRESHOLD
+            PLATE_MODEL_PATH, conf_threshold=PLATE_CONF_THRESHOLD, imgsz=DETECT_IMGSZ
         )
         print("[Pipeline] Plate model loaded:", self._plate_detector.class_names)
 
         print("[Pipeline] Loading person model (COCO)...")
         self._person_detector = HelmetPlateDetector(
-            PERSON_MODEL_PATH, conf_threshold=PERSON_CONF_THRESHOLD
+            PERSON_MODEL_PATH, conf_threshold=PERSON_CONF_THRESHOLD, imgsz=DETECT_IMGSZ,
+            fallback_path="yolov8n.pt" if PERSON_MODEL_PATH != "yolov8n.pt" else None,
         )
         print("[Pipeline] Person model loaded:", self._person_detector.class_names)
 
@@ -117,8 +150,15 @@ class VideoPipeline:
         # Cooldown cho cảnh báo WebSocket
         self._last_alert_time: float = 0.0
 
-        # Cooldown cho ghi log vi phạm vào DB: {(plate_type, violation_type): last_time}
+        # Cooldown cho ghi log vi phạm vào DB: {(biển số/track, violation_type): last_time}
         self._last_log_time: dict = {}
+
+        # Theo dõi từng người qua nhiều khung hình — mỗi người/xe được gom bằng
+        # chứng riêng và ghi vi phạm đúng 1 lần (xem app/cv/tracker.py).
+        self._tracker = IouTracker()
+        self._track_state: dict[int, dict] = {}
+        # Nhãn (biển số, lỗi) vẽ lên video — cache để vẽ lại ở frame bị skip
+        self._overlay_labels: list[tuple[tuple, str, tuple]] = []
 
         # Vote biển số qua nhiều lần đọc gần nhau (vị trí + thời gian) — thay cho
         # cache 1-giá-trị cũ. EasyOCR CPU tốn 300-800ms/lần nên vẫn cache theo vị
@@ -193,6 +233,8 @@ class VideoPipeline:
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        # Nạp sẵn OCR ở nền — lần đọc biển số đầu tiên không bị khựng vài giây
+        threading.Thread(target=warm_up_ocr, daemon=True, name="ocr-warmup").start()
         # Bước 7: start recorder SAU thread chính — push_frame ngay frame đầu tiên
         # (trước mọi early-return trong _run_loop). Xem comment trong _run_loop.
         if self._recorder is not None:
@@ -277,6 +319,13 @@ class VideoPipeline:
             "plate_read_success_rate": plate_success_rate,
             "pedestrian_count": self._pedestrian_count,
             "rider_count": self._rider_count,
+            "device": DEVICE,
+            "helmet_model_ok": self._helmet_model_ok,
+            "helmet_model_classes": self._helmet_model_classes,
+            "person_model": self._person_detector.model_path,
+            "frame_skip": FRAME_SKIP,
+            "detect_size": f"{DETECT_WIDTH}x{DETECT_HEIGHT}",
+            "camera_error": self._camera_error,
         }
     
     def _open_webcam(self, gate_config: dict):
@@ -285,18 +334,42 @@ class VideoPipeline:
             width=VIDEO_WIDTH,
             height=VIDEO_HEIGHT,
             loop=gate_config.get("loop", True),
+            realtime=VIDEO_FILE_REALTIME,
         )
+
+    def _show_message_frame(self, lines: list[str]):
+        """Hiện thông báo lỗi ngay trên khung video (thay vì màn hình đen không
+        rõ lý do) — bảo vệ/admin nhìn là biết camera đang gặp vấn đề gì."""
+        frame = np.zeros((VIDEO_HEIGHT, VIDEO_WIDTH, 3), dtype=np.uint8)
+        y = VIDEO_HEIGHT // 2 - 20 * len(lines)
+        for text in lines:
+            cv2.putText(frame, text[:90], (40, y), FONT, 0.8, (0, 200, 255), 2, cv2.LINE_AA)
+            y += 40
+        with self._lock:
+            self._latest_frame = frame
 
     def _run_loop(self):
         """Vòng lặp chính của thread nền."""
         gate_config = GATES.get(self.gate_id, {"source": 0, "loop": True, "name": self.gate_id})
-        try:
-            self._webcam = self._open_webcam(gate_config)
-            print("[Pipeline] Webcam opened")
-        except Exception as e:
-            print(f"[Pipeline] ERROR: Cannot open webcam: {e}")
-            self._running = False
-            return
+        # Mở camera — lỗi thì thử lại mỗi 3s (camera đang bị app khác chiếm, cắm
+        # lại USB, RTSP chưa lên...) thay vì dừng hẳn pipeline đến khi restart app.
+        while self._running and self._webcam is None:
+            try:
+                self._webcam = self._open_webcam(gate_config)
+                self._camera_error = None
+                print("[Pipeline] Webcam opened")
+            except Exception as e:
+                self._camera_error = str(e)
+                print(f"[Pipeline] ERROR: Cannot open webcam: {e} — thử lại sau 3s")
+                self._show_message_frame([
+                    f"KHONG MO DUOC CAMERA ({self.gate_id})",
+                    f"Nguon: {gate_config.get('source')}",
+                    "Dang thu lai moi 3 giay... Doi nguon tai /admin/camera",
+                ])
+                for _ in range(30):
+                    if not self._running:
+                        return
+                    time.sleep(0.1)
 
         _consecutive_errors = 0
         _RECONNECT_AFTER = 5
@@ -329,6 +402,8 @@ class VideoPipeline:
                         self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
                     for keypoints, offset in self._last_pose_data:
                         self._draw_pose_keypoints(frame, keypoints, offset=offset)
+                    for bbox, text, color in self._overlay_labels:
+                        self._draw_label(frame, bbox, text, color)
                     self._draw_roi(frame)
                     with self._lock:
                         self._latest_frame = frame
@@ -349,13 +424,16 @@ class VideoPipeline:
                 # nhau, nên chạy cùng lúc không mất gì ngoài chút CPU thừa ở frame
                 # không có người (kết quả helmet/plate lúc đó bị bỏ qua như cũ).
                 person_future = self._detect_pool.submit(self._person_detector.detect, detect_frame)
-                helmet_future = self._detect_pool.submit(self._helmet_detector.detect, detect_frame)
+                # Model mũ sai (xem __init__) → không chạy, tránh vẽ box biển số thành "mũ"
+                helmet_future = (self._detect_pool.submit(self._helmet_detector.detect, detect_frame)
+                                 if self._helmet_model_ok else None)
                 plate_future = self._detect_pool.submit(self._plate_detector.detect, detect_frame)
 
                 raw_person_dets = self._rescale_dets(person_future.result(), scale_x, scale_y)
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
                 vehicle_dets = [d for d in raw_person_dets if d.class_name.lower() in ('motorcycle', 'bicycle')]
-                helmet_dets = self._rescale_dets(helmet_future.result(), scale_x, scale_y)
+                helmet_dets = (self._rescale_dets(helmet_future.result(), scale_x, scale_y)
+                               if helmet_future is not None else [])
                 plate_dets = self._rescale_dets(plate_future.result(), scale_x, scale_y)
 
                 # Vùng nhận diện (ROI): loại bỏ mọi detection có tâm ngoài vùng đã
@@ -368,10 +446,21 @@ class VideoPipeline:
                     helmet_dets = filter_by_roi(helmet_dets, self._roi_polygon_px)
                     plate_dets = filter_by_roi(plate_dets, self._roi_polygon_px)
 
+                # Gán ID theo dõi cho từng người (cùng thứ tự person_dets) — gọi cả khi
+                # không có ai để tracker biết các track cũ đã rời khung hình.
+                now = time.time()
+                track_ids = self._tracker.update([d.bbox for d in person_dets], now)
+
                 # Không có person nào → bỏ qua toàn bộ frame (helmet/plate detect
                 # phía trên vẫn chạy xong nhưng kết quả không dùng tới, chấp nhận
                 # được vì tổng thời gian không tăng — chạy song song mà).
                 if not person_dets:
+                    self._overlay_labels = []
+                    self._last_person_dets = []
+                    self._last_helmet_dets = []
+                    self._last_plate_dets = []
+                    self._last_pose_data = []
+                    self._prune_track_state(now)
                     self._draw_roi(frame)
                     with self._lock:
                         self._latest_frame = frame
@@ -387,6 +476,8 @@ class VideoPipeline:
 
                 # Gom helmet + plate + loại phương tiện vào từng nhóm theo person
                 groups = self._group_by_person(person_dets, helmet_dets, plate_dets, vehicle_dets)
+                for group, track_id in zip(groups, track_ids):
+                    group['track_id'] = track_id
 
                 # Quan sát tỉ lệ người đi bộ / người đi xe (xem comment ở __init__)
                 for group in groups:
@@ -405,19 +496,29 @@ class VideoPipeline:
                 # người, nếu không có xe khớp) còn chạm mép khung hình, tức có thể
                 # chưa vào/đang ra hết khung → chưa đủ căn cứ kết luận (đặc biệt
                 # NO_PLATE/PLATE_OBSCURED: biển số có thể chỉ chưa kịp lọt vào khung).
+                overlay_labels = []
                 for group in groups:
                     edge_ref = group.get('_vehicle') or group.get('_person')
                     if edge_ref is not None and self._is_touching_frame_edge(edge_ref.bbox, frame_w, frame_h):
                         continue
 
-                    self._process_violations(
+                    track_id = group.get('track_id')
+                    state = self._track_state.setdefault(track_id, self._new_track_state())
+                    state['frames'] += 1
+                    state['last_seen'] = now
+
+                    summary = self._process_violations(
                         frame,
                         group['helmet_dets'],
                         group['plate_dets'],
                         posture_status=group.get('posture_status', 'unknown'),
                         vehicle_type=group.get('vehicle_type'),
                         too_many_riders=group.get('too_many_riders', False),
+                        track_id=track_id,
                     )
+                    overlay_labels.extend(self._labels_for_group(group, summary))
+                self._overlay_labels = overlay_labels
+                self._prune_track_state(now)
 
                 # Vẽ box helmet (theo nhóm)
                 for det in helmet_dets:
@@ -430,6 +531,10 @@ class VideoPipeline:
                 # Vẽ box person (cam) — SAU khi OCR đã xong
                 for det in person_dets:
                     self._draw_detection(frame, det, COLOR_PERSON, COLOR_PERSON)
+
+                # Nhãn biển số + lỗi của từng người/xe (vẽ sau cùng để nằm trên box)
+                for bbox, text, color in overlay_labels:
+                    self._draw_label(frame, bbox, text, color)
 
                 self._draw_roi(frame)
 
@@ -455,9 +560,15 @@ class VideoPipeline:
                         pass
                     try:
                         self._webcam = self._open_webcam(gate_config)
+                        self._camera_error = None
                         print("[Pipeline] Webcam reconnected")
                     except Exception as reconnect_err:
+                        self._camera_error = str(reconnect_err)
                         print(f"[Pipeline] Reconnect failed: {reconnect_err}")
+                        self._show_message_frame([
+                            f"MAT KET NOI CAMERA ({self.gate_id})",
+                            "Dang thu ket noi lai...",
+                        ])
                     _consecutive_errors = 0
                     time.sleep(_RECONNECT_BACKOFF_SEC)
                 else:
@@ -644,56 +755,125 @@ class VideoPipeline:
         margin_y = frame_h * FRAME_EDGE_MARGIN_RATIO
         return x1 <= margin_x or x2 >= frame_w - margin_x or y1 <= margin_y or y2 >= frame_h - margin_y
 
-    def _read_plate_voted(self, frame: np.ndarray, plate_det: Detection):
+    def _read_plate_voted(self, frame: np.ndarray, plate_det: Detection, key=None):
         """Đọc biển số qua PlateVoter (đa khung hình + confidence). Trả về
-        PlateReadResult — xem app/cv/plate_voter.py."""
-        return self._plate_voter.read(frame, plate_det, read_plate_detailed)
+        PlateReadResult — xem app/cv/plate_voter.py. key = khóa gom phiếu (ID
+        theo dõi của xe), None = gom theo vị trí như cũ."""
+        return self._plate_voter.read(frame, plate_det, read_plate_detailed, key=key)
+
+    @staticmethod
+    def _new_track_state() -> dict:
+        """Bằng chứng gom qua nhiều khung hình cho 1 người/xe (1 track)."""
+        return {
+            'frames': 0, 'last_seen': 0.0, 'logged': False,
+            'helmet_with': 0, 'helmet_without': 0,
+            'posture': {'riding': 0, 'standing': 0},
+            'too_many_riders': 0, 'plate_seen': 0,
+            'best_plate': None,  # (text, confidence, is_confident)
+        }
+
+    def _prune_track_state(self, now: float, max_idle_sec: float = 30.0) -> None:
+        """Xoá bằng chứng của người/xe đã rời khung hình lâu (không phình RAM)."""
+        stale = [tid for tid, st in self._track_state.items() if now - st['last_seen'] > max_idle_sec]
+        for tid in stale:
+            del self._track_state[tid]
 
     def _process_violations(self, frame: np.ndarray, helmet_dets: list, plate_dets: list,
                          posture_status: str = 'unknown', vehicle_type: str | None = None,
-                         too_many_riders: bool = False):
+                         too_many_riders: bool = False, track_id: int | None = None) -> dict | None:
         """
         Xử lý toàn bộ logic vi phạm cho MỘT nhóm (1 person):
         0. Chặn theo loại phương tiện — không có xe hoặc đi xe đạp thì không bắt mũ/biển số
         1. OCR đọc biển số
         2. Tra whitelist trong DB
         3. Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
-        4. Kiểm tra cooldown ghi log
+        4. Chống ghi trùng (1 lần/người-xe theo track_id + cooldown theo biển số)
         5. Lưu snapshot + ghi log vào DB
         6. Đẩy cảnh báo WebSocket
+
+        track_id (từ app/cv/tracker.py): có thì mũ/tư thế/biển số được GOM QUA
+        NHIỀU KHUNG HÌNH của cùng người đó và chỉ kết luận sau TRACK_MIN_FRAMES lần
+        thấy — không kết luận vội từ 1 khung hình nhiễu. None = xét riêng từng
+        khung hình như trước (dùng trong test).
+
+        Trả về tóm tắt để vẽ nhãn lên video: {'plate', 'registered', 'review',
+        'violations', 'logged', 'pending'}, hoặc None nếu là người đi bộ/xe đạp.
         """
         # Không phát hiện xe máy/xe đạp nào gần người này → người đi bộ, không bắt lỗi
         # mũ bảo hiểm/biển số. Trước đây thiếu bước này nên người đi bộ qua cổng bị báo
         # PLATE_UNREADABLE sai (mọi group đều bị coi như phải có biển số đọc được).
         if vehicle_type is None:
-            return
+            return None
 
         # Xe đạp thường không bắt buộc đội mũ bảo hiểm theo luật, chỉ xe máy và xe đạp
         # điện mới bắt buộc. COCO không phân biệt được xe đạp điện với xe đạp thường,
         # nên hiện tại coi mọi 'bicycle' là được miễn — đây là giới hạn đã biết, sẽ cần
         # dataset/model riêng để phân biệt xe đạp điện khi có.
         if vehicle_type == 'bicycle':
-            return
+            return None
 
-        # Phân loại helmet detections
-        has_with_helmet = any('With Helmet' in d.class_name for d in helmet_dets)
-        has_without_helmet = any('Without Helmet' in d.class_name for d in helmet_dets)
+        state = self._track_state.get(track_id) if track_id is not None else None
+
+        # Phân loại helmet detections của khung hình này
+        frame_with_helmet = any(helmet_state(d.class_name) == 'with' for d in helmet_dets)
+        frame_without_helmet = any(helmet_state(d.class_name) == 'without' for d in helmet_dets)
 
         # Đọc biển số từ plate detections (chỉ 1 plate gán vào nhóm này) — vote qua
         # nhiều khung hình + confidence (xem _read_plate_voted / app/cv/plate_voter.py)
-        plate_read = ""
-        plate_confidence = None
-        needs_review = False
+        frame_plate_text = ""
+        frame_plate_conf = None
+        frame_plate_confident = False
         if plate_dets:
             best_plate = plate_dets[0]  # Đã được gán ở _group_by_person
-            plate_result = self._read_plate_voted(frame, best_plate)
-            plate_read = plate_result.text
-            plate_confidence = plate_result.confidence if plate_read else None
-            needs_review = bool(plate_read) and not plate_result.is_confident
+            vote_key = ('track', track_id) if state is not None else None
+            plate_result = self._read_plate_voted(frame, best_plate, key=vote_key)
+            frame_plate_text = plate_result.text
+            frame_plate_conf = plate_result.confidence if frame_plate_text else None
+            frame_plate_confident = bool(frame_plate_text) and plate_result.is_confident
             # Feature 7: track plate read attempts/successes
             self._plate_attempts += 1
-            if plate_read:
+            if frame_plate_text:
                 self._plate_successes += 1
+
+        if state is None:
+            # Xét riêng khung hình này (hành vi cũ)
+            has_with_helmet, has_without_helmet = frame_with_helmet, frame_without_helmet
+            plate_seen = bool(plate_dets)
+            plate_read, plate_confidence, plate_confident = frame_plate_text, frame_plate_conf, frame_plate_confident
+        else:
+            # Gom bằng chứng qua nhiều khung hình của cùng 1 người/xe
+            state['helmet_with'] += frame_with_helmet
+            state['helmet_without'] += frame_without_helmet
+            if posture_status in state['posture']:
+                state['posture'][posture_status] += 1
+            state['too_many_riders'] += bool(too_many_riders)
+            state['plate_seen'] += bool(plate_dets)
+            if frame_plate_text:
+                best = state['best_plate']
+                better = (best is None
+                          or (frame_plate_confident and not best[2])
+                          or (frame_plate_confident == best[2] and (frame_plate_conf or 0) > best[1]))
+                if better:
+                    state['best_plate'] = (frame_plate_text, frame_plate_conf or 0.0, frame_plate_confident)
+
+            has_with_helmet = state['helmet_with'] > 0 and state['helmet_with'] >= state['helmet_without']
+            has_without_helmet = state['helmet_without'] > state['helmet_with']
+            riding, standing = state['posture']['riding'], state['posture']['standing']
+            if riding > standing:
+                posture_status = 'riding'
+            elif standing > riding:
+                posture_status = 'standing'
+            elif riding == 0:
+                posture_status = 'unknown'
+            # hòa (>0) → giữ tư thế của khung hình hiện tại
+            too_many_riders = state['too_many_riders'] * 2 >= state['frames'] > 0 and state['too_many_riders'] > 0
+            plate_seen = state['plate_seen'] > 0
+            if state['best_plate'] is not None:
+                plate_read, plate_confidence, plate_confident = state['best_plate']
+            else:
+                plate_read, plate_confidence, plate_confident = "", None, False
+
+        needs_review = bool(plate_read) and not plate_confident
 
         # Tra whitelist — KHÔNG tra khi needs_review=True: 1 lần đọc mơ hồ/lệch
         # nhau giữa các frame không đủ tin cậy để gán vào 1 học sinh cụ thể. Đây
@@ -721,7 +901,7 @@ class VideoPipeline:
         violation_types = []
 
         # 1. Không có plate_det → xe không có biển số trong khung hình
-        if not plate_dets:
+        if not plate_seen:
             violation_types.append("NO_PLATE")
         # 2. Có box biển số nhưng OCR đọc rỗng → bị che/mờ/hỏng
         elif not plate_read:
@@ -734,7 +914,7 @@ class VideoPipeline:
         # 4. Đọc được, đủ tin cậy, nhưng không tìm thấy trong whitelist
         if plate_read and not needs_review and not plate_matched:
             violation_types.append("PLATE_NOT_REGISTERED")
-        
+
         # 5. Không có mũ bảo hiểm (có Without Helmet mà không có With Helmet).
         # Dắt bộ xe (posture == 'standing') không bắt buộc đội mũ theo luật —
         # chỉ bắt lỗi khi đang ngồi lái (riding) hoặc không xác định được tư thế
@@ -757,30 +937,56 @@ class VideoPipeline:
         if too_many_riders:
             violation_types.append("TOO_MANY_RIDERS")
 
+        summary = {
+            'plate': plate_read,
+            'registered': bool(plate_matched),
+            'review': needs_review,
+            'violations': list(violation_types),
+            'logged': False,
+            'pending': False,
+        }
+
         # Nếu không có vi phạm nào → không làm gì
         if not violation_types:
-            return
-        
-        # Gộp violation_type nếu nhiều điều kiện cùng đúng
+            return summary
+
+        if state is not None:
+            # Người/xe này đã được ghi vi phạm trong lượt đi qua hiện tại → không
+            # ghi/cảnh báo lặp lại mỗi khung hình
+            if state['logged']:
+                summary['logged'] = True
+                return summary
+            # Chưa đủ số lần thấy để kết luận → chờ thêm bằng chứng (biển số có thể
+            # chưa kịp lọt vào khung/chưa đọc rõ, mũ/tư thế có thể nhiễu 1 khung)
+            if state['frames'] < TRACK_MIN_FRAMES:
+                summary['pending'] = True
+                return summary
+
+        # Gộp violation_type nếu nhiều điều kiện cùng đúng — danh sách lỗi cụ thể
+        # vẫn được lưu riêng (violation_details) để giao diện hiện RÕ từng lỗi
         if len(violation_types) > 1:
             violation_type = "MULTIPLE"
         else:
             violation_type = violation_types[0]
-        
-        # Key cho cooldown log: plate_matched hoặc "UNKNOWN"
-        cooldown_key = plate_matched or "UNKNOWN"
-        
-        # Kiểm tra cooldown ghi log
+        violation_details = ",".join(violation_types)
+
+        # Chống ghi trùng cùng 1 xe qua nhiều track (mất dấu rồi bắt lại, 2 người
+        # trên cùng 1 xe...): cooldown theo (biển số, loại lỗi). Xe không đọc được
+        # biển số dùng ID theo dõi làm khóa — trước đây mọi xe không biển dùng
+        # chung khóa "UNKNOWN" nên xe thứ 2, 3... trong cùng 60s bị BỎ SÓT.
+        identity = plate_matched or plate_read or (f"track:{track_id}" if track_id is not None else "UNKNOWN")
+        cooldown_key = (identity, violation_type)
         current_time = time.time()
         last_log = self._last_log_time.get(cooldown_key, 0)
         if current_time - last_log < VIOLATION_COOLDOWN:
-            # Trong cooldown → chỉ đẩy cảnh báo WebSocket (không ghi log, không snapshot mới)
-            self._push_alert(violation_type, plate_read, plate_matched, plate_format_valid=plate_format_valid)
-            return
+            if state is not None:
+                state['logged'] = True
+            summary['logged'] = True
+            return summary
 
         # Chuẩn bị đường dẫn snapshot (rẻ, làm ngay ở main thread)
-        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        snapshot_filename = f"{timestamp_str}_{violation_type}.jpg"
+        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        snapshot_filename = f"{timestamp_str}_{self.gate_id}_{violation_type}.jpg"
         snapshot_path = os.path.join(SNAPSHOTS_DIR, snapshot_filename)
         os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
@@ -797,20 +1003,83 @@ class VideoPipeline:
             plate_read, plate_matched, helmet_status, violation_type,
             posture_status, plate_format_valid,
             plate_confidence, self.gate_id, initial_status,
+            violation_details,
         )
 
         # Cập nhật cooldown ngay (không chờ IO xong) — tránh spam ghi khi nhiều
         # group/frame liên tiếp rơi vào lúc thread nền đang xử lý phía sau.
         self._last_log_time[cooldown_key] = current_time
+        if state is not None:
+            state['logged'] = True
+        summary['logged'] = True
 
         # Đẩy cảnh báo WebSocket ngay — coi snapshot là sẽ ghi thành công
         # (best-effort: đã tạo thư mục trước, imwrite hiếm khi lỗi) để không
-        # phải chờ IO thread ghi xong mới cảnh báo bảo vệ.
+        # phải chờ IO thread ghi xong mới cảnh báo bảo vệ. Mỗi vi phạm MỚI đều
+        # cảnh báo (force) — đã chống lặp ở trên nên không sợ spam.
         self._push_alert(
             violation_type, plate_read, plate_matched,
             snapshot_filename=snapshot_filename,
             plate_format_valid=plate_format_valid,
+            violation_details=violation_types,
+            force=True,
         )
+        return summary
+
+    @staticmethod
+    def _format_plate(text: str) -> str:
+        """'59K165072' → '59K1-650.72' cho dễ đọc trên video."""
+        if validate_plate_format(text) and len(text) >= 8:
+            head, tail = text[:4], text[4:]
+            if len(tail) == 5:
+                return f"{head}-{tail[:3]}.{tail[3:]}"
+            return f"{head}-{tail}"
+        return text
+
+    def _labels_for_group(self, group: dict, summary: dict | None) -> list[tuple[tuple, str, tuple]]:
+        """Nhãn vẽ lên video cho 1 người: ID + đi bộ/đi xe + lỗi; biển số (xanh =
+        đã đăng ký, đỏ = biển lạ, tím = cần kiểm tra)."""
+        labels = []
+        person = group.get('_person')
+        track_id = group.get('track_id')
+        tid = f"#{track_id} " if track_id is not None else ""
+        if person is not None:
+            if summary is None:
+                kind = "DI BO" if group.get('vehicle_type') is None else "XE DAP"
+                labels.append((person.bbox, f"{tid}{kind}", COLOR_PEDESTRIAN))
+            elif summary['violations']:
+                text = ", ".join(VIOLATION_SHORT_LABELS.get(v, v) for v in summary['violations'])
+                color = COLOR_VIOLATION
+                if summary['pending'] and not summary['logged']:
+                    text = f"dang xet: {text}"
+                    color = COLOR_PENDING
+                labels.append((person.bbox, f"{tid}{text}", color))
+            else:
+                labels.append((person.bbox, f"{tid}XE MAY - OK", COLOR_OK))
+
+        plate_dets = group.get('plate_dets') or []
+        if summary is not None and plate_dets and summary['plate']:
+            if summary['registered']:
+                color, suffix = COLOR_OK, " DA DANG KY"
+            elif summary['review']:
+                color, suffix = COLOR_REVIEW, " ?"
+            else:
+                color, suffix = COLOR_VIOLATION, " CHUA DANG KY"
+            labels.append((plate_dets[0].bbox, self._format_plate(summary['plate']) + suffix, color))
+        return labels
+
+    @staticmethod
+    def _draw_label(frame: np.ndarray, bbox: tuple, text: str, color: tuple):
+        """Vẽ nhãn chữ trắng trên nền màu, ngay trên box (hoặc dưới nếu sát mép trên)."""
+        x1, y1 = int(bbox[0]), int(bbox[1])
+        scale, thickness = 0.6, 2
+        (tw, th), baseline = cv2.getTextSize(text, FONT, scale, thickness)
+        top = y1 - th - baseline - 6
+        if top < 0:
+            top = int(bbox[3]) + 2
+        x1 = max(0, min(x1, frame.shape[1] - tw - 6))
+        cv2.rectangle(frame, (x1, top), (x1 + tw + 6, top + th + baseline + 6), color, -1)
+        cv2.putText(frame, text, (x1 + 3, top + th + 3), FONT, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
     def _write_clip(self, frames: list, out_path: str):
         """Write video clip from buffered frames. Runs on _io_pool (Feature 4)."""
@@ -829,7 +1098,8 @@ class VideoPipeline:
                             plate_format_valid: bool | None,
                             plate_confidence: float | None = None,
                             gate_id: str | None = None,
-                            status: str = 'pending'):
+                            status: str = 'pending',
+                            violation_details: str | None = None):
         """Lưu snapshot + ghi log vi phạm vào DB. Chạy trên _io_pool (thread nền).
 
         Sau khi insert xong, submit try_correlate (cũng qua _io_pool — không
@@ -861,8 +1131,10 @@ class VideoPipeline:
                 plate_confidence=plate_confidence,
                 gate_id=gate_id,
                 status=status,
+                violation_details=violation_details,
             )
-            print(f"[Pipeline] Violation logged: {violation_type}, plate={plate_read or 'N/A'}, gate={gate_id}, id={new_id}")
+            print(f"[Pipeline] Violation logged: {violation_details or violation_type}, "
+                  f"plate={plate_read or 'N/A'}, gate={gate_id}, id={new_id}")
 
             # Bước 3: ghép với camera kia. Submit ngay trong _io_pool để không
             # block detect loop — correlation chỉ là query+update nhẹ.
@@ -918,13 +1190,18 @@ class VideoPipeline:
             print(f"[Pipeline] Correlation error for #{new_event.get('id')}: {e}")
 
     def _push_alert(self, violation_type: str, plate_read: str, plate_matched: str,
-                     snapshot_filename: str | None = None, plate_format_valid: bool | None = None):
-        """Đẩy cảnh báo vi phạm vào WebSocket queue (có alert cooldown)."""
+                     snapshot_filename: str | None = None, plate_format_valid: bool | None = None,
+                     violation_details: list[str] | None = None, force: bool = False):
+        """Đẩy cảnh báo vi phạm vào WebSocket queue (có alert cooldown, trừ khi
+        force=True — dùng cho vi phạm mới được ghi, đã chống lặp ở nơi gọi)."""
         current_time = time.time()
-        if current_time - self._last_alert_time >= ALERT_COOLDOWN:
+        if force or current_time - self._last_alert_time >= ALERT_COOLDOWN:
             alert = {
                 "type": "violation",
                 "violation_type": violation_type,
+                "violation_details": violation_details or [violation_type],
+                "gate_id": getattr(self, "gate_id", None),
+                "gate_name": getattr(self, "gate_name", None),
                 "plate_read": plate_read or None,
                 "plate_matched": plate_matched or None,
                 "plate_format_valid": plate_format_valid,

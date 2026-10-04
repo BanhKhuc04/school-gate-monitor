@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
 import { speakVietnamese, warmUpVoices } from '../utils/speak';
 import { getAlertPriority } from '../utils/alertPriority';
+import { violationDetailList, violationText } from '../utils/violationLabels';
 
 /**
  * AlertBanner — connects to /guard/ws WebSocket and shows a red banner
@@ -47,7 +48,7 @@ function buildSpeechText(data) {
     case 'TOO_MANY_RIDERS':
       return `Cảnh báo: ${plateText} chở quá số người quy định`;
     case 'MULTIPLE':
-      return `Cảnh báo: ${plateText} vi phạm nhiều lỗi`;
+      return `Cảnh báo: ${plateText} vi phạm ${violationDetailList(data).length} lỗi: ${violationText(data).replaceAll(' + ', ', ')}`;
     default:
       return `Cảnh báo vi phạm: ${plateText}`;
   }
@@ -101,13 +102,17 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
 
     function handleAlert(data) {
       const priority = getAlertPriority(data.violation_type);
-      setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
+      const plate = data.plate_matched || data.plate_read;
+      setMessage(
+        '⚠️ ' + (data.gate_name ? data.gate_name + ': ' : '') + violationText(data)
+        + (plate ? ` — biển ${plate}` : ' — không đọc được biển số')
+      );
       setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
       // Feature 3: banner color based on priority
       setBannerBg(priority === 'high' ? '#c92035' : '#f59e0b');
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => setVisible(false), 3000);
+      timeoutRef.current = setTimeout(() => setVisible(false), 5000);
 
       // Beep trước để bảo vệ chú ý ngay, TTS đọc nội dung ngay sau đó.
       const beepDurationMs = playAlertSound(data.violation_type || 'default');
@@ -120,8 +125,13 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
       onAlertRef.current?.(data);
     }
 
+    // Hủy timer kết nối lại khi rời trang/đổi cổng — trước đây timer vẫn chạy
+    // sau khi unmount và mở thêm 1 WebSocket thừa mỗi lần đổi trang.
+    let disposed = false;
+    let reconnectTimer = null;
+
     function connect() {
-      let reconnectTimer = null;
+      if (disposed) return;
       try {
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -131,7 +141,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
           try {
             const data = JSON.parse(event.data);
             handleAlert(data);
-          } catch (e) {
+          } catch {
             // Malformed message
           }
         };
@@ -140,16 +150,18 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
         };
         ws.onclose = () => {
           if (wsRef.current === ws) wsRef.current = null;
-          reconnectTimer = setTimeout(connect, 3000);
+          if (!disposed) reconnectTimer = setTimeout(connect, 3000);
         };
-      } catch (e) {
-        reconnectTimer = setTimeout(connect, 5000);
+      } catch {
+        if (!disposed) reconnectTimer = setTimeout(connect, 5000);
       }
     }
 
     connect();
 
     return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       if (wsRef.current) {
         wsRef.current.onclose = null;
