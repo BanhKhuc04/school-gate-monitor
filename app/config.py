@@ -189,7 +189,10 @@ CAMERA_LOOP = _gate_cfgs["main"]["loop"]
 
 # Model paths
 HELMET_MODEL_PATH = os.environ.get("HELMET_MODEL_PATH") or str(BASE_DIR / "models" / "helmet_best.pt")
-PLATE_MODEL_PATH = str(BASE_DIR / "models" / "plate_best.pt")
+# plate_square_best.pt (Kaggle, chỉ biển vuông, 2026-10-04) đã đo trên 1447 khung
+# video cổng thật: bỏ sót ~65 biển thật mà plate_best.pt bắt được, box riêng của
+# nó chủ yếu là biển báo/đèn hậu — giữ plate_best.pt. Thử bằng env PLATE_MODEL_PATH.
+PLATE_MODEL_PATH = os.environ.get("PLATE_MODEL_PATH") or str(BASE_DIR / "models" / "plate_best.pt")
 # COCO weights ở gốc repo (gitignore). YOLO11n trên 120 khung hình cổng thật:
 # bắt được 84 xe máy so với 73 của yolov8n (cùng số người), pose ra khớp
 # xương 234/267 crop so với 228. Đổi lại bằng env PERSON_MODEL_PATH=yolov8n.pt.
