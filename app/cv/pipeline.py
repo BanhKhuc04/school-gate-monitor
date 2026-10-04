@@ -5,7 +5,7 @@ Luồng: đọc frame → detect helmet → detect plate → OCR → tra DB → 
 Có thêm queue cho cảnh báo vi phạm (Bước 4) và ghi log vi phạm vào DB (Bước 6).
 """
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor, Future
 import time
 import queue
@@ -26,7 +26,7 @@ from app.config import (
     PLATE_ONLY_DETECT_WIDTH, TRACK_STITCH_SEC, TRACK_STITCH_DIST,
     HEAD_EDGE_MARGIN_PX,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
-    VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
+    VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS, VIOLATION_CLIP_POST_SECONDS,
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
     PLATE_CROP_PAD_X, PLATE_CROP_PAD_Y, PLATE_BEST_CROP_PAD, PLATE_MIN_BLUR_SCORE, DEBUG_PLATE_OCR,
     CROSSING_EDGE_MARGIN, CROSSING_MIN_FRAMES_PER_SIDE, CROSSING_REARM_DISTANCE,
@@ -74,6 +74,12 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 # định đặt giữa vùng mặt đường (y=0.5 trùng mép xa của sân demo, xe không bao
 # giờ cắt qua). Admin vẫn vẽ lại vạch thật ở trang ROI.
 _DEFAULT_GATE_LINE = (0.0, 0.65, 1.0, 0.65)
+
+
+class _ClipFrames(list):
+    """Clip frames plus their wall-clock times and the event time (post-roll)."""
+    times: list = []
+    event_ts = None
 
 
 class _PoseOverlay:
@@ -480,6 +486,7 @@ class VideoPipeline:
 
         # Feature 4: ring buffer for violation video clips
         self._clip_buffer: deque = deque(maxlen=VIOLATION_CLIP_SECONDS * VIOLATION_CLIP_FPS)
+        self._clip_times: deque = deque(maxlen=VIOLATION_CLIP_SECONDS * VIOLATION_CLIP_FPS)
 
         # Cache khớp xương (pose keypoints) của lần detect gần nhất — dùng để vẽ lại
         # ở nhánh frame bị SKIP (giống _last_helmet_dets/_last_plate_dets/_last_person_dets).
@@ -1365,6 +1372,8 @@ class VideoPipeline:
         self._fast_track_active = False
         if hasattr(self, '_clip_buffer'):
             self._clip_buffer.clear()
+        if hasattr(self, '_clip_times'):
+            self._clip_times.clear()
         if hasattr(self, '_frame_timestamps'):
             self._frame_timestamps.clear()
         # Reset PlateVoter + EventManager để vote lại từ đầu (track cũ không
@@ -2467,8 +2476,15 @@ class VideoPipeline:
                     self._fps_capture_window += 1
                 self._resource_sampler.update()
                 # Resize down before buffering to save RAM (640x360 = ~1/4 of 1280x720)
-                small = cv2.resize(frame, (640, 360))
-                self._clip_buffer.append(small)
+                # Sampled on wall time, not per AI frame: at ~15 AI fps the old
+                # 32-frame buffer held 2 s and played back at half speed.
+                now_clip = time.time()
+                clip_times = getattr(self, '_clip_times', None)
+                if clip_times is None:
+                    clip_times = self._clip_times = deque(maxlen=getattr(self._clip_buffer, 'maxlen', None) or 64)
+                if not clip_times or now_clip - clip_times[-1] >= 1 / VIOLATION_CLIP_FPS:
+                    self._clip_buffer.append(cv2.resize(frame, (640, 360)))
+                    clip_times.append(now_clip)
                 self._last_process_latency_ms = (time.perf_counter() - t0) * 1000
 
                 # Lưu frame đã vẽ
@@ -2960,7 +2976,7 @@ class VideoPipeline:
                       'posture_status':'riding' if riding else 'walking_with_bike' if walking else 'unknown'}
             self._crossing_jobs[eid] = self._crossing_pool.submit(self._finish_crossing_event,
                 {**frozen, 'run_generation': getattr(self, '_run_generation', 0)},
-                original.copy(), crop, [f.copy() for f in self._clip_buffer])
+                original.copy(), crop, self._clip_snapshot(now))
         # Sealed IDs persist for this source; bounding doesn't revive old IDs
         # because expiry exceeds the lifetime of a tracked encounter.
         self._crossing_sealed = {k:v for k,v in self._crossing_sealed.items() if now-v < 3600}
@@ -3290,11 +3306,50 @@ class VideoPipeline:
         self._persist_pending[encounter] = (future, int(track_id), confirmed, epoch)
         self._diagnostic('io', 'pending', 'evidence_pending', track_id)
 
+    def _clip_snapshot(self, event_ts):
+        """Pre-event frames plus what the clip writer needs to add the post-roll."""
+        frames = _ClipFrames(f.copy() for f in self._clip_buffer)
+        frames.times = list(getattr(self, '_clip_times', []))[-len(frames):] if frames else []
+        frames.event_ts = event_ts
+        return frames
+
+    def _add_post_roll(self, frames):
+        """Wait out VIOLATION_CLIP_POST_SECONDS and append the frames buffered since the event."""
+        event_ts = getattr(frames, 'event_ts', None)
+        if event_ts is None or VIOLATION_CLIP_POST_SECONDS <= 0 or not hasattr(self, '_clip_times'):
+            return frames
+        wait = event_ts + VIOLATION_CLIP_POST_SECONDS - time.time()
+        if wait > 0:
+            time.sleep(min(wait, VIOLATION_CLIP_POST_SECONDS))
+        for _ in range(3):  # the capture thread may append while we copy
+            try:
+                pairs = list(zip(list(self._clip_times), list(self._clip_buffer)))
+                break
+            except RuntimeError:
+                pairs = []
+        last = frames.times[-1] if frames.times else event_ts
+        for ts, frame in pairs:
+            if last < ts <= event_ts + VIOLATION_CLIP_POST_SECONDS:
+                frames.append(frame.copy())
+                frames.times.append(ts)
+        return frames
+
     def _write_clip(self, frames: list, out_path: str):
         if not frames:
             return False
         h, w = frames[0].shape[:2]
-        writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), VIOLATION_CLIP_FPS, (w, h))
+        # Real playback speed when wall-clock times are known.
+        times = getattr(frames, 'times', None) or []
+        fps = VIOLATION_CLIP_FPS
+        if len(times) == len(frames) and len(times) > 1 and times[-1] > times[0]:
+            fps = max(2.0, min(30.0, (len(times) - 1) / (times[-1] - times[0])))
+        # H.264 first: browsers cannot play OpenCV's default MPEG-4 Part 2
+        # ('mp4v'), so saved clips showed a blank player on the violations page.
+        for fourcc in ('avc1', 'mp4v'):
+            writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
+            if writer.isOpened():
+                break
+            writer.release()
         try:
             if not writer.isOpened():
                 return False
@@ -3307,6 +3362,8 @@ class VideoPipeline:
     def _save_optional_clip(self, event_id, frames, filename):
         try:
             path = os.path.join(SNAPSHOTS_DIR, filename)
+            if isinstance(frames, _ClipFrames):
+                frames = self._add_post_roll(frames)
             if not self._write_clip(frames, path):
                 raise OSError('clip write failed')
             from app.db import update_violation_media

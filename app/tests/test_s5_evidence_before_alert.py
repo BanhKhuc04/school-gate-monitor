@@ -334,3 +334,29 @@ class TestS5EvidenceStateColumn:
             cfg.DB_PATH = orig_path
             db_module.DB_PATH = orig_module_path
             db_module.get_connection = orig_conn
+
+def test_clip_is_h264_real_speed_with_post_roll(tmp_path):
+    """Browsers cannot play OpenCV's mp4v; the clip must be H.264, play at the
+    real rate, and include frames from after the crossing."""
+    import subprocess, shutil
+    import numpy as np
+    from collections import deque
+    from app.cv import pipeline as module
+    p = module.VideoPipeline.__new__(module.VideoPipeline)
+    p._clip_buffer, p._clip_times = deque(maxlen=64), deque(maxlen=64)
+    t0 = 1000.0
+    for i in range(30):  # 30 frames over 3 s; event at t0+2
+        p._clip_buffer.append(np.full((360, 640, 3), i * 8, np.uint8))
+        p._clip_times.append(t0 + i * .1)
+    pre = module._ClipFrames(list(p._clip_buffer)[:21])
+    pre.times, pre.event_ts = list(p._clip_times)[:21], t0 + 2.0
+    import unittest.mock as m
+    with m.patch.object(module.time, 'time', return_value=t0 + 10), m.patch.object(module, 'VIOLATION_CLIP_POST_SECONDS', 1):
+        frames = p._add_post_roll(pre)
+    assert len(frames) == 30 and frames.times[-1] == t0 + 2.9
+    out = tmp_path / 'clip.mp4'
+    assert p._write_clip(frames, str(out))
+    if shutil.which('ffprobe'):
+        info = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_name,r_frame_rate',
+                               '-of', 'csv=p=0', str(out)], capture_output=True, text=True).stdout
+        assert info.startswith('h264') and '10/1' in info
