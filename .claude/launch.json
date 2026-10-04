@@ -5,7 +5,14 @@
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
+      "cwd": "frontend",
       "port": 5173
+    },
+    {
+      "name": "user-test",
+      "runtimeExecutable": "D:\\Work\\Project_motorbike\\venv\\Scripts\\python.exe",
+      "runtimeArgs": ["C:\\Users\\khucv\\AppData\\Local\\Temp\\claude\\D--Work-Project-motorbike\\e02d8d97-b274-4847-9170-cc1f85ae0c7d\\scratchpad\\run_user_test.py"],
+      "port": 8000
     }
   ]
 }

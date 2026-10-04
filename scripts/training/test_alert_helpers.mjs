@@ -110,5 +110,29 @@ const none_msg = buildAlertMessage({
 });
 eq('no speakable → empty', none_msg, '');
 
+// Offline voice: every sentence the app can speak maps to recorded clips.
+{
+  const { clipsForMessage, numberClips } = await import('../../frontend/src/utils/offlineVoice.js');
+  const { readdirSync } = await import('node:fs');
+  const have = new Set(readdirSync(new URL('../../frontend/public/voice/vi/', import.meta.url)).map(f => f.replace('.mp3', '')));
+  eq('237', numberClips('237'), ['h2', 'n37']);
+  eq('205', numberClips('205'), ['h2', 'linh', 'n5']);
+  eq('200', numberClips('200'), ['h2']);
+  eq('053', numberClips('053'), ['n0', 'n53']);
+  const msg = buildAlertMessage({plate_read: '89F123792', plate_status: 'CONFIRMED', audio_authorized: true,
+    evidence_state: 'persisted', issues: [{code: 'NO_HELMET', status: 'confirmed'}, {code: 'RIDING_THROUGH_GATE', status: 'confirmed'}]});
+  eq('plate+both', clipsForMessage(msg), ['n89', 'l_F', 'n1', 'h2', 'n37', 'n92', 'p_helmet_walk']);
+  eq('unreadable', clipsForMessage('Không đọc được biển số. Vui lòng đội mũ.'), ['p_unreadable', 'p_helmet']);
+  eq('unknown text', clipsForMessage('Xin chào'), null);
+  for (const plate of ['89AA60081', '30F12345', '29B1205', '51H00099']) {
+    for (const codes of [['NO_HELMET'], ['RIDING_THROUGH_GATE'], ['PLATE_NOT_REGISTERED'], ['TOO_MANY_RIDERS', 'NO_HELMET']]) {
+      const m = buildAlertMessage({plate_read: plate, plate_status: 'CONFIRMED', audio_authorized: true, evidence_state: 'persisted',
+        issues: codes.map(code => ({code, status: 'confirmed'}))});
+      const keys = clipsForMessage(m);
+      eq(`clips ${plate} ${codes}`, keys !== null && keys.every(k => have.has(k)), true);
+    }
+  }
+}
+
 console.log(`RESULT ok=${ok} fail=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

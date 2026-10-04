@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
-import { warmUpVoices, speakVietnamese, stopSpeech } from '../utils/speak';
+import { warmUpVoices, speakVietnamese, stopSpeech, getVietnameseVoiceStatus } from '../utils/speak';
+import { clipsForMessage, playClips } from '../utils/offlineVoice';
 import { createAlertAudio, buildAlertMessage } from '../utils/alertAudio';
 import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
 
@@ -23,6 +24,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
   const timeoutRef = useRef(null);
   const wsRef = useRef(null);
   const audioRef = useRef(null);
+  const clipPlayback = useRef(null);
   const onAlertRef = useRef(onAlert);
   onAlertRef.current = onAlert;
 
@@ -57,8 +59,17 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
         }
         return 220;
       },
-      speak: (text, opts) => speakVietnamese(text, opts),
-      cancel: () => stopSpeech(),
+      // Recorded clips unless this machine has a LOCAL Vietnamese voice: the
+      // browsers' Vietnamese voices are online-only, and a LAN without
+      // internet still reports navigator.onLine === true.
+      speak: (text, opts) => {
+        const clips = getVietnameseVoiceStatus().local ? null : clipsForMessage(text);
+        if (!clips) { speakVietnamese(text, opts); return; }
+        clipPlayback.current?.stop();
+        clipPlayback.current = playClips(clips, { rate: opts?.rate ?? 1, volume: opts?.volume ?? 1 });
+        clipPlayback.current.then(ok => { if (!ok) speakVietnamese(text, opts); });
+      },
+      cancel: () => { clipPlayback.current?.stop(); stopSpeech(); },
       config: { rate: 1.25, volume: 1, debug: false },
     });
     return () => {
