@@ -194,3 +194,16 @@ def test_plate_not_shared_between_two_nearby_vehicles():
     assert g1['plate_dets'][0].bbox[0] < 180
     # Plate bên phải thuộc group bên phải
     assert g2['plate_dets'][0].bbox[0] > 180
+
+
+def test_helmet_on_head_cut_by_top_edge_is_not_judged():
+    """Person box at the frame top: the 'head' region is chin/neck, so no
+    helmet call (either way) — it was a coin toss on the gate recording."""
+    p = _pipeline()
+    cut = _det('person', (100, 0, 200, 300))
+    whole = _det('person', (300, 40, 400, 340))
+    helmets = [_det('With Helmet', (130, 5, 170, 40)), _det('Without Helmet', (330, 45, 370, 80))]
+    groups, matched = p._group_by_person([cut, whole], helmets, [], [])
+    assert groups[0]['helmet_dets'] == [] and 'head_cut_by_frame' in groups[0]['association_reasons']
+    assert [d.class_name for d in groups[1]['helmet_dets']] == ['Without Helmet']
+    assert [d.class_name for d in matched] == ['Without Helmet']

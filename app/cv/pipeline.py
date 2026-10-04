@@ -23,7 +23,8 @@ from app.config import (
     HELMET_CONF_THRESHOLD, HELMET_NO_HELMET_MIN_CONF, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
     VEHICLE_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, DETECT_WIDTH, DETECT_HEIGHT, RECOGNITION_LOG_ENABLED,
-    PLATE_ONLY_DETECT_WIDTH,
+    PLATE_ONLY_DETECT_WIDTH, TRACK_STITCH_SEC, TRACK_STITCH_DIST,
+    HEAD_EDGE_MARGIN_PX,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
@@ -1394,6 +1395,8 @@ class VideoPipeline:
                     detector.reset_tracker()
         except Exception:
             pass
+        for stitcher in getattr(self, '_track_stitchers', None) or ():
+            stitcher.reset()
         self._start_capture()
         return True
 
@@ -2282,6 +2285,14 @@ class VideoPipeline:
                 # phải tổng tuần tự.
                 person_dets = [d for d in raw_person_dets if d.class_name.lower() == 'person']
                 vehicle_dets = [d for d in raw_person_dets if d.class_name.lower() in ('motorcycle', 'bicycle')]
+                if TRACK_STITCH_SEC > 0:
+                    if getattr(self, '_track_stitchers', None) is None:
+                        from app.cv.track_stitch import TrackStitcher
+                        self._track_stitchers = (TrackStitcher(TRACK_STITCH_SEC, TRACK_STITCH_DIST),
+                                                 TrackStitcher(TRACK_STITCH_SEC, TRACK_STITCH_DIST))
+                    now_stitch = time.monotonic()
+                    self._track_stitchers[0].apply(person_dets, now_stitch)
+                    self._track_stitchers[1].apply(vehicle_dets, now_stitch)
                 helmet_dets = [d for d in self._rescale_dets(helmet_future.result(), scale_x, scale_y)
                                if d.class_name != 'Without Helmet' or d.confidence >= HELMET_NO_HELMET_MIN_CONF]
                 plate_dets = self._rescale_dets(plate_future.result(), scale_x, scale_y)
@@ -2651,7 +2662,14 @@ class VideoPipeline:
             cx,cy=(hx1+hx2)/2,(hy1+hy2)/2
             matches = [g for g in groups if g['_person'].bbox[0] <= cx <= g['_person'].bbox[2]
                        and g['_person'].bbox[1]-.15*(g['_person'].bbox[3]-g['_person'].bbox[1]) <= cy <= g['_person'].bbox[1]+.4*(g['_person'].bbox[3]-g['_person'].bbox[1])]
-            if len(matches)==1:
+            if len(matches)==1 and matches[0]['_person'].bbox[1] <= HEAD_EDGE_MARGIN_PX:
+                # Head cut by the top edge: the "head" region is chin/neck.
+                # On the 04/10 front camera nearly every helmet call (152 with,
+                # 141 without, on a bare-headed rider) came from such boxes —
+                # a coin toss that could also raise a false no-helmet alert.
+                if 'head_cut_by_frame' not in matches[0]['association_reasons']:
+                    matches[0]['association_reasons'].append('head_cut_by_frame')
+            elif len(matches)==1:
                 matches[0]['helmet_dets'].append(helmet)
                 matched_helmet_dets.append(helmet)
             elif len(matches)>1:

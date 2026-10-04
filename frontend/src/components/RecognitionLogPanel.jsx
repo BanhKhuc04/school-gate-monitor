@@ -4,7 +4,8 @@ import client from '../api/client';
 const REASONS = {track_missing:'Chưa có track ổn định', vehicle_not_associated:'Chưa ghép được xe; biển chỉ là ứng viên',
   vehicle_association_ambiguous:'Có nhiều xe gần nhau — chưa ghép chắc chắn',
   helmet_association_ambiguous:'Chưa ghép chắc mũ với người', plate_association_ambiguous:'Có nhiều ứng viên biển — cần kiểm tra',
-  plate_pairing_ambiguous:'Camera sau thấy nhiều biển cùng lúc — không ghép'};
+  plate_pairing_ambiguous:'Camera sau thấy nhiều biển cùng lúc — không ghép',
+  head_cut_by_frame:'Đầu chạm mép trên khung — không xét mũ (nên đặt camera thấy trọn đầu)'};
 const COLORS = {confirmed:'bg-emerald-100 text-emerald-900', checking:'bg-slate-100 text-slate-700',
   review:'bg-amber-100 text-amber-900', error:'bg-red-100 text-red-900'};
 const HEAD = {helmet:'Có mũ', no_helmet:'Quan sát không mũ', unknown:'Chưa thấy rõ đầu/mũ'};

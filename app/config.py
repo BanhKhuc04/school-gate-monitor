@@ -215,11 +215,19 @@ HELMET_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho helmet detection
 # phát hiện ở imgsz 640: các lần gán nhầm "không mũ" (mũ tối nhìn từ sau) đều
 # có confidence 0.29–0.44, các lần "không mũ" đúng phần lớn >= 0.5.
 HELMET_NO_HELMET_MIN_CONF = float(os.environ.get("HELMET_NO_HELMET_MIN_CONF", "0.5"))
+# Box người có mép trên <= số px này (khung VIDEO_WIDTH x VIDEO_HEIGHT) = đầu bị mép
+# trên cắt: không xét mũ (vùng "đầu" lúc đó là cằm/cổ). Đặt -1 để tắt.
+HEAD_EDGE_MARGIN_PX = int(os.environ.get("HEAD_EDGE_MARGIN_PX", "4"))
 PLATE_CONF_THRESHOLD = 0.25  # Ngưỡng confidence cho plate detection
 PERSON_CONF_THRESHOLD = 0.4  # Ngưỡng confidence cho person detection (COCO)
 # Xe máy/xe đạp CÓ NGƯỜI NGỒI bị che nửa nên COCO chỉ cho 0.2-0.4: ở ngưỡng 0.4
 # của person, 270/472 khung đang ngồi xe (video cổng 04/10) không ghép được xe.
 VEHICLE_CONF_THRESHOLD = float(os.environ.get("VEHICLE_CONF_THRESHOLD", "0.2"))
+# Nối lại track người/xe bị ByteTrack cấp id mới (app/cv/track_stitch.py): id mới
+# lấy lại id vừa mất trong TRACK_STITCH_SEC giây nếu tâm cách <= TRACK_STITCH_DIST x
+# cạnh box. Video camera trước 04/10: 1 người 6 id -> 1, xe 26 id -> 7. 0 = tắt.
+TRACK_STITCH_SEC = float(os.environ.get("TRACK_STITCH_SEC", "5"))
+TRACK_STITCH_DIST = float(os.environ.get("TRACK_STITCH_DIST", "1.0"))
 # Hạ từ 0.5 xuống 0.3 (2026-09-29) — người ở xa/bị che một phần trong crop nhỏ
 # thường không đạt 0.5, khiến pose model bỏ qua hoàn toàn (không trả khớp nào),
 # posture_status rơi về 'unknown'. Đánh đổi: dễ bắt khớp sai hơn khi ảnh mờ/nhiễu.
