@@ -78,8 +78,10 @@ class HelmetPlateDetector:
         # Explicit imgsz: helmet_best.pt was trained at 224 and Ultralytics
         # falls back to that, shrinking the detect frame to 224 px wide —
         # it found 54 helmets on 90 gate frames instead of 213 at 640.
-        results = self.model(frame, verbose=False, conf=self.conf_threshold, half=USE_FP16,
-                             imgsz=DETECT_WIDTH)
+        # quantize replaces the deprecated half=, which logged a warning on
+        # every single inference call.
+        results = self.model(frame, verbose=False, conf=self.conf_threshold,
+                             quantize=16 if USE_FP16 else None, imgsz=DETECT_WIDTH)
         detections = []
         for result in results:
             if result.boxes is None:

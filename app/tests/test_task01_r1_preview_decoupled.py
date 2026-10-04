@@ -360,3 +360,21 @@ class TestR1WebcamInterface:
         assert fc[0] == 2, "Counter increments each call"
         assert not np.array_equal(frame, frame2), "Each frame must be unique"
         print("  FakeWebcamWithSourceFrame implements interface correctly")
+
+
+def test_ai_frame_carries_its_own_boxes_and_pauses_raw_capture_frames():
+    """Boxes are drawn on the exact frame they were computed on, so a moving
+    person is never boxed where they stood a moment earlier."""
+    import queue as _queue
+    from app.cv import pipeline as pipeline_module
+    p = pipeline_module.VideoPipeline.__new__(pipeline_module.VideoPipeline)
+    p._preview_frame_queue = _queue.Queue(maxsize=2)
+    p._capture = object()
+    p._source_epoch = 3
+    p._frame_seq = 41
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    p._publish_ai_frame(frame, ('det',))
+    epoch, shown, seq, dets = p._preview_frame_queue.get_nowait()
+    assert (epoch, seq, dets) == (3, 41, ('det',))
+    assert shown is not frame  # the source frame is still needed for OCR crops
+    assert time.monotonic() - p._last_ai_publish < .3

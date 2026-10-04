@@ -834,6 +834,30 @@ class VideoPipeline:
             self._latest_jpeg = jpeg_bytes
             self._latest_frame = frame
 
+    def _publish_ai_frame(self, source_frame, dets) -> None:
+        """Show the very frame the boxes were computed on.
+
+        Drawing the latest boxes on newer capture frames left them trailing a
+        walking person by a body width at ~17 AI fps. While AI frames keep
+        coming, capture frames are not shown; see _start_capture.received.
+        """
+        frames = getattr(self, '_preview_frame_queue', None)
+        if frames is None or getattr(self, '_capture', None) is None:
+            return
+        item = (self._source_epoch, source_frame.copy(), self._frame_seq, dets)
+        try:
+            frames.put_nowait(item)
+        except queue.Full:
+            try:
+                frames.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                frames.put_nowait(item)
+            except queue.Full:
+                pass
+        self._last_ai_publish = time.monotonic()
+
     def _preview_loop(self) -> None:
         """R1 (Task 1): Preview encoder thread — tách khỏi main loop.
         Main loop push frame vào queue, preview thread pop và encode JPEG.
@@ -846,20 +870,27 @@ class VideoPipeline:
             except queue.Empty:
                 continue
             # Legacy test/producer pairs carry no epoch. Runtime always does.
-            epoch, frame, frame_seq = item if len(item) == 3 else (self._source_epoch, *item)
+            # AI frames carry their own boxes (4-tuple); capture frames reuse
+            # the latest boxes only as a fallback while AI is stalled.
+            own_dets = item[3] if len(item) == 4 else None
+            epoch, frame, frame_seq = item[:3] if len(item) >= 3 else (self._source_epoch, *item)
             if epoch != self._source_epoch:
                 continue
             try:
-                # Reuse the latest completed inference without waiting for AI.
                 overlay = getattr(self, '_preview_overlay', None)
-                if (getattr(self, '_debug_overlay_enabled', True) and overlay and overlay[0] == self._source_epoch
-                        and time.monotonic()-overlay[1] <= 1.0):
-                    for det, positive, negative in overlay[2]:
+                dets = own_dets
+                # A stalled AI must not paint old boxes where a person was
+                # half a second ago; past 0.25 s show the frame unboxed.
+                if (dets is None and overlay and overlay[0] == self._source_epoch
+                        and time.monotonic()-overlay[1] <= .25):
+                    dets = overlay[2]
+                if getattr(self, '_debug_overlay_enabled', True) and dets:
+                    for det, positive, negative in dets:
                         self._draw_detection(frame, det, positive, negative)
                 self._draw_roi(frame)
                 if DEBUG_CROSSING and getattr(self, '_debug_overlay_enabled', True):
                     self._draw_crossing_line_debug(frame)
-                if len(item) == 3:
+                if len(item) >= 3:
                     self._publish_frame_jpeg(frame, frame_seq, expected_epoch=epoch)
                 else:
                     self._publish_frame_jpeg(frame, frame_seq)
@@ -1984,6 +2015,8 @@ class VideoPipeline:
             self._last_frame_time = time.time()
             self._fps_capture_window += 1
             self._metrics_capture.add(packet.read_ms)
+            if time.monotonic() - getattr(self, '_last_ai_publish', 0.) < .3:
+                return  # AI frames with their own aligned boxes are flowing
             item = (epoch, frame, self._capture_seq_base+packet.seq)
             try:
                 self._preview_frame_queue.put_nowait(item)
@@ -2245,6 +2278,8 @@ class VideoPipeline:
                 preview_dets = tuple((d, COLOR_PERSON, COLOR_PERSON) for d in person_dets+vehicle_dets)
                 preview_dets += tuple((d, COLOR_PLATE, COLOR_PLATE) for d in plate_dets)
                 self._preview_overlay = (self._source_epoch, time.monotonic(), preview_dets)
+                if not person_dets:
+                    self._publish_ai_frame(source_frame, preview_dets)
 
                 # Không có person nào → bỏ qua toàn bộ frame (helmet/plate detect
                 # phía trên vẫn chạy xong nhưng kết quả không dùng tới, chấp nhận
@@ -2278,6 +2313,7 @@ class VideoPipeline:
                     self._observe_plate_only(source_frame, unassociated_plates)
                 self._preview_overlay = (self._source_epoch, time.monotonic(), preview_dets +
                     tuple((d, COLOR_HELMET, COLOR_NO_HELMET) for d in matched_helmet_dets))
+                self._publish_ai_frame(source_frame, self._preview_overlay[2])
 
                 # Cập nhật cache để nhánh skip vẽ box mượt — helmet dùng bản đã
                 # lọc theo vùng đầu (matched_helmet_dets), không dùng raw helmet_dets

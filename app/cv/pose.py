@@ -414,7 +414,10 @@ class PostureDetector:
         try:
             from app.config import POSE_CONF_THRESHOLD, USE_FP16
             results = model_owner().run(getattr(self, 'camera_id', 'pose'), lambda: self.model(
-                crops, verbose=False, conf=POSE_CONF_THRESHOLD, half=USE_FP16))
+                crops, verbose=False, conf=POSE_CONF_THRESHOLD, quantize=16 if USE_FP16 else None,
+                # Person crops are rarely taller than 320 px; letterboxing each
+                # to 640x640 made a crowded gate frame cost up to ~0.6 s.
+                imgsz=320))
         except Exception as e:
             print(f"[Pose] Error during pose detection: {e}")
             return out

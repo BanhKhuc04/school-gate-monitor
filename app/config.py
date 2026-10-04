@@ -25,12 +25,11 @@ try:
     import torch
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     if DEVICE == "cuda":
-        # cuDNN tự đo và cache thuật toán conv nhanh nhất cho các shape input
-        # CỐ ĐỊNH (DETECT_WIDTH/HEIGHT, person crop...) — input shape ở đây
-        # lặp lại mỗi frame nên bật benchmark là lợi thuần, không đánh đổi độ
-        # chính xác. Chỉ có hại nếu input shape đổi liên tục (không phải case
-        # của pipeline này).
-        torch.backends.cudnn.benchmark = True
+        # KHÔNG bật cudnn.benchmark: pose (batch N người, crop mỗi lần một cỡ)
+        # và quét vùng biển đổi shape liên tục, mỗi shape mới bắt cuDNN đo lại
+        # — đo thật trên video cổng trường: pose có lượt 1.2 s, AI còn 2-3 fps;
+        # tắt đi thì số frame xử lý tăng 2.3x.
+        torch.backends.cudnn.benchmark = False
 except ImportError:
     DEVICE = "cpu"
 
