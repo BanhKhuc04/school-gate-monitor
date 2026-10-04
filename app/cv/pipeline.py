@@ -73,6 +73,14 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 _DEFAULT_GATE_LINE = (0.0, 0.65, 1.0, 0.65)
 
 
+class _PoseOverlay:
+    """Khung xương 1 người trong overlay live view (keypoint theo toạ độ crop)."""
+    __slots__ = ('keypoints', 'offset')
+
+    def __init__(self, keypoints, offset):
+        self.keypoints, self.offset = keypoints, offset
+
+
 def _sha256_file(path: str, chunk_size: int = 1024 * 1024) -> Optional[str]:
     """Compute SHA256 hex digest of a file. Returns None nếu file không tồn tại
     hoặc không đọc được. Phase 3 (Task 1): dùng cho helmet weights hash check."""
@@ -886,7 +894,10 @@ class VideoPipeline:
                     dets = overlay[2]
                 if getattr(self, '_debug_overlay_enabled', True) and dets:
                     for det, positive, negative in dets:
-                        self._draw_detection(frame, det, positive, negative)
+                        if isinstance(det, _PoseOverlay):
+                            self._draw_pose_keypoints(frame, det.keypoints, det.offset)
+                        else:
+                            self._draw_detection(frame, det, positive, negative)
                 self._draw_roi(frame)
                 if DEBUG_CROSSING and getattr(self, '_debug_overlay_enabled', True):
                     self._draw_crossing_line_debug(frame)
@@ -2316,9 +2327,7 @@ class VideoPipeline:
                 unassociated_plates = [d for d in plate_dets if id(d) not in associated_plates]
                 if unassociated_plates:
                     self._observe_plate_only(source_frame, unassociated_plates)
-                self._preview_overlay = (self._source_epoch, time.monotonic(), preview_dets +
-                    tuple((d, COLOR_HELMET, COLOR_NO_HELMET) for d in matched_helmet_dets))
-                self._publish_ai_frame(source_frame, self._preview_overlay[2])
+                preview_dets += tuple((d, COLOR_HELMET, COLOR_NO_HELMET) for d in matched_helmet_dets)
 
                 # Cập nhật cache để nhánh skip vẽ box mượt — helmet dùng bản đã
                 # lọc theo vùng đầu (matched_helmet_dets), không dùng raw helmet_dets
@@ -2351,7 +2360,14 @@ class VideoPipeline:
                 self._count_riders_per_vehicle(groups)
 
                 # Phát hiện tư thế cho mỗi person box — ISOLATED try/except
+                self._last_pose_data = []
                 groups = self._run_posture_detection(frame, groups)
+                # Live view publishes after pose so the skeleton is drawn on the
+                # very frame it was computed from (earlier it went out boxes-only
+                # before pose ran, so the UI never showed a skeleton).
+                preview_dets += tuple((_PoseOverlay(k, o), None, None) for k, o in self._last_pose_data)
+                self._preview_overlay = (self._source_epoch, time.monotonic(), preview_dets)
+                self._publish_ai_frame(source_frame, preview_dets)
 
                 # Xe chở 2+ người tạo 2+ group (1 group/person) CÙNG trỏ vào 1
                 # _vehicle — chỉ 1 người "đại diện" (track_id nhỏ nhất, ổn định

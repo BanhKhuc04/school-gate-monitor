@@ -378,3 +378,28 @@ def test_ai_frame_carries_its_own_boxes_and_pauses_raw_capture_frames():
     assert (epoch, seq, dets) == (3, 41, ('det',))
     assert shown is not frame  # the source frame is still needed for OCR crops
     assert time.monotonic() - p._last_ai_publish < .3
+
+
+def test_preview_draws_pose_skeleton_from_ai_overlay():
+    """The live view must show the skeleton: pose entries in an AI frame's
+    overlay are drawn as keypoints, not passed to the box drawer."""
+    import queue as _queue
+    import threading as _threading
+    from app.cv import pipeline as pipeline_module
+    p = pipeline_module.VideoPipeline.__new__(pipeline_module.VideoPipeline)
+    p._preview_frame_queue = _queue.Queue(maxsize=2)
+    p._preview_stop = _threading.Event()
+    p._source_epoch = 1
+    p._roi_points = None
+    p._roi_polygon_px = None
+    drawn, boxes = [], []
+    p._draw_pose_keypoints = lambda frame, kps, offset: drawn.append((kps, offset))
+    p._draw_detection = lambda frame, det, a, b: boxes.append(det)
+    p._draw_roi = lambda frame: None
+    p._publish_frame_jpeg = lambda *a, **k: p._preview_stop.set()
+    kps = [{'x': 1.0, 'y': 2.0, 'confidence': .9}] * 17
+    p._preview_frame_queue.put((1, np.zeros((8, 8, 3), np.uint8), 5,
+                                (('box', 0, 0), (pipeline_module._PoseOverlay(kps, (3, 4)), None, None))))
+    p._preview_loop()
+    assert boxes == ['box']
+    assert drawn == [(kps, (3, 4))]
