@@ -350,7 +350,12 @@ DEBUG_PLATE_BEST_FRAME = os.environ.get("DEBUG_PLATE_BEST_FRAME", "0") == "1"
 DEBUG_ALERT = os.environ.get("DEBUG_ALERT", "0") == "1"
 PLATE_BEST_MIN_QUALITY = float(os.environ.get("PLATE_BEST_MIN_QUALITY", "0.65"))
 PLATE_BEST_REPLACE_MARGIN = float(os.environ.get("PLATE_BEST_REPLACE_MARGIN", "0.05"))
-PLATE_OCR_MIN_CONFIDENCE = float(os.environ.get("PLATE_OCR_MIN_CONFIDENCE", "0.70"))
+# Độ tin cậy biển = ký tự yếu nhất. Ban đêm camera chạy hồng ngoại, biển hơi lóa:
+# 89F123792 đọc đúng đủ 9 ký tự nhưng ký tự yếu nhất 0.62 -> ở 0.70 bị bỏ, 94/101
+# lượt OCR thành "rỗng". Video camera sau 04/10 (biển đã biết): 0.70 -> 293 lượt
+# đúng, 0.55 -> 302, 0 lượt sai ở mọi ngưỡng 0.50-0.70. Vẫn cần đúng định dạng
+# biển VN và >= 2 lượt khớp nhau mới xác nhận.
+PLATE_OCR_MIN_CONFIDENCE = float(os.environ.get("PLATE_OCR_MIN_CONFIDENCE", "0.55"))
 MAX_PLATE_OCR_ATTEMPTS = 1
 ALERT_MAX_PLATE_WAIT_MS = max(0, min(200, int(os.environ.get("ALERT_MAX_PLATE_WAIT_MS", "150"))))
 

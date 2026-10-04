@@ -28,10 +28,12 @@ def main():
     ap.add_argument('--step', type=int, default=2)
     ap.add_argument('--model', default=PLATE_MODEL_PATH)
     ap.add_argument('--detect-width', type=int, default=DETECT_WIDTH, help='kích thước detect (imgsz)')
+    ap.add_argument('--min-conf', default='0.70', help='ngưỡng tin cậy OCR, nhiều giá trị cách nhau dấu phẩy')
     args = ap.parse_args()
     import app.cv.detector as detector_module
     detector_module.DETECT_WIDTH = args.detect_width
     pads = [float(p) for p in args.pads.split(',')]
+    thresholds = [float(t) for t in args.min_conf.split(',')]
     detector = HelmetPlateDetector(args.model, conf_threshold=PLATE_CONF_THRESHOLD)
     cap = cv2.VideoCapture(args.video)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -63,20 +65,20 @@ def main():
                     continue
                 raw_read = read_plate_detailed(cand.crop)
                 text = normalize_plate(raw_read.get('full', ''))
-                confident = resolve_plate(raw_read).text
                 s = stats[pad]
                 s['boxes'] += 1
                 s['exact_any'] += text == args.plate
-                s['confident'] += bool(confident)
-                s['confident_exact'] += confident == args.plate
-                s['confident_wrong'] += bool(confident) and confident != args.plate
+                for mc in thresholds:
+                    confident = resolve_plate(raw_read, mc).text
+                    s[f'confident@{mc}'] += bool(confident)
+                    s[f'right@{mc}'] += confident == args.plate
+                    s[f'wrong@{mc}'] += bool(confident) and confident != args.plate
     for pad in pads:
         s = stats[pad]
         n = max(1, s['boxes'])
-        print(f"pad {pad:4.2f}: boxes={s['boxes']:4d} đọc đúng (thô)={s['exact_any']/n:6.1%} "
-              f"chắc chắn={s['confident']/n:6.1%} chắc chắn&đúng={s['confident_exact']:4d} "
-              f"chắc chắn&SAI={s['confident_wrong']:3d}")
-
+        print(f"pad {pad:4.2f}: boxes={s['boxes']:4d} đọc đúng (thô)={s['exact_any']/n:6.1%}")
+        for mc in thresholds:
+            print(f"   ngưỡng {mc:.2f}: chắc chắn&đúng={s[f'right@{mc}']:4d}  chắc chắn&SAI={s[f'wrong@{mc}']:3d}")
 
 if __name__ == '__main__':
     main()
