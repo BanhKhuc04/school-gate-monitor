@@ -7,6 +7,8 @@ Nguồn:
      đội mũ, đồ vật), uncertain che xám.
   3. Video camera trước 04/10 (người đầu trần suốt video): box đầu dựng từ pose
      khi thấy rõ mặt (>= 60% đầu trong khung) — mẫu "tóc đen không phải mũ".
+  4. Hai video selfie đầu trần (cvat_review/selfie_bare_heads.json): đầu cúi/ngửa/
+     nghiêng, lộ đỉnh tóc — model cũ gọi "có mũ" 4/54 khung. Video A (người khác) làm val.
 
 Val chia theo VIDEO GỐC (giống build_real_plate_dataset.py) để không rò.
 
@@ -25,6 +27,7 @@ REVIEW = ROOT / 'datasets' / 'cvat_review'
 EDGE = ROOT / 'datasets' / 'edgevision_helmet'
 OUT = ROOT / 'datasets' / 'helmet_mix'
 BARE_HEAD_VIDEO = Path('D:/Work/gate_recordings/dongbo_camera_truoc.mp4')
+SELFIE_DIR = Path.home() / 'Downloads'  # video của selfie_bare_heads.json
 # Giây có người trên xe/dắt xe trong video trên (dongbo_ground_truth.json).
 BARE_HEAD_TRAIN = [(64, 123)]
 BARE_HEAD_VAL = [(124, 167)]
@@ -108,6 +111,21 @@ def bare_head_frames(stats, fps_sample=2):
             stats[split]['Without Helmet'] += len(rows)
 
 
+def selfie_frames(stats):
+    doc = json.loads((REVIEW / 'selfie_bare_heads.json').read_text())
+    for tag, video in doc['videos'].items():
+        cap = cv2.VideoCapture(str(SELFIE_DIR / video['file']))
+        for index, box in sorted(video['frames'].items(), key=lambda kv: int(kv[0])):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            h, w = frame.shape[:2]
+            write(video['split'], f'selfie{tag}_{int(index):04d}', frame, [yolo(box, w, h, 1)])
+            stats[video['split']]['images'] += 1
+            stats[video['split']]['Without Helmet'] += 1
+
+
 def main():
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -126,6 +144,7 @@ def main():
     review_frames(stats)
     if BARE_HEAD_VIDEO.exists():
         bare_head_frames(stats)
+    selfie_frames(stats)
     for val in ('val_real', 'val_public'):
         (OUT / f'data_{val}.yaml').write_text(
             f"path: {OUT.as_posix()}\ntrain: images/train\nval: images/{val}\nnc: 2\n"

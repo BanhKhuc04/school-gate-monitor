@@ -22,6 +22,7 @@ import cv2
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / 'datasets' / 'cvat_review'
 OUT = ROOT / 'datasets' / 'real_plate_review'
+PHONE_DIR = Path.home() / 'Downloads' / 'biensoxe'  # ảnh của phone_plates.json
 # v3, v5, v13 (+ b2_*): 66/240 biển, đủ kiểu (gần/xa, ô tô đỏ, nắng). Video
 # 2026-10-01 18-33-23.mp4 không có trong plate_review nên cũng là video test sạch.
 VAL_VIDEOS = ('1790578609473', '1790578808519', '1790589989047')
@@ -95,6 +96,18 @@ def main():
                 crop, keep = crop_around(img, box, plates, rng)
                 write(split, f'{stem}_c{i}{j}', crop, keep)
                 st['crops'] += 1
+    # Ảnh chụp gần bằng điện thoại: biển chiếm gần hết khung — plate_real_best.pt
+    # bắt sai/hụt 4/9 ảnh (bắt nhầm đèn phản quang). Chỉ dùng để train.
+    phone = json.loads((SRC / 'phone_plates.json').read_text())
+    for name, item in sorted(phone['images'].items()):
+        img = cv2.imread(str(PHONE_DIR / name))
+        if img is None:
+            continue
+        scale = min(1., 1280 / max(img.shape[:2]))
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        write('train', 'phone_' + Path(name).stem[:13], img, [[v * scale for v in item['box']]])
+        stats['train']['frames'] += 1
+        stats['train']['plates'] += 1
     meta = {'name': 'real_plate_review', 'val_videos': VAL_VIDEOS, 'stats': stats}
     (OUT / 'real_plate_meta.json').write_text(json.dumps(meta, indent=1))
     zip_path = shutil.make_archive(str(OUT), 'zip', OUT)
