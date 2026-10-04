@@ -2,6 +2,22 @@
 
 Phát hiện mũ bảo hiểm + nhận diện biển số xe máy tại cổng trường học, dùng webcam và YOLOv8, giao diện React SPA với đăng nhập phân quyền.
 
+## ⚡ Chạy demo nhanh (Windows, bấm đúp là chạy)
+
+Máy đã cài **Python 3.9+** và **Node.js 18+** (xem Bước 1 bên dưới nếu chưa):
+
+| File | Khi nào chạy | Làm gì |
+|---|---|---|
+| `CAI_DAT.bat` | 1 lần, cần mạng | Tạo venv, cài thư viện (tự cài **torch bản CUDA** nếu máy có card NVIDIA), build giao diện, tải sẵn mọi model, **tự sửa model mũ bảo hiểm**, tạo `.env` |
+| `CHAY_DEMO.bat` | Mỗi lần demo | Kiểm tra nhanh rồi chạy hệ thống trong **1 cửa sổ** tại `http://localhost:8000`, tự mở trình duyệt |
+| `TRAIN_GPU.bat` | Khi có dữ liệu mới | Train lại model bằng GPU, **tự so sánh và chỉ thay model khi tốt hơn** (xem `scripts/train_all.py`) |
+
+- Đăng nhập `admin` / `admin123` (tài khoản mặc định được tự tạo khi DB còn trống — đổi mật khẩu trước khi dùng thật).
+- Có GPU NVIDIA thì hệ thống **tự dùng tối đa GPU**: FP16, xử lý mọi khung hình, detect ở nguyên độ phân giải 1280x720 (bắt được biển số nhỏ ở xa), model người/xe lớn hơn (`yolov8s`). Trang **Sức khỏe & Lưu trữ** hiện đang chạy GPU hay CPU.
+- Điện thoại/máy khác cùng mạng wifi mở `http://<IP-máy-chạy>:8000` cũng xem được (lần đầu Windows hỏi tường lửa → bấm *Allow*).
+- Chạy video quay sẵn thay camera: vào **Cấu hình Camera**, dán đường dẫn file `.mp4` → *Lưu & khởi động lại* (video phát đúng tốc độ thật, tự lặp lại).
+- Kiểm tra máy bất cứ lúc nào: `python scripts/prepare_demo.py` — in bảng OK/LỖI kèm cách sửa.
+
 ## Cài đặt (dành cho máy chưa có gì cả)
 
 Hướng dẫn này giả sử máy bạn **chưa cài Python, Node.js hay Git** — làm theo đúng thứ tự là chạy được, không cần biết lập trình. Các bước dưới viết cho **Windows** (có ghi chú riêng cho macOS/Linux ở bước nào khác biệt).
@@ -114,24 +130,25 @@ Máy không có GPU NVIDIA vẫn chạy được bình thường (tự động d
 - **Nhận diện khuôn mặt** — gỡ hoàn toàn (commit `d4d8dc4`): mở khẩu trang không đeo mặt nạ vẫn xâm phạm dữ liệu sinh trắc học trẻ vị thành niên, rủi ro pháp lý không đáng đánh đổi. Không còn `app/api/faces.py`, `app/cv/face.py`, bảng `face_embeddings`/`face_match_events`, trang `AdminFacesPage`.
 
 **Chưa làm (kế hoạch, chưa có code):**
-- Chạy 2 camera song song (cổng vào/cổng ra) — hiện pipeline chỉ đọc **1 nguồn camera duy nhất** (`CAMERA_SOURCE` trong `app/config.py`), chưa có route/logic phân biệt hướng vào/ra.
+- Phân biệt hướng vào/ra (2 camera chạy song song + ghép 1 lượt xe trước/sau đã có — xem `.env.example`).
 - Deploy lên VPS (103.101.162.111, 1 vCPU/1GB/15GB) — VPS mới có, chưa cấu hình gì; kế hoạch là chỉ host API + DB + frontend static, inference vẫn chạy ở máy edge tại chỗ.
 - Mua/lắp camera IP thật tại cổng — đang khảo giá (Hikvision dòng IP "CD", Imou), chưa chốt.
 - OCR (EasyOCR) và model helmet vẫn dùng pretrained public, chưa fine-tune bằng dữ liệu thật của trường (model plate đã fine-tune, xem mục "Model" bên trên).
 
 ## Model
 
-`models/helmet_best.pt` và `models/plate_best.pt` đã nằm sẵn trong repo (clone
-về là chạy được ngay, không cần tải thêm) — đây là 2 file model **dành riêng
+`models/helmet_best.pt` và `models/plate_best.pt` đã nằm sẵn trong repo — đây là 2 file model **dành riêng
 cho dự án**, không phải bản pretrained public gốc:
-- `helmet_best.pt`: bản pretrained gốc từ [iam-tsr/yolov8n-helmet-detection](https://huggingface.co/iam-tsr/yolov8n-helmet-detection) (thử fine-tune lại trên dữ liệu thật nhưng kết quả tệ hơn nên giữ nguyên bản gốc, xem commit `d631432`).
+- `helmet_best.pt`: phải là bản gốc từ [iam-tsr/yolov8n-helmet-detection](https://huggingface.co/iam-tsr/yolov8n-helmet-detection) (lớp `With Helmet` / `Without Helmet`). ⚠️ **File đang commit trong repo bị ghi đè nhầm bằng 1 model biển số** (lớp duy nhất `plate`, bản fine-tune Kaggle 29/09) → hệ thống không bắt được lỗi không đội mũ. Giờ backend tự phát hiện lúc khởi động (log đỏ + cảnh báo ở trang Sức khỏe, tắt riêng phần mũ, phần còn lại vẫn chạy), và `python scripts/prepare_demo.py` (hoặc `CAI_DAT.bat`) tự tìm bản đúng trong `models/` hoặc tải lại từ HuggingFace rồi kiểm tra lớp trước khi cài.
 - `plate_best.pt`: **đã fine-tune** trên 8259 ảnh biển số xe máy Việt Nam thật (`scripts/train_plate.py`) — tỉ lệ nhận diện trên khung hình xe máy thật tăng từ ~0% lên ~70% so với bản gốc [Koushim/yolov8-license-plate-detection](https://huggingface.co/Koushim/yolov8-license-plate-detection). **Không tải bản gốc từ HuggingFace để thay thế file này** — sẽ làm chất lượng nhận diện biển số giảm mạnh.
 
-Model `models/yolov8n.pt` (person COCO) và `yolov8n-pose.pt` (tư thế đi bộ vs ngồi xe) vẫn tự tải lần đầu khi chạy (cần internet, ~6MB, không commit vì tải lại y hệt được).
+Model `yolov8n.pt` / `yolov8s.pt` (người + xe COCO — bản `s` khi có GPU) và `yolov8n-pose.pt` (tư thế đi bộ vs ngồi xe) tự tải lần đầu khi chạy (cần internet, không commit vì tải lại y hệt được) — `prepare_demo.py` tải sẵn để lúc demo không cần mạng.
+
+`models/plate_ocr_best.pt` (tùy chọn): model YOLO đọc **từng ký tự** biển số, train bằng `TRAIN_GPU.bat --only ocr` trên `datasets/plate_char_ocr`. Chỉ được cài khi đọc đúng cả biển nhiều hơn EasyOCR trên tập val; có file này thì OCR dùng nó trước, EasyOCR làm dự phòng.
 
 ## Biến môi trường
 
-Xem chi tiết từng biến (camera, cổng phụ, JWT...) trong file `.env.example` — đã có chú thích đầy đủ. Bước cài đặt ở trên (Bước 5) đã hướng dẫn tạo `.env` và set `JWT_SECRET_KEY`. Nên đổi luôn mật khẩu của các tài khoản seed mặc định (xem bảng "Users" bên dưới) trước khi dùng thật — đây là mật khẩu demo công khai trong README.
+Xem chi tiết từng biến (camera, cổng phụ, JWT...) trong file `.env.example` — đã có chú thích đầy đủ. Tinh chỉnh hiệu năng (đều có mặc định tự chọn theo GPU/CPU, `app/config.py`): `FRAME_SKIP`, `DETECT_WIDTH`/`DETECT_HEIGHT`/`DETECT_IMGSZ`, `PERSON_MODEL_PATH`, `TRACK_MIN_FRAMES` (số lần thấy 1 người/xe trước khi kết luận vi phạm, mặc định 3), `VIDEO_FILE_REALTIME` (video file phát đúng tốc độ thật, mặc định 1). Bước cài đặt ở trên (Bước 5) đã hướng dẫn tạo `.env` và set `JWT_SECRET_KEY`. Nên đổi luôn mật khẩu của các tài khoản seed mặc định (xem bảng "Users" bên dưới) trước khi dùng thật — đây là mật khẩu demo công khai trong README.
 
 ## Chạy (Production — một process duy nhất)
 
@@ -199,10 +216,15 @@ Mở trình duyệt: `http://localhost:8000`
 | Code | Mô tả |
 |------|--------|
 | `NO_HELMET` | Không đội mũ bảo hiểm |
-| `PLATE_NOT_REGISTERED` | Biển số không có trong danh sách đăng ký |
-| `PLATE_UNREADABLE` | Không đọc được biển số |
-| `MULTIPLE` | Nhiều loại vi phạm cùng lúc |
-| `RIDING_THROUGH_GATE` | Người ngồi trên xe đi qua cổng (tư thế riding + có mũ) |
+| `PLATE_NOT_REGISTERED` | Biển số đọc rõ nhưng không có trong danh sách đăng ký |
+| `NO_PLATE` | Xe máy không thấy biển số |
+| `PLATE_OBSCURED` | Có biển số nhưng bị che/mờ, không đọc được |
+| `PLATE_LOW_CONFIDENCE` | Đọc được biển nhưng chưa chắc chắn → trạng thái "AI cần kiểm tra", không tự gán học sinh |
+| `RIDING_THROUGH_GATE` | Ngồi trên xe chạy qua cổng (phải dắt xe) |
+| `TOO_MANY_RIDERS` | Chở quá số người quy định |
+| `MULTIPLE` | Nhiều lỗi cùng lúc — danh sách lỗi cụ thể lưu ở `violation_details`, giao diện/CSV/cảnh báo hiện rõ từng lỗi |
+
+Mỗi người/xe được **theo dõi qua nhiều khung hình** (`app/cv/tracker.py`): bằng chứng (mũ, tư thế, biển số rõ nhất) được gom lại và vi phạm chỉ ghi **1 lần cho mỗi lượt đi qua** — không bỏ sót xe khác đi liền sau, không ghi trùng.
 
 ## License
 

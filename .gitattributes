@@ -1,0 +1,2 @@
+# File .bat phải giữ CRLF để cmd.exe chạy đúng trên Windows
+*.bat text eol=crlf

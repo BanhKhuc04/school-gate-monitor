@@ -666,9 +666,42 @@ Tests: **172/172 pass** (167 + 5 mới).
 
 Next task: Không có việc bắt buộc tiếp theo (đợt vá lỗi + cải thiện phân biệt người đi bộ/đi xe từ camera thật đã xong). Gợi ý nếu muốn làm tiếp: alert escalation, parent notification tự động, export danh sách xe.
 
+### SESSION LOG — 2026-10-04 (chuẩn bị demo: kiểm tra toàn bộ + sửa lỗi + tối ưu GPU)
+
+Goal: Người dùng yêu cầu "kiểm tra lại toàn bộ dự án, train thêm, mai demo cần chạy tốt nhất, dùng tối đa GPU, xe nào cũng nhận dạng, người nào cũng đúng, lỗi rành rọt" — toàn quyền A→Z. Làm trên cloud container (4 CPU, KHÔNG GPU, chặn HuggingFace/Kaggle/Roboflow) nên mọi thứ chạy GPU được viết + kiểm tra logic trên CPU, train thật phải chạy trên máy người dùng (`TRAIN_GPU.bat`).
+
+Lỗi nghiêm trọng tìm thấy + đã sửa:
+1. **Clone mới không khởi động được**: `app/main.py` + `frontend/src/App.jsx` import `app/api/camera.py` và `pages/AdminCameraPage.jsx` từ commit `88f9229` nhưng 2 file này CHƯA BAO GIỜ được commit (chỉ có trên máy người dùng) → backend ImportError, frontend build fail. Viết lại cả 2 + 6 test.
+2. **`models/helmet_best.pt` là model BIỂN SỐ** (lớp duy nhất `plate`, bản fine-tune Kaggle 29/09 bị lưu nhầm tên) → hệ thống KHÔNG BAO GIỜ bắt được lỗi không đội mũ, không báo gì. Máy cloud không tải được bản đúng (HuggingFace bị chặn) → (a) pipeline kiểm tra lớp model lúc khởi động: sai/thiếu → log đỏ + cảnh báo trang Sức khỏe + tắt riêng phần mũ (không sập); (b) `scripts/prepare_demo.py` tự tìm bản đúng trong `models/` hoặc tải lại từ HF `iam-tsr/yolov8n-helmet-detection`, kiểm tra lớp rồi mới cài. Đã đo: bản `plate_best.pt` hiện tại bắt biển NHỎ tốt hơn bản Kaggle 29/09 (biển 45px: 9/10 vs 8/10) dù mAP val kém hơn chút → GIỮ NGUYÊN plate_best.pt.
+3. **Bỏ sót xe**: cooldown ghi vi phạm dùng khóa `plate_matched or "UNKNOWN"` → mọi xe không biển/biển lạ dùng chung khóa "UNKNOWN" 60s → xe thứ 2, 3... trong 1 phút KHÔNG được ghi. Sửa tận gốc bằng tracker (xem dưới). Có test hồi quy + mutation check (khôi phục logic cũ → 2 test FAIL).
+4. **DB mới không có tài khoản nào** dù README ghi có sẵn admin/admin123 → `seed_default_users_if_empty()` gọi lúc khởi động app (chỉ khi bảng users trống).
+5. **OCR sắp xếp ký tự sai**: `read_plate_detailed` "sắp xếp theo x" nhưng thực tế sort theo y → ký tự 1 dòng bị đảo. Viết lại OCR (xem dưới).
+6. **Chế độ 1 tiến trình** (backend phục vụ `frontend/dist`): mở thẳng/F5 `/admin/violations` trả JSON 410 "Gone" (handler route Jinja cũ trùng route React); mọi file tĩnh (logo `favicon.svg`) bị trả `index.html` → logo vỡ. Sửa cả 2 (có chặn path traversal).
+7. `API_BASE_URL` cứng `http://localhost:8000` → mở giao diện từ máy khác/điện thoại là hỏng. Đổi sang cùng gốc với trang (vite đã proxy /api /media /guard/* sẵn).
+8. Banner cảnh báo hiện mã tiếng Anh (`⚠️ CẢNH BÁO: NO_HELMET`); lỗi MULTIPLE chỉ ghi "Nhiều vi phạm" → thêm cột `violation_details` (migration ALTER TABLE), UI/CSV/cảnh báo/giọng đọc liệt kê RÕ từng lỗi tiếng Việt; lọc theo 1 loại lỗi ra cả bản ghi MULTIPLE chứa lỗi đó.
+9. AlertBanner rò timer reconnect WebSocket khi rời trang (mở thêm WS thừa).
+10. Test cũ lỗi thời/chập chờn: `test_run_loop_survives_failing_job...` (limit=10 quá nhỏ trên máy nhanh), `tests/test_api_errors.py` (khẳng định hành vi 410 sai + test stream MJPEG đọc vô hạn bị treo).
+
+Tính năng/cải tiến:
+- **`app/cv/tracker.py`** (IoU tracker + fallback khoảng cách tâm): ID ổn định cho từng người. Pipeline gom bằng chứng THEO TRACK (mũ/tư thế bỏ phiếu đa số, biển số đọc rõ nhất, đã thấy biển ở frame nào chưa), chỉ kết luận sau `TRACK_MIN_FRAMES` (mặc định 3) lần thấy, ghi ĐÚNG 1 lần/track; cooldown theo (biển số hoặc track, loại lỗi). PlateVoter gom phiếu theo track id (xe đang chạy đổi ô lưới liên tục nên trước đây gần như không gom được).
+- **OCR** (`app/cv/ocr.py`): gom box thành dòng theo Y + xếp trái→phải; phóng to crop nhỏ lên 160px; nhận crop từ 12x20 (trước bỏ qua <20x40); allowlist ký tự biển số; sửa nhầm chữ↔số theo vị trí (chỉ khi giúp khớp định dạng); nới box 6%. Đo trên 9 biển thật (`data/samples/plates`, đáp án đọc tay trong `test_ocr.py`): biển cao 45px (cỡ thật trên camera 720p) cũ đúng 1/9 → mới 6/9; ảnh gốc 6/9 → 8/9. Hỗ trợ model YOLO đọc từng ký tự `models/plate_ocr_best.pt` (dùng trước nếu có, EasyOCR dự phòng). Thử tách đôi biển 2 dòng → KÉM hơn, đã bỏ.
+- **GPU tối đa** (`app/config.py`, chỉ khi CUDA): FP16, `FRAME_SKIP=1`, detect NGUYÊN 1280x720 (đo: biển 32px — detect 640 bắt 1/10, 960: 8/10, 1280: 10/10), model người/xe `yolov8s.pt` (tự lùi về yolov8n nếu không tải được). CPU giữ nguyên cấu hình cũ. Mọi giá trị đè được qua env.
+- Video file phát đúng tốc độ thật (`VIDEO_FILE_REALTIME`), camera mở lỗi thì tự thử lại mỗi 3s + hiện lý do ngay trên khung video (trước: thread chết im lặng tới khi restart app).
+- Nhãn trên video: `#ID` + đi bộ/lỗi (không dấu, cv2 không vẽ được tiếng Việt có dấu), biển số định dạng `59K1-650.72` + ĐÃ/CHƯA ĐĂNG KÝ.
+- Trang Sức khỏe: GPU/CPU, model đang dùng, cỡ detect, cảnh báo đỏ khi model mũ sai hoặc camera lỗi.
+- `scripts/prepare_demo.py`: kiểm tra + tự sửa (GPU/torch CUDA, model mũ, tải sẵn model + EasyOCR, tạo .env, tự kiểm tra đọc biển + phát hiện người trên ảnh thật), in bảng OK/LỖI kèm cách sửa. `--quick` chỉ kiểm tra.
+- `scripts/train_all.py`: train dùng tối đa GPU (batch theo 80% VRAM, AMP, cache RAM, worker = số nhân) — job `ocr` (model đọc ký tự, chỉ cài nếu đọc đúng CẢ BIỂN nhiều hơn EasyOCR trên val), `plate` (fine-tune, chỉ thay nếu mAP val không giảm VÀ bắt biển 32px không kém), `helmet` (khi có `datasets/helmet`). Model cũ luôn backup `*.bak`. Đã chạy thử toàn bộ luồng bằng CPU trên bản sao repo với dataset tổng hợp.
+- `CAI_DAT.bat` / `CHAY_DEMO.bat` / `TRAIN_GPU.bat` (Windows, 1 click; CAI_DAT tự cài torch CUDA nếu có card NVIDIA).
+
+Tests: unit **206 pass** (`pytest`), live API `tests/test_api_errors.py` **36/36**, Playwright UI **24/24** (chạy với backend thật phục vụ `frontend/dist`). Chạy thật backend + model thật (CPU) trên video tổng hợp từ ảnh người thật + biển số thật: ~2.8 FPS CPU, người đi bộ được nhận đúng "DI BO", 0 vi phạm sai, biển thật được phát hiện + đọc đúng `59K165072`.
+Known: `test_vehicles.py::test_csv_import_success` thỉnh thoảng "database is locked" CHỈ khi CPU bị tiến trình khác chiếm 100% (chạy song song server inference) — chạy bình thường luôn pass; chưa tìm ra kết nối giữ khóa.
+
+Việc người dùng PHẢI làm trên máy có GPU trước demo: chạy `CAI_DAT.bat` (hoặc `python scripts/prepare_demo.py`) để tải model mũ bảo hiểm đúng; muốn train thêm thì giải nén dataset vào `datasets/plate_char_ocr` / `datasets/vn_plate_detect` rồi chạy `TRAIN_GPU.bat`.
+
 ## 24. CURRENT HANDOVER SUMMARY
 
-Current stable commit: (xem git log — commit "đợt 3: Vùng nhận diện ROI")
+Current stable commit: (xem git log — các commit ngày 2026-10-04 "chuẩn bị demo", xem SESSION LOG ngay trên)
+**Cập nhật 2026-10-04:** đọc SESSION LOG "chuẩn bị demo" — model mũ bảo hiểm trong repo SAI (là model biển số), phải chạy `python scripts/prepare_demo.py` trên máy có mạng để tải bản đúng.
 System status: Backend/frontend chạy được, **161/161 test pass**. Đợt nâng cấp lớn 7 bước (Bước 1+3-7) đã HOÀN THÀNH từ trước. Đợt 3 (2026-09-29) thêm vùng nhận diện (ROI) per-gate + xác nhận đa-camera đã sẵn có (chỉ thiếu `.env.example`, nay đã thêm). Bước 7 (continuous recording) vẫn **MẶC ĐỊNH TẮT** — chưa đổi, chờ benchmark thật.
 Current development phase: ✅ Đợt 3 (ROI) đã HOÀN THÀNH. Chờ người dùng: (1) review benchmark Bước 7 continuous recording, (2) test ROI + 2 camera với phần cứng thật khi có.
 Next recommended task: (1) Người dùng review benchmark Bước 7 — quyết định có bật `CONTINUOUS_RECORDING_ENABLED=True` làm mặc định hay không. (2) Nếu muốn dùng continuous recording thật, chạy `scripts/benchmark_recording.py` trên máy production với camera thật để có số liệu chính xác (script hiện dùng synthetic frame). (3) Khi có camera vật lý thứ 2, set `CAMERA_SOURCE_SECONDARY` theo `.env.example` rồi vẽ vùng ROI riêng cho từng gate tại `/admin/roi`.
