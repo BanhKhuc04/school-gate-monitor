@@ -415,15 +415,32 @@ PLATE_TWO_LINE_MAX_ASPECT_RATIO = 2.0
 
 # Crossing (vạch mốc) — xem app/cv/crossing.py. vehicle_anchor (bottom-center
 # bbox xe) là điểm duy nhất dùng để xác định crossing.
-CROSSING_EDGE_MARGIN = 0.02          # dead-zone quanh vạch (tỉ lệ chuẩn hóa)
+CROSSING_EDGE_MARGIN = float(os.environ.get("CROSSING_EDGE_MARGIN", "0.01"))  # dead-zone quanh vạch (tỉ lệ đường chéo); nhỏ = bắt ngay khi mũi xe chạm vạch
 CROSSING_MIN_FRAMES_PER_SIDE = 3     # phía TRƯỚC vạch cần ổn định bấy nhiêu frame mới xác nhận lần đầu
 CROSSING_REARM_DISTANCE = 0.05       # xe phải rời vạch xa hơn mức này mới tính crossing LẦN MỚI
 CROSSING_COOLDOWN_SEC = 2.0          # + đủ thời gian này mới rearm — chống anchor jitter tạo nhiều event
 CROSSING_ALLOWED_DIRECTION = None    # None = tính cả 2 chiều; 'enter' hoặc 'exit' = chỉ tính chiều đó
-# Phase 4 (Task 1): chốt lượt 3+3 — phía đích cũng cần MIN_FRAMES_PER_SIDE
-# mẫu ổn định mới chốt crossing. Mặc định ON (3+3). Set 1 để legacy 3+1.
+
+
+def crossing_motion(gate_id: str) -> str:
+    """Chiều đi hợp lệ của điểm neo TRONG ẢNH: 'down' | 'up' | 'any'.
+
+    Xe vào cổng chạy VỀ PHÍA camera trước (đầu xe đi xuống trong ảnh) và ĐI XA
+    camera sau (biển ở đít xe đi lên trong ảnh). Lùi xe lại = ngược chiều =
+    không tính, không đọc biển. Đổi bằng env GATE_<ID>_CROSS_MOTION.
+    """
+    value = os.environ.get(f"GATE_{gate_id.upper()}_CROSS_MOTION", "").strip().lower()
+    if value in ("down", "up", "any"):
+        return value
+    return "down" if _resolve_role(gate_id) == "front" else "up"
+
+
+# Phía đích cần bấy nhiêu khung để chốt. 1 = chốt ngay khung đầu tiên mũi xe
+# (điểm neo) qua vạch. Trước đây 3 (thêm ~0.3 s trễ) để chống rung box quanh
+# vạch; giờ đã có lọc chiều đi (crossing_motion) + vùng đệm + rearm/cooldown
+# nên rung qua lại không còn tạo lượt mới. Set 3 để quay lại kiểu cũ.
 CROSSING_MIN_FRAMES_EXIT_SIDE = max(
-    1, min(10, int(os.environ.get("CROSSING_MIN_FRAMES_EXIT_SIDE", "3")))
+    1, min(10, int(os.environ.get("CROSSING_MIN_FRAMES_EXIT_SIDE", "1")))
 )
 # Phase 4 (Task 1): cửa sổ thời gian tối đa giữa frame đầu tiên và frame cuối
 # của transition (entry→exit). Nếu vượt quá → reset stable_side, không chốt.

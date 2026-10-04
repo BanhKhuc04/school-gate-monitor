@@ -5,47 +5,124 @@ Only valid at a single-file gate: one vehicle passes at a time, so the plate a
 rear camera confirms inside the window belongs to the vehicle the front camera
 saw. Two different plates inside the window means two vehicles: never guess.
 Misreads of one plate (89F123792 / 89F123192) count as the same plate.
+
+Two ways to pair, strongest first:
+  1. Shared gate line. Each camera draws the same physical line on its own
+     image; the rear camera reports when a PLATE crosses it. The front event
+     takes the plate whose crossing is within LINE_WINDOW_SEC of its own
+     vehicle crossing, after removing the learned camera offset (stream
+     latency + where each line was drawn), median of recent unique pairs.
+     Once the rear camera reports crossings, only this rule is used, so a
+     plate seen seconds earlier or later can no longer be attached.
+  2. Fallback (rear line not drawn / never fires): any plate the rear camera
+     confirmed within WINDOW_SEC.
 """
 import difflib
 import os
+import statistics
 import threading
 import time
+from collections import deque
 
 WINDOW_SEC = max(1.0, float(os.environ.get('PAIRING_WINDOW_SEC', '8')))
+LINE_WINDOW_SEC = max(.5, float(os.environ.get('PAIRING_LINE_WINDOW_SEC', '2.5')))
+PAIRING_WAIT_SEC = max(0., float(os.environ.get('PAIRING_WAIT_SEC', '2.0')))
 SAME_PLATE_SIMILARITY = 0.8
+MIN_OFFSET_SAMPLES = 5
 
 _lock = threading.Lock()
-_seen = {}     # (gate_id, plate) -> [first_ts, last_ts, observations, best_confidence]
-_waiting = []  # [deadline_ts, event_ts, event_gate, callback]
+_seen = {}       # (gate_id, plate) -> [first_ts, last_ts, observations, best_confidence]
+_crossings = {}  # (gate_id, plate) -> {crossing_ts: confidence}
+_waiting = []    # [deadline_ts, event_ts, event_gate, callback]
+_deltas = deque(maxlen=21)  # rear crossing - front crossing, unique pairs only
+_events = deque(maxlen=64)  # (gate_id, event_ts) of vehicle crossings needing a plate
 
 
 def reset():
     with _lock:
         _seen.clear()
+        _crossings.clear()
         _waiting.clear()
+        _deltas.clear()
+        _events.clear()
+
+
+def record_event(gate_id, event_ts):
+    """A vehicle crossing on a camera that cannot see plates (learning input)."""
+    with _lock:
+        _events.append((gate_id, event_ts))
+
+
+def wait_budget():
+    """How long a front event should wait for the rear plate crossing."""
+    return min(WINDOW_SEC, max(PAIRING_WAIT_SEC, offset() + LINE_WINDOW_SEC))
+
+
+def _learn(gate_id, plate, crossing_ts):
+    """One vehicle event and one plate crossing near each other -> a delay sample."""
+    events = [ts for g, ts in _events if g != gate_id and abs(crossing_ts - ts) <= WINDOW_SEC]
+    if len(events) != 1:
+        return
+    others = {p for (g, p), times in _crossings.items() if g == gate_id
+              and any(abs(t - events[0]) <= WINDOW_SEC for t in times)}
+    if len(_clusters(others, len)) == 1:
+        _deltas.append(crossing_ts - events[0])
+
+
+def offset():
+    """Learned rear-minus-front crossing delay (0 until enough unique pairs)."""
+    return statistics.median(_deltas) if len(_deltas) >= MIN_OFFSET_SAMPLES else 0.0
+
+
+def _clusters(plates, weight):
+    groups = []
+    for plate in sorted(plates, key=weight, reverse=True):
+        for group in groups:
+            if difflib.SequenceMatcher(None, plate, group[0]).ratio() >= SAME_PLATE_SIMILARITY:
+                group.append(plate)
+                break
+        else:
+            groups.append([plate])
+    return groups
 
 
 def _decide(event_ts, event_gate):
-    """(plate, confidence, status) with status in paired / ambiguous / none."""
+    """(plate, confidence, status, method); status paired / ambiguous / none."""
+    other = {(g, p): c for (g, p), c in _crossings.items() if g != event_gate}
+    wide = {}
+    for (gate, plate), times in other.items():
+        for ts, conf in times.items():
+            if abs(ts - event_ts) <= WINDOW_SEC:
+                wide.setdefault(plate, []).append((ts, conf))
+    if wide:  # the rear camera reports line crossings: use only those
+        target = event_ts + offset()
+        close = {p: [(t, c) for t, c in v if abs(t - target) <= LINE_WINDOW_SEC] for p, v in wide.items()}
+        close = {p: v for p, v in close.items() if v}
+        if not close:
+            return None, 0.0, 'none', 'line'
+        groups = _clusters(close, lambda p: (len(close[p]), max(c for _, c in close[p])))
+        if len(groups) > 1:
+            return None, 0.0, 'ambiguous', 'line'
+        best = groups[0][0]
+        return best, max(c for _, c in close[best]), 'paired', 'line'
     near = {plate: span for (gate, plate), span in _seen.items()
             if gate != event_gate and span[0] - WINDOW_SEC <= event_ts <= span[1] + WINDOW_SEC}
     if not near:
-        return None, 0.0, 'none'
-    clusters = []
-    for plate in sorted(near, key=lambda p: -near[p][2]):
-        for cluster in clusters:
-            if difflib.SequenceMatcher(None, plate, cluster[0]).ratio() >= SAME_PLATE_SIMILARITY:
-                cluster.append(plate)
-                break
-        else:
-            clusters.append([plate])
-    if len(clusters) > 1:
-        return None, 0.0, 'ambiguous'
-    best = clusters[0][0]  # most observed spelling of the one plate
-    return best, near[best][3], 'paired'
+        return None, 0.0, 'none', 'window'
+    groups = _clusters(near, lambda p: near[p][2])
+    if len(groups) > 1:
+        return None, 0.0, 'ambiguous', 'window'
+    best = groups[0][0]  # most observed spelling of the one plate
+    return best, near[best][3], 'paired', 'window'
 
 
 def pair(event_ts, event_gate):
+    with _lock:
+        return _decide(event_ts, event_gate)[:3]
+
+
+def pair_detail(event_ts, event_gate):
+    """Like pair() plus how it was paired ('line' or 'window')."""
     with _lock:
         return _decide(event_ts, event_gate)
 
@@ -57,10 +134,19 @@ def wait_for_plate(event_ts, event_gate, callback):
         _waiting.append([event_ts + WINDOW_SEC, event_ts, event_gate, callback])
 
 
-def record_plate(gate_id, plate, confidence=0.0, ts=None):
+def record_plate(gate_id, plate, confidence=0.0, ts=None, crossing_ts=None):
+    """crossing_ts: wall time this plate's track crossed the camera's gate line."""
     ts = time.time() if ts is None else ts
     ready = []
     with _lock:
+        if crossing_ts is not None:
+            times = _crossings.setdefault((gate_id, plate), {})
+            new = crossing_ts not in times
+            times[crossing_ts] = max(confidence, times.get(crossing_ts, 0.0))
+            if new:
+                _learn(gate_id, plate, crossing_ts)
+            for key in [k for k, v in _crossings.items() if ts - max(v) > 10 * WINDOW_SEC]:
+                del _crossings[key]
         span = _seen.get((gate_id, plate))
         if span is None:
             _seen[(gate_id, plate)] = [ts, ts, 1, confidence]
@@ -77,7 +163,7 @@ def record_plate(gate_id, plate, confidence=0.0, ts=None):
                 continue
             if event_gate == gate_id:
                 continue
-            text, conf, status = _decide(event_ts, event_gate)
+            text, conf, status, _ = _decide(event_ts, event_gate)
             if status != 'none':
                 _waiting.remove(entry)
                 ready.append((callback, text, conf, status))

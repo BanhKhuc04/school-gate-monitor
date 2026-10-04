@@ -37,7 +37,7 @@ from app.config import (
     CONTINUOUS_RECORDING_FPS, CONTINUOUS_RECORDING_WIDTH, CONTINUOUS_RECORDING_HEIGHT,
     CONTINUOUS_RECORDING_DIR, FRAME_EDGE_MARGIN_RATIO,
     HELMET_MODEL_HASH_SHA256, HELMET_MODEL_MAPPING,
-    get_gate_role, get_gate_profile,
+    get_gate_role, get_gate_profile, crossing_motion,
     DEBUG_ALERT,
 )
 from app.cv.capture import WebcamStream, LatestFrameCapture
@@ -345,7 +345,9 @@ class VideoPipeline:
         # evidence đến trễ bị bỏ — chốt lượt xong là SEAL cứng, mũ đủ mẫu
         # 100ms sau crossing đã không được vào event.
         self._crossing_event_to_db_id: dict[str, int] = {}
-        self._crossing_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f'crossing-{gate_id}')
+        # 4 workers: a violation may wait ~2.5 s for the rear plate (shared
+        # gate line) without holding up the next bikes' crossings.
+        self._crossing_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix=f'crossing-{gate_id}')
         self._ocr_health: dict = {
             "errors": 0, "empty": 0, "submitted": 0, "completed": 0,
             "stale_dropped": 0, "sync_fallbacks": 0, "duplicate_dropped": 0,
@@ -499,7 +501,7 @@ class VideoPipeline:
         # pixel 1 lần ở đây. None = không giới hạn vùng (mặc định, không đổi
         # hành vi cũ). set_roi() cập nhật sống khi admin lưu vùng mới, không
         # cần restart pipeline.
-        self._crossing_detector = self._make_crossing_detector(get_gate_line(gate_id))
+        self._crossing_detector = self._make_crossing_detector(get_gate_line(gate_id), crossing_motion(gate_id))
         self._roi_points = get_gate_roi(gate_id)
         self._roi_polygon_px = to_pixel_polygon(self._roi_points, VIDEO_WIDTH, VIDEO_HEIGHT)
 
@@ -1608,6 +1610,7 @@ class VideoPipeline:
             tid = det.track_id
             if tid is None:
                 continue  # untracked plate remains preview-only; no location identity
+            self._update_plate_crossing(tid, bbox, sw, sh)
             candidate = make_candidate(original, self._padded_plate_box(bbox, sw, sh), det.confidence,
                                        self._frame_seq, time.time())
             if candidate is None:
@@ -1804,6 +1807,31 @@ class VideoPipeline:
             return None, 0.0, 0
         return consensus.decide(tid)
 
+    def _update_plate_crossing(self, tid, bbox, frame_w, frame_h):
+        """Rear camera: note the wall time a plate track crosses this camera's
+        gate line. The front camera pairs its vehicle crossing with the plate
+        that crossed the same physical line at the same moment."""
+        from app.cv.crossing import vehicle_anchor
+        detector = getattr(self, '_crossing_detector', None)
+        if detector is None or not detector.is_configured:
+            return
+        ax, ay = vehicle_anchor(bbox)
+        detector.update(('plate', tid), ax / frame_w, ay / frame_h, time.monotonic(),
+                        frame_seq=self._frame_seq, frame_size=(frame_w, frame_h))
+        hist = detector._tracks.get(('plate', tid))
+        if not hist or not hist.has_crossed or hist.crossed_at is None:
+            return
+        seen = getattr(self, '_plate_crossed_at', None)
+        if seen is None:
+            seen, self._plate_crossed_at, self._plate_crossed_wall = {}, {}, {}
+        if seen.get(tid) != hist.crossed_at:
+            seen[tid] = hist.crossed_at
+            self._plate_crossed_wall[tid] = time.time()
+            if len(seen) > 256:
+                old = next(iter(seen))
+                seen.pop(old)
+                self._plate_crossed_wall.pop(old, None)
+
     def _announce_plate(self, tid, single):
         """Tell viewers once per track when its plate is confirmed, with the
         registration lookup. Visual only (no evidence/audio): violations stay
@@ -1814,7 +1842,13 @@ class VideoPipeline:
         if tid is None or not read.is_confident or not read.text:
             return
         from app.cv import gate_pairing
-        gate_pairing.record_plate(self.gate_id, read.text, read.confidence or 0.0)
+        crossed = getattr(self, '_plate_crossed_wall', {}).get(tid)
+        gate_pairing.record_plate(self.gate_id, read.text, read.confidence or 0.0, crossing_ts=crossed)
+        # Rear camera: a plate is news only when it crossed the line in the
+        # entering direction; a bike backing up or parked in view stays quiet
+        # (its plate reaches viewers inside the front camera's event).
+        if getattr(self, 'role', None) == 'rear' and crossed is None:
+            return
         # One bike can hold a vehicle track and a plate-only track at once,
         # so dedupe on the plate itself for a minute, not on the track.
         announced = getattr(self, '_announced_plates', None)
@@ -2744,23 +2778,25 @@ class VideoPipeline:
                     g['too_many_riders'] = True
 
     @staticmethod
-    def _make_crossing_detector(gate_line):
-        from app.cv.crossing import CrossingDetector
+    def _make_crossing_detector(gate_line, motion='any'):
+        from app.cv.crossing import CrossingDetector, direction_for_motion
         # Without a drawn line no vehicle ever crosses, so no violation or
         # alert is ever raised; a fresh demo DB would stay silent.
+        line = list(gate_line or _DEFAULT_GATE_LINE)
         return CrossingDetector(
-            list(gate_line or _DEFAULT_GATE_LINE),
+            line,
             edge_margin=CROSSING_EDGE_MARGIN,
             min_frames_per_side=CROSSING_MIN_FRAMES_PER_SIDE,
             rearm_distance=CROSSING_REARM_DISTANCE,
             cooldown_sec=CROSSING_COOLDOWN_SEC,
-            allowed_direction=CROSSING_ALLOWED_DIRECTION,
+            # Only the entering direction counts: backing up never re-fires.
+            allowed_direction=direction_for_motion(line, motion) or CROSSING_ALLOWED_DIRECTION,
             min_frames_exit_side=CROSSING_MIN_FRAMES_EXIT_SIDE,
             max_transition_sec=CROSSING_MAX_TRANSITION_SEC,
         )
 
     def set_gate_line(self, line):
-        self._crossing_detector = self._make_crossing_detector(line)
+        self._crossing_detector = self._make_crossing_detector(line, crossing_motion(self.gate_id))
         self._midline_track_state.clear()
         self._instant_alerted_tracks.clear()
 
@@ -3027,17 +3063,33 @@ class VideoPipeline:
             return True
         # Single-file gate: the plate the rear camera confirmed at this moment
         # is this vehicle's plate (a front camera cannot see rear plates).
-        pairing, front = None, getattr(self, 'role', None) == 'front'
+        pairing, method, front = None, None, getattr(self, 'role', None) == 'front'
         if front and not getattr(plate, 'is_confident', False):
             from app.cv import gate_pairing
             from app.cv.plate_voter import PlateReadResult
-            text, conf, pairing = gate_pairing.pair(frozen.get('observed_ts', time.time()), self.gate_id)
+            event_ts = frozen.get('observed_ts', time.time())
+            gate_pairing.record_event(self.gate_id, event_ts)
+            # Wait (bounded) for the rear camera's plate to cross the shared
+            # line, so the one spoken alert already carries the plate.
+            # Bounded by a poll count, not the clock alone, so a stalled or
+            # stubbed clock can never hold the crossing worker forever.
+            # Only an event that will be spoken waits; a clean crossing pairs
+            # with what is there now and frees the worker for the next bike.
+            needs_alert = any(i.get('status') == 'confirmed' for i in frozen.get('issues', []))
+            budget = gate_pairing.wait_budget() if needs_alert else 0.
+            polls = int(min(budget, max(0., event_ts + budget - time.time())) / .1) + 1
+            for _ in range(polls):
+                text, conf, pairing, method = gate_pairing.pair_detail(event_ts, self.gate_id)
+                if pairing != 'none':
+                    break
+                if _ < polls - 1:
+                    time.sleep(.1)
             if text:
                 plate = PlateReadResult(text=text, confidence=conf, sample_count=2, is_confident=True)
         event = aggregate_crossing_event(frozen['vehicle_track_id'], frozen['event_id'], frozen['issues'], plate,
                                          plate_expected=not front)
         if pairing == 'paired':
-            event['issues'].append({'code': 'PLATE_FROM_REAR_CAMERA', 'status': 'info'})
+            event['issues'].append({'code': 'PLATE_FROM_REAR_CAMERA', 'status': 'info', 'method': method})
         elif pairing == 'ambiguous':
             event['issues'].append({'code': 'PLATE_PAIRING_AMBIGUOUS', 'status': 'needs_review'})
         # Matching is permitted ONLY for a complete validated recognition.

@@ -96,6 +96,23 @@ def get_line_side(point: tuple, line_p1: tuple, line_p2: tuple,
 _SIDE_ENUM = {-1: Side.ABOVE, 0: Side.ON, 1: Side.BELOW}
 
 
+def direction_for_motion(gate_line, motion):
+    """'enter'/'exit' meaning "anchor moves down" or "up" in the image across
+    this line, or None for 'any' / a near-vertical line (no up/down sense)."""
+    if motion not in ('down', 'up') or not gate_line:
+        return None
+    x1, y1, x2, y2 = gate_line
+    if abs(x2 - x1) < 1e-6:
+        return None
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    below = get_line_side((mx, my + .01), (x1, y1), (x2, y2))
+    if below == 0:
+        return None
+    down = Direction.ENTER.value if below == 1 else Direction.EXIT.value  # ENTER = -1 -> +1
+    up = Direction.EXIT.value if down == Direction.ENTER.value else Direction.ENTER.value
+    return down if motion == 'down' else up
+
+
 @dataclass
 class _TrackState:
     track_id: int

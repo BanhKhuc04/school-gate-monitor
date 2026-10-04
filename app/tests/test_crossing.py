@@ -231,3 +231,31 @@ class TestCrossingDetector:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_only_the_entering_direction_counts_backing_up_never_fires():
+    """Front camera: a bike rides toward the camera (anchor moves down) and
+    fires once, the moment its nose passes the line; backing up across the
+    same line afterwards is ignored."""
+    from app.cv.crossing import CrossingDetector, direction_for_motion
+    line = [0.1, 0.5, 0.9, 0.5]
+    det = CrossingDetector(line, edge_margin=.01, min_frames_per_side=3, min_frames_exit_side=1,
+                           cooldown_sec=0, rearm_distance=.05,
+                           allowed_direction=direction_for_motion(line, 'down'))
+    fired = []
+    ys = [.30, .35, .40, .45, .52, .60, .70,      # ride in: fires at .52 (first frame past the line)
+          .65, .58, .52, .45, .40, .35, .30]      # back up across the line: nothing
+    for k, y in enumerate(ys):
+        _, crossed = det.update(1, .5, y, timestamp=k * .1)
+        if crossed:
+            fired.append(round(y, 2))
+    assert fired == [.52]
+
+
+def test_direction_for_motion_ignores_how_the_line_was_drawn():
+    from app.cv.crossing import direction_for_motion
+    a, b = [0.2, 0.7, 0.8, 0.6], [0.8, 0.6, 0.2, 0.7]
+    assert direction_for_motion(a, 'down') != direction_for_motion(b, 'down')  # sides flip with P1/P2...
+    assert direction_for_motion(a, 'down') == direction_for_motion(a, 'down')
+    assert direction_for_motion(a, 'up') != direction_for_motion(a, 'down')
+    assert direction_for_motion(a, 'any') is None and direction_for_motion([.5, 0, .5, 1], 'down') is None
