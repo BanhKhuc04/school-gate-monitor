@@ -1688,6 +1688,23 @@ def update_violation_issues(violation_id: int, issues_json: str | None,
             conn.close()
 
 
+def update_violation_plate(violation_id: int, plate_read: str, plate_matched: str | None,
+                           plate_confidence: float | None, issues_json: str) -> bool:
+    """Attach a plate another camera confirmed after the event was saved."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE violation_events SET plate_read = ?, plate_matched = ?, plate_confidence = ?, "
+                "plate_format_valid = 1, issues_json = ? WHERE id = ?",
+                (plate_read, plate_matched, plate_confidence, issues_json, violation_id))
+            conn.commit()
+            return cursor.rowcount == 1
+        finally:
+            conn.close()
+
+
 def get_violation_audit_log(violation_id: int) -> list[dict]:
     """
     Lấy lịch sử audit log của một vi phạm.

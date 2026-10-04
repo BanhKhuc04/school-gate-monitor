@@ -1775,6 +1775,8 @@ class VideoPipeline:
         read = self._consensus_result(tid, single)
         if tid is None or not read.is_confident or not read.text:
             return
+        from app.cv import gate_pairing
+        gate_pairing.record_plate(self.gate_id, read.text, read.confidence or 0.0)
         # One bike can hold a vehicle track and a plate-only track at once,
         # so dedupe on the plate itself for a minute, not on the track.
         announced = getattr(self, '_announced_plates', None)
@@ -2895,6 +2897,7 @@ class VideoPipeline:
             frozen = {'event_id':eid, 'vehicle_track_id':tid, 'source_epoch':self._source_epoch,
                       'camera_id':self.camera_id, 'frame_seq':self._frame_seq,
                       'observed_at':datetime.datetime.fromtimestamp(now, datetime.timezone.utc).isoformat(),
+                      'observed_ts':now,
                       'issues':deepcopy(issues), 'plate':deepcopy(plate), 'future':future, 'deadline':deadline,
                       'plate_samples':self._plate_consensus.observations(tid) if hasattr(self, '_plate_consensus') else [],
                       'plate_candidate':deepcopy(best),
@@ -2952,8 +2955,21 @@ class VideoPipeline:
                 plate = PlateReadResult(error=f'ocr_engine_error:{type(exc).__name__}')
         if frozen['source_epoch'] != self._source_epoch:
             return True
+        # Single-file gate: the plate the rear camera confirmed at this moment
+        # is this vehicle's plate (a front camera cannot see rear plates).
+        pairing, front = None, getattr(self, 'role', None) == 'front'
+        if front and not getattr(plate, 'is_confident', False):
+            from app.cv import gate_pairing
+            from app.cv.plate_voter import PlateReadResult
+            text, conf, pairing = gate_pairing.pair(frozen.get('observed_ts', time.time()), self.gate_id)
+            if text:
+                plate = PlateReadResult(text=text, confidence=conf, sample_count=2, is_confident=True)
         event = aggregate_crossing_event(frozen['vehicle_track_id'], frozen['event_id'], frozen['issues'], plate,
-                                         plate_expected=getattr(self, 'role', None) != 'front')
+                                         plate_expected=not front)
+        if pairing == 'paired':
+            event['issues'].append({'code': 'PLATE_FROM_REAR_CAMERA', 'status': 'info'})
+        elif pairing == 'ambiguous':
+            event['issues'].append({'code': 'PLATE_PAIRING_AMBIGUOUS', 'status': 'needs_review'})
         # Matching is permitted ONLY for a complete validated recognition.
         matched = None
         if event['plate_status'] == 'CONFIRMED':
@@ -2967,7 +2983,7 @@ class VideoPipeline:
         filename = f'{uuid.uuid4().hex}.jpg'
         if DEBUG_ALERT:
             print(f"[Alert] event={event['crossing_event_id']} vehicle={event['vehicle_track_id']} plate={event['plate_read']} issues={[i['code'] for i in event['issues']]} stage=evidence_pending audio_jobs_planned=1")
-        return self._persist_violation(frame, os.path.join(SNAPSHOTS_DIR, filename), filename,
+        saved = self._persist_violation(frame, os.path.join(SNAPSHOTS_DIR, filename), filename,
             event['plate_read'], matched, frozen['helmet_status'],
             confirmed[0]['code'] if len(confirmed)==1 else 'MULTIPLE', frozen['posture_status'],
             bool(event['plate_read']), getattr(plate, 'confidence', None), self.gate_id, 'pending',
@@ -2975,6 +2991,53 @@ class VideoPipeline:
             frozen['source_epoch'], frozen['camera_id'], track_id=frozen['vehicle_track_id'],
             frame_seq=frozen['frame_seq'], crop_frame=crop, clip_frames=clip_frames,
             crossing_event_id=event['crossing_event_id'], plate_status=event['plate_status'])
+        if saved and pairing == 'none':
+            # The rear camera often confirms a moment later: attach it then.
+            from app.cv import gate_pairing
+            eid = frozen['event_id']
+            gate_pairing.wait_for_plate(frozen.get('observed_ts', time.time()), self.gate_id,
+                lambda text, conf, status: self._attach_late_plate(eid, text, conf, status))
+        return saved
+
+    def _attach_late_plate(self, eid, text, confidence, status):
+        """Write a plate paired after the event was saved; one UI notice, no
+        second spoken alert (the vehicle's alert has already played)."""
+        db_id = getattr(self, '_crossing_event_to_db_id', {}).get(eid)
+        if db_id is None:
+            return False
+        from app.db import get_connection, update_violation_plate, update_violation_issues
+        conn = get_connection()
+        try:
+            row = conn.execute("SELECT issues_json FROM violation_events WHERE id = ?", (db_id,)).fetchone()
+        finally:
+            conn.close()
+        try:
+            issues = json.loads(row['issues_json'] or '[]') if row else []
+        except (TypeError, ValueError):
+            issues = []
+        if status == 'ambiguous':
+            issues.append({'code': 'PLATE_PAIRING_AMBIGUOUS', 'status': 'needs_review'})
+            return update_violation_issues(db_id, json.dumps(issues, ensure_ascii=False))
+        vehicle = get_vehicle_by_plate(text)
+        matched = vehicle['plate_number'] if vehicle else None
+        issues = [i for i in issues if i.get('code') != 'PLATE_UNREADABLE']
+        issues.append({'code': 'PLATE_FROM_REAR_CAMERA', 'status': 'info'})
+        if not matched:
+            issues.append({'code': 'PLATE_NOT_REGISTERED', 'status': 'confirmed', 'sample_count': 1})
+        if not update_violation_plate(db_id, text, matched, confidence, json.dumps(issues, ensure_ascii=False)):
+            return False
+        alerts = getattr(self, '_alert_queue', None)
+        if alerts is not None:
+            try:
+                alerts.put_nowait({
+                    'type': 'plate_paired', 'event_id': eid, 'violation_id': db_id,
+                    'plate_read': text, 'plate_matched': matched, 'registered': vehicle is not None,
+                    'student_name': vehicle.get('student_name') if vehicle else None,
+                    'student_class': vehicle.get('student_class') if vehicle else None,
+                    'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+            except queue.Full:
+                pass
+        return True
 
     def _process_violations(self, frame, helmet_dets, plate_dets,
                             posture_status='unknown', vehicle_type=None,

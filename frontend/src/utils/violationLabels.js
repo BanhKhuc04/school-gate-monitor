@@ -10,4 +10,6 @@ export const VIOLATION_LABELS = {
   MULTIPLE: 'Nhiều vi phạm',
   RIDING_THROUGH_GATE: 'Xe chạy qua cổng',
   TOO_MANY_RIDERS: 'Chở quá số người quy định',
+  PLATE_FROM_REAR_CAMERA: 'Biển lấy từ camera sau',
+  PLATE_PAIRING_AMBIGUOUS: 'Không ghép được biển (nhiều xe cùng lúc)',
 };

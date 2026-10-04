@@ -17,6 +17,12 @@ test('violation shows confirmed issue labels, never review-only notes', () => {
   assert.equal(shown.tone, 'violation');
 });
 
+test('late paired plate is a silent notice, not a new violation', () => {
+  const shown = describeAlert({ type: 'plate_paired', plate_read: '89F123792', registered: false });
+  assert.equal(shown.title, 'Đã ghép biển 89-F1 237.92 vào lượt vi phạm');
+  assert.equal(shown.detail, 'Biển chưa đăng ký');
+});
+
 test('recognised plate: registered student vs unknown plate', () => {
   const known = describeAlert({ type: 'plate_recognized', plate_read: '50A41234', registered: true,
     student_name: 'Nguyễn Văn An', student_class: '10A1' });

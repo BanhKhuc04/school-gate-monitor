@@ -19,6 +19,12 @@ export function describeAlert(data) {
     }
     return { tone: 'warning', title: `Biển số chưa đăng ký: ${plate}`, detail: 'Không có trong danh sách xe của trường' };
   }
+  if (data?.type === 'plate_paired') {
+    const plate = formatPlate(data.plate_read);
+    const who = [data.student_name, data.student_class && `Lớp ${data.student_class}`].filter(Boolean).join(' · ');
+    return { tone: data.registered ? 'info' : 'warning', title: `Đã ghép biển ${plate} vào lượt vi phạm`,
+      detail: data.registered ? (who || 'Xe đã đăng ký') : 'Biển chưa đăng ký' };
+  }
   const issues = Array.isArray(data?.issues) && data.issues.length
     ? data.issues.filter(i => i?.status === 'confirmed')
     : [{ code: data?.violation_type }];
