@@ -104,7 +104,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
       const priority = getAlertPriority(data.violation_type);
       const plate = data.plate_matched || data.plate_read;
       setMessage(
-        '⚠️ ' + (data.gate_name ? data.gate_name + ': ' : '') + violationText(data)
+        '⚠️ CẢNH BÁO' + (data.gate_name ? ` (${data.gate_name})` : '') + ': ' + violationText(data)
         + (plate ? ` — biển ${plate}` : ' — không đọc được biển số')
       );
       setSnapshotUrl(data.snapshot_url || null);

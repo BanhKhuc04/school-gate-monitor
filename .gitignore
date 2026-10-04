@@ -65,3 +65,7 @@ tools/OmniRoute/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backup DB + ghi hình liên tục (dữ liệu chạy thật, không phải source)
+data/backups/
+data/recordings/

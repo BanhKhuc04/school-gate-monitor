@@ -150,3 +150,14 @@ def test_cleanup_invalid_days(client):
         headers=auth_headers(client, "admin"),
     )
     assert resp.status_code == 422
+
+
+def test_health_with_continuous_recording_enabled(client, monkeypatch):
+    """Bật ghi hình liên tục: /api/system/health không được lỗi 500 (trước đây
+    _recording_status_all_gates dùng GATES chưa import → NameError)."""
+    import app.config as cfg
+    from app.tests.conftest import auth_headers
+    monkeypatch.setattr(cfg, "CONTINUOUS_RECORDING_ENABLED", True)
+    resp = client.get("/api/system/health", headers=auth_headers(client, "admin"))
+    assert resp.status_code == 200
+    assert resp.json()["recording"]["enabled"] is True

@@ -1,14 +1,20 @@
 /**
  * Axios client for the School Gate Monitor API.
  *
- * baseURL hardcoded to http://localhost:8000 — no .env file for this small project.
+ * API gọi về CÙNG địa chỉ với trang đang mở: chạy dev (vite :5173) thì vite
+ * proxy /api, /media, /guard/* sang backend :8000 (xem vite.config.js); chạy
+ * production (backend :8000 phục vụ luôn giao diện) thì trùng gốc sẵn. Nhờ vậy
+ * mở giao diện từ máy khác/điện thoại trong cùng mạng (http://<ip-máy>:8000)
+ * vẫn chạy — trước đây cứng 'http://localhost:8000' nên máy khác mở vào là
+ * gọi nhầm về chính nó. Đè bằng VITE_API_BASE_URL nếu backend ở máy khác.
  * All API calls go through this instance so the auth interceptor is shared.
  */
 import axios from 'axios';
 
 // ponytail: export as constant so GuardPage + AlertBanner can reuse it
-// instead of hardcoding 'http://localhost:8000' in multiple places.
-export const API_BASE_URL = 'http://localhost:8000';
+// instead of hardcoding the backend address in multiple places.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+  || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000');
 
 const client = axios.create({
   baseURL: API_BASE_URL,

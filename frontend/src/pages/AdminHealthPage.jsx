@@ -139,7 +139,7 @@ export default function AdminHealthPage() {
               </div>
               {gp.helmet_model_ok === false && (
                 <div className="bg-[#f8d7dc] border border-[#f0aab3] text-[#7a1422] px-4 py-3 rounded-xl mb-4 text-[12px]">
-                  <b>Model mũ bảo hiểm SAI</b> (các lớp: {(gp.helmet_model_classes || []).join(', ') || '—'}) — hệ thống
+                  <b>Model mũ bảo hiểm SAI</b> (các lớp: {(gp.helmet_model_classes || []).join(', ') || '—'}) — AI
                   đang KHÔNG phát hiện được lỗi không đội mũ. Sửa: chạy <code className="font-mono">python scripts/prepare_demo.py</code> rồi khởi động lại.
                 </div>
               )}

@@ -290,13 +290,17 @@ class TestDevEndpoint:
 class TestSPAFallback:
     """SPA routing edge cases."""
 
-    def test_old_admin_route_returns_410(self):
-        resp = httpx.get(f"{BASE}/admin", timeout=TIMEOUT)
-        assert resp.status_code == 410
-
-    def test_old_admin_violations_route_returns_410(self):
+    def test_admin_violations_route_returns_spa_html(self):
+        """/admin/violations là route của React SPA — mở thẳng/F5 phải ra giao
+        diện (trước đây bị handler route Jinja cũ chặn, trả JSON 410 "Gone")."""
         resp = httpx.get(f"{BASE}/admin/violations", timeout=TIMEOUT)
-        assert resp.status_code == 410
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_admin_root_returns_spa_html(self):
+        resp = httpx.get(f"{BASE}/admin", timeout=TIMEOUT)
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
 
     def test_guard_route_returns_spa_html(self):
         resp = httpx.get(f"{BASE}/guard", timeout=TIMEOUT)
@@ -324,6 +328,10 @@ class TestGuardVideoFeed:
         resp = httpx.get(f"{BASE}/guard/video_feed", params={"token": "invalid.token"}, timeout=TIMEOUT)
         assert resp.status_code == 401
 
-    def test_video_feed_management_returns_403(self):
-        resp = httpx.get(f"{BASE}/guard/video_feed", params={"token": auth("management")["Authorization"].split(" ")[1]}, timeout=TIMEOUT)
-        assert resp.status_code == 401, "Guard video feed should reject management token"
+    def test_video_feed_management_allowed(self):
+        """Ban giám hiệu được xem camera trực tiếp (commit 9d81244). MJPEG là
+        stream vô hạn — chỉ đọc header rồi đóng, không đọc hết body (sẽ treo)."""
+        token = auth("management")["Authorization"].split(" ")[1]
+        with httpx.stream("GET", f"{BASE}/guard/video_feed", params={"token": token}, timeout=TIMEOUT) as resp:
+            assert resp.status_code == 200
+            assert "multipart/x-mixed-replace" in resp.headers.get("content-type", "")

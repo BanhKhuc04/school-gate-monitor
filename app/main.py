@@ -16,7 +16,7 @@ from app.api.dev import router as dev_router
 from app.api.system import router as system_router
 from app.api.roi import router as roi_router
 from app.api.camera import router as camera_router
-from app.db import init_db
+from app.db import init_db, seed_default_users_if_empty
 
 _pipeline_started = False
 
@@ -28,6 +28,10 @@ async def lifespan(app: FastAPI):
     # Startup
     print("[App] Initializing database...")
     init_db()
+    created = seed_default_users_if_empty()
+    if created:
+        print(f"[App] DB mới — đã tạo tài khoản mặc định: {', '.join(created)} "
+              f"(mật khẩu xem README, ĐỔI NGAY trước khi dùng thật)")
     # Đợt 2, Bước 4: MaintenanceWorker không phụ thuộc CV libs — start ĐỘC LẬP
     # với pipeline để DB-test env (không có ultralytics) vẫn chạy được worker,
     # và để nếu CV import lỗi thì cleanup tự động vẫn chạy (chỉ mất camera).
@@ -112,23 +116,28 @@ frontend_dist = __import__("os").path.join(
     "frontend", "dist"
 )
 if __import__("os").path.exists(frontend_dist):
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.responses import FileResponse
 
-    # Old Jinja HTML routes — return 410 Gone so they don't accidentally
-    # get caught by the SPA fallback (which must come AFTER this block)
-    @app.get("/admin")
-    @app.get("/admin/vehicles/{_}")
-    @app.get("/admin/violations")
-    async def old_jinja_routes(_: str = ""):
-        return JSONResponse({"detail": "Gone — frontend moved to React SPA"}, status_code=410)
+    # (Đã bỏ handler trả 410 cho các route Jinja cũ /admin, /admin/violations...:
+    # đó giờ chính là route của React SPA — mở thẳng/F5 trang Nhật ký vi phạm
+    # bị trả JSON "Gone" thay vì giao diện.)
 
     assets_dir = __import__("os").path.join(frontend_dist, "assets")
     if __import__("os").path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
+    _dist_root = __import__("os").path.realpath(frontend_dist)
+
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
-        return FileResponse(__import__("os").path.join(frontend_dist, "index.html"))
+        # File tĩnh ở gốc dist (favicon.svg, icons.svg...) phải trả đúng file —
+        # trước đây mọi đường dẫn đều trả index.html nên logo bị vỡ ảnh.
+        # realpath + so tiền tố: chặn ../ đọc file ngoài thư mục dist.
+        os_ = __import__("os")
+        candidate = os_.path.realpath(os_.path.join(_dist_root, full_path))
+        if full_path and candidate.startswith(_dist_root + os_.sep) and os_.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os_.path.join(frontend_dist, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn

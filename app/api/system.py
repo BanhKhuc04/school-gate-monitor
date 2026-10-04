@@ -222,7 +222,7 @@ def _recording_status_all_gates() -> dict:
     Khi CONTINUOUS_RECORDING_ENABLED=False (mặc định), chỉ trả flag để frontend biết
     không cần poll UI — KHÔNG đụng vào pipeline (tránh import cv2 khi test env).
     """
-    from app.config import CONTINUOUS_RECORDING_ENABLED
+    from app.config import CONTINUOUS_RECORDING_ENABLED, GATES
     if not CONTINUOUS_RECORDING_ENABLED:
         return {"enabled": False}
     try:

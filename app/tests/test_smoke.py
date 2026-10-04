@@ -46,3 +46,38 @@ def test_auth_me_unauthenticated(client):
     """GET /api/auth/me without token returns 401."""
     resp = client.get("/api/auth/me")
     assert resp.status_code == 401
+
+
+def test_seed_default_users_only_when_empty(test_app):
+    """Máy cài mới (bảng users trống) phải có tài khoản admin để đăng nhập;
+    DB đã có user thì không được tạo thêm/đè gì."""
+    import app.db as db
+    from app.auth import verify_password
+    # test_app đã seed sẵn user test → không tạo gì
+    assert db.seed_default_users_if_empty() == []
+
+    conn = db.get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM users").fetchall()
+        saved = [dict(r) for r in rows]
+        conn.execute("DELETE FROM users")
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        assert db.seed_default_users_if_empty() == ["admin", "security", "management"]
+        admin = db.get_user_by_username("admin")
+        assert admin["role"] == "admin"
+        assert verify_password("admin123", admin["password_hash"])
+    finally:
+        conn = db.get_connection()
+        try:
+            conn.execute("DELETE FROM users")
+            cols = list(saved[0].keys())
+            conn.executemany(
+                f"INSERT INTO users ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                [tuple(r[c] for c in cols) for r in saved],
+            )
+            conn.commit()
+        finally:
+            conn.close()

@@ -164,9 +164,10 @@ export default function GuardPage() {
                       className="w-full h-auto max-h-48 object-contain rounded border border-white/10 bg-black/20 mb-2"
                     />
                   )}
-                  <span className="font-mono text-xs">
+                  <span className="font-mono text-sm font-bold text-[#111827]">
                     {a.plate_matched || a.plate_read || 'Không đọc được biển số'}
                   </span>
+                  {a.plate_matched && <span className="ml-2 text-[11px] font-semibold text-[#065f46]">đã đăng ký</span>}
                 </div>
               ))
             )}

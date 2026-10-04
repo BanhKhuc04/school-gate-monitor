@@ -508,9 +508,9 @@ export default function AdminViolationsPage() {
           </div>
           <div className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-[#d1d5db]">
             <div>
-              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">NO_HELMET</p>
+              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">Không đội mũ</p>
               <p className="text-3xl font-bold font-mono text-[#374151] mt-1">
-                {violations.filter(v => v.violation_type === 'NO_HELMET').length}
+                {violations.filter(v => violationDetailList(v).includes('NO_HELMET')).length}
               </p>
             </div>
             <div className="w-11 h-11 rounded-lg bg-[#f8d7dc] flex items-center justify-center">
@@ -521,9 +521,9 @@ export default function AdminViolationsPage() {
           </div>
           <div className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-[#d1d5db]">
             <div>
-              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">PLATE_NOT_REGISTERED</p>
+              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">Biển số chưa đăng ký</p>
               <p className="text-3xl font-bold font-mono text-[#374151] mt-1">
-                {violations.filter(v => v.violation_type === 'PLATE_NOT_REGISTERED').length}
+                {violations.filter(v => violationDetailList(v).includes('PLATE_NOT_REGISTERED')).length}
               </p>
             </div>
             <div className="w-11 h-11 rounded-lg bg-[#f8d7dc] flex items-center justify-center">
@@ -535,7 +535,7 @@ export default function AdminViolationsPage() {
           </div>
           <div className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-[#d1d5db]">
             <div>
-              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">MULTIPLE</p>
+              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">Nhiều lỗi cùng lúc</p>
               <p className="text-3xl font-bold font-mono text-[#374151] mt-1">
                 {violations.filter(v => v.violation_type === 'MULTIPLE').length}
               </p>

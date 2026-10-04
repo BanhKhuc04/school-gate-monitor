@@ -254,6 +254,38 @@ def init_db():
         conn2.close()
 
 
+# Tài khoản demo ghi trong README — chỉ tạo khi DB CHƯA có user nào (máy cài mới),
+# không bao giờ đè/đổi mật khẩu tài khoản đã có.
+DEFAULT_USERS = [
+    ("admin", "admin123", "admin"),
+    ("security", "security123", "security"),
+    ("management", "management123", "management"),
+]
+
+
+def seed_default_users_if_empty() -> list[str]:
+    """Tạo tài khoản mặc định nếu bảng users trống. Trả về danh sách username đã tạo.
+
+    Trước đây README ghi "có sẵn admin/admin123" nhưng không có code nào tạo các
+    tài khoản này — máy cài mới từ đầu không đăng nhập được.
+    """
+    from app.auth import hash_password
+    with _write_lock:
+        conn = get_connection()
+        try:
+            if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
+                return []
+            for username, password, role in DEFAULT_USERS:
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                    (username, hash_password(password), role),
+                )
+            conn.commit()
+            return [u for u, _, _ in DEFAULT_USERS]
+        finally:
+            conn.close()
+
+
 def add_vehicle(plate_number: str, student_name: str, student_class: str) -> int:
     """
     Thêm xe mới.
