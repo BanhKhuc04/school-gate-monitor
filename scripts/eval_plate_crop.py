@@ -27,7 +27,10 @@ def main():
     ap.add_argument('--pads', default='0,0.05,0.1,0.15,0.2')
     ap.add_argument('--step', type=int, default=2)
     ap.add_argument('--model', default=PLATE_MODEL_PATH)
+    ap.add_argument('--detect-width', type=int, default=DETECT_WIDTH, help='kích thước detect (imgsz)')
     args = ap.parse_args()
+    import app.cv.detector as detector_module
+    detector_module.DETECT_WIDTH = args.detect_width
     pads = [float(p) for p in args.pads.split(',')]
     detector = HelmetPlateDetector(args.model, conf_threshold=PLATE_CONF_THRESHOLD)
     cap = cv2.VideoCapture(args.video)
@@ -48,7 +51,7 @@ def main():
         scale = min(1., VIDEO_WIDTH / w, VIDEO_HEIGHT / h)
         frame = cv2.resize(raw, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
         fh, fw = frame.shape[:2]
-        ds = min(DETECT_WIDTH / fw, DETECT_HEIGHT / fh)
+        ds = min(1., args.detect_width / fw, args.detect_width * DETECT_HEIGHT / DETECT_WIDTH / fh)
         small = cv2.resize(frame, (round(fw * ds), round(fh * ds)))
         for det in detector.detect_tracked(small):
             sx, sy = w / small.shape[1], h / small.shape[0]

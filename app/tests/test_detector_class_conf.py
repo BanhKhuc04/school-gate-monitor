@@ -52,3 +52,18 @@ def test_without_class_conf_behaviour_is_unchanged():
     out = d._infer(np.zeros((480, 640, 3), np.uint8), False)
     assert d.seen['conf'] == .4
     assert [x.class_name for x in out] == ['person']
+
+
+def test_imgsz_override_reaches_the_model():
+    """The plate-only camera detects at 1280: close, tilted plates vanish at 640."""
+    d = _detector(ROWS)
+    calls = {}
+    model = d.model
+    d.model = lambda frame, **kw: (calls.update(kw), model(frame, **kw))[1]
+    d.imgsz = 1280
+    d._infer(np.zeros((480, 640, 3), np.uint8), False)
+    assert calls['imgsz'] == 1280
+    d.imgsz = None
+    d._infer(np.zeros((480, 640, 3), np.uint8), False)
+    from app.config import DETECT_WIDTH
+    assert calls['imgsz'] == DETECT_WIDTH

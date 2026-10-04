@@ -3,14 +3,16 @@ import client from '../api/client';
 
 const REASONS = {track_missing:'Chưa có track ổn định', vehicle_not_associated:'Chưa ghép được xe; biển chỉ là ứng viên',
   vehicle_association_ambiguous:'Có nhiều xe gần nhau — chưa ghép chắc chắn',
-  helmet_association_ambiguous:'Chưa ghép chắc mũ với người', plate_association_ambiguous:'Có nhiều ứng viên biển — cần kiểm tra'};
+  helmet_association_ambiguous:'Chưa ghép chắc mũ với người', plate_association_ambiguous:'Có nhiều ứng viên biển — cần kiểm tra',
+  plate_pairing_ambiguous:'Camera sau thấy nhiều biển cùng lúc — không ghép'};
 const COLORS = {confirmed:'bg-emerald-100 text-emerald-900', checking:'bg-slate-100 text-slate-700',
   review:'bg-amber-100 text-amber-900', error:'bg-red-100 text-red-900'};
 const HEAD = {helmet:'Có mũ', no_helmet:'Quan sát không mũ', unknown:'Chưa thấy rõ đầu/mũ'};
 const PLATE = {missing:'Chưa thấy biển', reading:'Đang đọc OCR', error:'OCR lỗi',
   selecting:'Đang chọn ảnh biển tốt nhất — chờ gần vạch',
   candidate:'Biển đọc thử', confirmed:'Biển đã đối chiếu', partial:'Đọc được một phần — chưa đủ toàn biển',
-  unreadable:'Chưa đọc được ký tự', review:'Chưa đủ điều kiện OCR'};
+  unreadable:'Chưa đọc được ký tự', review:'Chưa đủ điều kiện OCR',
+  paired:'Biển đọc ở camera sau (ghép theo thời gian)'};
 
 function Crop({image, label, className=''}) {
   const [failed,setFailed]=useState(false);
@@ -88,10 +90,10 @@ export default function RecognitionLogPanel({gate}) {
         <Samples label="Theo dõi người" result={card.person}/>
         <Samples label={HEAD[card.helmet.value] || HEAD.unknown} result={card.helmet}/>
         </>}
-        <div className={`rounded-lg px-3 py-2 text-xs ${card.plate.state==='confirmed'?COLORS.confirmed:card.plate.state==='error'?COLORS.error:COLORS.review}`}>
+        <div className={`rounded-lg px-3 py-2 text-xs ${['confirmed','paired'].includes(card.plate.state)?COLORS.confirmed:card.plate.state==='error'?COLORS.error:COLORS.review}`}>
           <p className="font-semibold">{PLATE[card.plate.state] || 'Biển cần kiểm tra'}</p>
           {card.plate.text && <p className="font-mono text-lg mt-1 tracking-wide">{card.plate.text}</p>}
-          <p>{card.plate_debug?.max_attempts ? `${card.plate_debug.attempts}/1 lượt OCR · chọn một crop tốt nhất` : card.vehicle_track_id==null ? 'Chưa ghép xe — chưa thực hiện OCR' : '0/1 lượt OCR · chờ crop biển phù hợp'}</p>
+          <p>{card.plate.state==='paired' ? 'Xe máy không có biển trước — lấy biển camera sau xác nhận cùng lúc' : card.plate_debug?.max_attempts ? `${card.plate_debug.attempts}/1 lượt OCR · chọn một crop tốt nhất` : card.vehicle_track_id==null ? 'Chưa ghép xe — chưa thực hiện OCR' : '0/1 lượt OCR · chờ crop biển phù hợp'}</p>
           {card.plate_debug?.best_frame_id != null && <div className="mt-2 space-y-1">
             <p>Ảnh chọn: frame {card.plate_debug.best_frame_id} · {card.plate_debug.size?.join('×')} px gốc</p>
             <p>Chất lượng crop: {card.plate_debug.quality} · độ nét: {card.plate_debug.blur}</p>
@@ -110,6 +112,7 @@ export default function RecognitionLogPanel({gate}) {
             <p>Score: {card.riding.score ?? '—'} · chân: {card.riding.leg_status}</p>
           </details>}
           {card.plate.association==='unverified' && <p className="mt-1 font-semibold">Chưa ghép xe — không gán học sinh</p>}
+          {card.plate.association==='paired_camera' && <p className="mt-1">Ghép theo thời gian: chỉ đúng khi mỗi lần một xe qua cổng</p>}
         </div>
         {card.reasons?.length>0 && <p className="text-[11px] opacity-80">{card.reasons.map(r=>REASONS[r] || r).join(' · ')}</p>}
         {card.images_state==='error' && <p role="alert" className="text-xs text-red-800">Không tạo được ảnh crop; kết quả nhận diện cần kiểm tra.</p>}

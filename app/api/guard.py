@@ -74,8 +74,13 @@ def recognition_cards(gate: str = 'main',
     store = getattr(pipeline, '_recognition_cards', None)
     if store is None:
         return {'status': 'not_started', 'run_id': None, 'source_epoch': 0, 'cards': [], 'models': {}}
+    snapshot = store.snapshot()
+    from app.config import get_gate_role
+    if get_gate_role(gate) == 'front':
+        from app.cv import gate_pairing
+        gate_pairing.annotate_cards(snapshot['cards'], gate)
     return {'status': 'running' if pipeline._running else 'stopped',
-            **store.snapshot(), 'models': pipeline.recognition_models(),
+            **snapshot, 'models': pipeline.recognition_models(),
             'gate_line_configured': bool(getattr(getattr(pipeline, '_crossing_detector', None), 'gate_line', None)),
             'plate_region': {'scans': getattr(pipeline, '_plate_region_scans', 0),
                              'last_ms': round(getattr(pipeline, '_plate_region_scan_ms', 0), 2)}}

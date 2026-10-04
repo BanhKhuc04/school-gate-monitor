@@ -23,6 +23,7 @@ from app.config import (
     HELMET_CONF_THRESHOLD, HELMET_NO_HELMET_MIN_CONF, PLATE_CONF_THRESHOLD, PERSON_CONF_THRESHOLD,
     VEHICLE_CONF_THRESHOLD,
     FRAME_SKIP, VIDEO_WIDTH, VIDEO_HEIGHT, DETECT_WIDTH, DETECT_HEIGHT, RECOGNITION_LOG_ENABLED,
+    PLATE_ONLY_DETECT_WIDTH,
     ALERT_COOLDOWN, VIOLATION_COOLDOWN, SNAPSHOTS_DIR, MAX_RIDERS_PER_MOTORCYCLE,
     VIOLATION_CLIP_SECONDS, VIOLATION_CLIP_FPS,
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
@@ -251,7 +252,8 @@ class VideoPipeline:
             print(f"[Pipeline] Plate model skipped: profile={self.profile} (aux camera)")
         else:
             self._plate_detector = HelmetPlateDetector(
-                PLATE_MODEL_PATH, conf_threshold=PLATE_CONF_THRESHOLD
+                PLATE_MODEL_PATH, conf_threshold=PLATE_CONF_THRESHOLD,
+                imgsz=PLATE_ONLY_DETECT_WIDTH if self.profile == 'ocr_only' else None
             )
             print("[Pipeline] Plate model loaded:", self._plate_detector.class_names)
 
@@ -989,7 +991,7 @@ class VideoPipeline:
 
         try:
             # Keep a person model's vehicle thresholds across the swap.
-            extra = {'class_conf': old_detector.class_conf} if getattr(old_detector, 'class_conf', None) else {}
+            extra = {k: getattr(old_detector, k) for k in ('class_conf', 'imgsz') if getattr(old_detector, k, None)}
             new_detector = HelmetPlateDetector(model_path, conf_threshold=threshold, **extra)
         except Exception as exc:
             result["message"] = f"Failed to load {model_path!r}: {exc}"
@@ -1071,8 +1073,8 @@ class VideoPipeline:
             return result
 
         try:
-            current = getattr(getattr(self, attr_map[engine], None), 'class_conf', None)
-            extra = {'class_conf': current} if current else {}
+            current = getattr(self, attr_map[engine], None)
+            extra = {k: getattr(current, k) for k in ('class_conf', 'imgsz') if getattr(current, k, None)}
             new_detector = HelmetPlateDetector(model_path, conf_threshold=threshold_map[engine], **extra)
         except Exception as exc:
             result["message"] = f"Failed to load baseline {model_path!r}: {exc}"
@@ -2227,7 +2229,12 @@ class VideoPipeline:
                 # tốc độ detect vì detect vẫn chạy trên ảnh nhỏ như cũ.
                 t0 = time.perf_counter()
                 frame_h, frame_w = frame.shape[:2]
-                detect_scale = min(DETECT_WIDTH/frame_w, DETECT_HEIGHT/frame_h)
+                if getattr(self, 'profile', 'full') == 'ocr_only':
+                    # Plate-only camera: one model, so detect near full resolution.
+                    detect_scale = min(1., PLATE_ONLY_DETECT_WIDTH/frame_w,
+                                       PLATE_ONLY_DETECT_WIDTH*DETECT_HEIGHT/DETECT_WIDTH/frame_h)
+                else:
+                    detect_scale = min(DETECT_WIDTH/frame_w, DETECT_HEIGHT/frame_h)
                 detect_frame = cv2.resize(frame, (max(1, round(frame_w*detect_scale)), max(1, round(frame_h*detect_scale))))
                 scale_x = frame_w / detect_frame.shape[1]
                 scale_y = frame_h / detect_frame.shape[0]

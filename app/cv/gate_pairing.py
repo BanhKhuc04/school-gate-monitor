@@ -83,3 +83,33 @@ def record_plate(gate_id, plate, confidence=0.0, ts=None):
                 ready.append((callback, text, conf, status))
     for callback, text, conf, status in ready:
         callback(text, conf, status)
+
+
+# A card's own camera never saw a plate in these states.
+_NO_OWN_PLATE = {'missing', 'reading', 'selecting', 'unreadable', 'review', 'partial'}
+
+
+def annotate_cards(cards, gate_id):
+    """Show the plate another camera confirmed while this vehicle was in view.
+
+    Vietnamese motorbikes carry no front plate, so a front camera's live card
+    can only get one this way. Same single-file rule as events: two plates in
+    the window means two vehicles, so nothing is shown.
+    """
+    for card in cards:
+        plate = card.get('plate') or {}
+        if (card.get('kind') == 'plate' or card.get('vehicle_track_id') is None
+                or plate.get('state') not in _NO_OWN_PLATE):
+            continue
+        try:
+            from datetime import datetime
+            seen = datetime.fromisoformat(card['last_seen']).timestamp()
+        except (KeyError, TypeError, ValueError):
+            continue
+        text, confidence, status = pair(seen, gate_id)
+        if status == 'paired':
+            plate.update(state='paired', text=text, association='paired_camera',
+                         confidence=round(confidence, 3))
+        elif status == 'ambiguous':
+            card.setdefault('reasons', []).append('plate_pairing_ambiguous')
+    return cards

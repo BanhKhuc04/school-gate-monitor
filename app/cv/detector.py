@@ -36,7 +36,7 @@ class HelmetPlateDetector:
     """Bọc ultralytics.YOLO, cung cấp method detect()."""
 
     def __init__(self, model_path: str, conf_threshold: float = 0.25,
-                 class_conf: Optional[dict] = None):
+                 class_conf: Optional[dict] = None, imgsz: Optional[int] = None):
         """
         Khởi tạo detector.
 
@@ -45,7 +45,9 @@ class HelmetPlateDetector:
             conf_threshold: Ngưỡng confidence tối thiểu (0.0 - 1.0)
             class_conf: ngưỡng riêng theo tên lớp, vd {'motorcycle': .2}. Các lớp
                 này có tracker riêng với ngưỡng tạo track thấp tương ứng.
+            imgsz: kích thước suy luận; None = DETECT_WIDTH.
         """
+        self.imgsz = imgsz
         self.camera_id = "default"
         self._tracker = None
         self._class_tracker = None
@@ -106,7 +108,8 @@ class HelmetPlateDetector:
         # was never paired with a bike (270/472 riding frames on gate video).
         floor = min([self.conf_threshold, *self.class_conf.values()])
         results = self.model(frame, verbose=False, conf=floor,
-                             quantize=16 if USE_FP16 else None, imgsz=DETECT_WIDTH)
+                             quantize=16 if USE_FP16 else None,
+                             imgsz=getattr(self, 'imgsz', None) or DETECT_WIDTH)
         detections = []
         for result in results:
             if result.boxes is None:

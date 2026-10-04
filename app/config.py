@@ -287,6 +287,10 @@ VIDEO_HEIGHT = 720
 # đọc rỗng dù box detect đúng 85%: đã đo thật, cùng 1 ảnh đọc đúng "188888" ở
 # độ phân giải gốc nhưng đọc rỗng khi resize xuống 640x480 trước khi OCR.
 DETECT_WIDTH = 640
+# Camera chỉ đọc biển (profile ocr_only: 1 model) detect ở độ phân giải cao hơn.
+# Camera sau 04/10: 640 -> 211 lần đọc đúng 89F123792, 1280 -> 293, 0 đọc sai;
+# RTX 3050 ~16 ms ở 640 vs ~18 ms ở 1280 (biển gần, nghiêng mạnh thu nhỏ về 640 thì hụt).
+PLATE_ONLY_DETECT_WIDTH = int(os.environ.get("PLATE_ONLY_DETECT_WIDTH", "1280"))
 DETECT_HEIGHT = 480
 
 # Violation cooldown (seconds)
