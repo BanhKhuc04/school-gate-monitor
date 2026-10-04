@@ -22,6 +22,12 @@ import sys
 
 from app.cv.camera_sources import normalize_source, is_network_source
 
+# DirectShow device open/release is not safe across threads: two gates
+# opening OBS Virtual Camera + a webcam at the same instant failed every time
+# ("raised unknown C++ exception") and eventually crashed the server.
+_DSHOW_LOCK = threading.Lock()
+_NO_LOCK = __import__('contextlib').nullcontext()
+
 
 class WebcamStream:
     """Bọc cv2.VideoCapture, cung cấp read_frame() và release()."""
@@ -60,7 +66,9 @@ class WebcamStream:
             # mặc định (CAP_ANY) rơi vào MSMF trên Windows, đánh số thiết bị khác
             # DSHOW nên cùng 1 số index có thể ra 2 camera khác nhau tùy backend.
             backend = cv2.CAP_DSHOW if sys.platform == 'win32' else cv2.CAP_ANY
-            self.cap = cv2.VideoCapture(source, backend)
+            with _DSHOW_LOCK:
+                self.cap = cv2.VideoCapture(source, backend)
+        self._device = not self._is_file_or_url
         if not self.cap.isOpened():
             self.cap.release()
             raise RuntimeError('Không mở được camera. Kiểm tra thiết bị, địa chỉ và thông tin đăng nhập.')
@@ -70,8 +78,9 @@ class WebcamStream:
         # toàn, camera vẫn trả về đúng độ phân giải gốc của nó (vd. Imou trả
         # 2688x1664 dù set 1280x720) — vì vậy read_frame() phải tự cv2.resize
         # xuống target_size cho nguồn network, xem bên dưới.
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        with _DSHOW_LOCK if self._device else _NO_LOCK:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
         self._is_opened = True
         if self._is_file_or_url and not network:
@@ -118,7 +127,8 @@ class WebcamStream:
     def release(self):
         """Giải phóng webcam."""
         if self._is_opened:
-            self.cap.release()
+            with _DSHOW_LOCK if getattr(self, '_device', False) else _NO_LOCK:
+                self.cap.release()
             self._is_opened = False
 
     def __enter__(self):

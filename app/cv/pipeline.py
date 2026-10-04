@@ -2089,15 +2089,10 @@ class VideoPipeline:
         except Exception as e:
             print(f"[Pipeline] ERROR: Cannot open webcam: {e}")
             self._diagnostic('camera', 'error', 'camera_open_failed')
-            # Đợt R: nếu có pending camera switch → đợi switch áp dụng (có thể
-            # sang nguồn khác đang online). Nếu không, thoát như cũ.
-            has_pending = (self.camera_switch is not None
-                           and getattr(self.camera_switch, 'has_pending', False))
-            if not has_pending:
-                self._running = False
-                return
+            # Không thoát: camera RTSP khởi động chậm hơn app, hoặc thiết bị
+            # vừa được tiến trình trước nhả ra, sẽ được mở lại ở vòng lặp
+            # (trước đây pipeline chết hẳn tới khi khởi động lại app).
             self._webcam = None
-            # Tiếp tục vòng lặp; vòng lặp sẽ thử _apply_camera_change mỗi lần.
 
         # R2: _consecutive_errors/_RECONNECT_AFTER/_RECONNECT_BACKOFF_SEC đã là
         # instance attributes (xem __init__). Local vars đã xóa để tránh shadow.
@@ -2124,6 +2119,14 @@ class VideoPipeline:
                 # backoff rồi quay lại đầu vòng lặp.
                 if self._webcam is None:
                     time.sleep(self._RECONNECT_BACKOFF_SEC)
+                    if self._running:
+                        try:
+                            self._webcam = self._open_webcam(GATES.get(self.gate_id, gate_config))
+                            self._start_capture()
+                            print("[Pipeline] Webcam opened (retry)")
+                            self._diagnostic('camera', 'observed', 'camera_connected')
+                        except Exception:
+                            self._webcam = None
                     continue
                 # Đọc frame
                 t_read_start = time.perf_counter()
