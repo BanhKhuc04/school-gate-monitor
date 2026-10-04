@@ -189,10 +189,15 @@ CAMERA_LOOP = _gate_cfgs["main"]["loop"]
 
 # Model paths
 HELMET_MODEL_PATH = os.environ.get("HELMET_MODEL_PATH") or str(BASE_DIR / "models" / "helmet_best.pt")
-# plate_square_best.pt (Kaggle, chỉ biển vuông, 2026-10-04) đã đo trên 1447 khung
-# video cổng thật: bỏ sót ~65 biển thật mà plate_best.pt bắt được, box riêng của
-# nó chủ yếu là biển báo/đèn hậu — giữ plate_best.pt. Thử bằng env PLATE_MODEL_PATH.
-PLATE_MODEL_PATH = os.environ.get("PLATE_MODEL_PATH") or str(BASE_DIR / "models" / "plate_best.pt")
+# plate_real_best.pt = plate_best.pt fine-tune thêm ảnh camera thật đã duyệt tay
+# (notebooks/kaggle_plate_real_finetune.ipynb, 2026-10-04). Video không có trong
+# train: camera sau sáng 04/10 bắt biển 266 khung (cũ 105), đọc đúng 211 (cũ 95),
+# 0 đọc sai; video cổng giữ lại: 185 box chỉ model mới có, ~92% là biển thật.
+# (plate_square_best.pt — chỉ biển vuông — đã thử và bị loại: mất ~65 biển thật.)
+# Quay về model cũ: env PLATE_MODEL_PATH=models/plate_best.pt.
+_PLATE_REAL = BASE_DIR / "models" / "plate_real_best.pt"
+PLATE_MODEL_PATH = os.environ.get("PLATE_MODEL_PATH") or str(
+    _PLATE_REAL if _PLATE_REAL.exists() else BASE_DIR / "models" / "plate_best.pt")
 # COCO weights ở gốc repo (gitignore). YOLO11n trên 120 khung hình cổng thật:
 # bắt được 84 xe máy so với 73 của yolov8n (cùng số người), pose ra khớp
 # xương 234/267 crop so với 228. Đổi lại bằng env PERSON_MODEL_PATH=yolov8n.pt.

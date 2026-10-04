@@ -105,6 +105,7 @@ def test_files_hash_pinned_for_audit():
     expected = {
         'models/helmet_best.pt': 'c8eb324e365cf4fa',  # restored helmet artifact
         'models/plate_best.pt': '5b57ca666211a4b7',
+        'models/plate_real_best.pt': '3602cb96399b5ce2',  # default plate detector since 2026-10-04
     }
     for path, expected_prefix in expected.items():
         path = str(ROOT / path)
