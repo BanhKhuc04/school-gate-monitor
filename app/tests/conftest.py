@@ -79,6 +79,7 @@ def test_app(request, tmp_path_factory):
     from app.api.dev import router as dev_router
     from app.api.system import router as system_router
     from app.api.roi import router as roi_router
+    from app.api.camera import router as camera_router
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,
@@ -100,6 +101,7 @@ def test_app(request, tmp_path_factory):
     app.include_router(dev_router)
     app.include_router(system_router)
     app.include_router(roi_router)
+    app.include_router(camera_router)
 
     yield app
 

@@ -1053,7 +1053,9 @@ def _create_pipeline_locked(gate_id: str) -> VideoPipeline:
     # gate_config truyền vào đây (chỉ dùng để lấy "name").
     saved_source = get_gate_camera_source(gate_id)
     if saved_source is not None:
-        gate_config["source"] = saved_source
+        # DB lưu dạng chuỗi — "0"/"1" phải đổi về int, nếu không WebcamStream
+        # coi là đường dẫn file và không mở được webcam.
+        gate_config["source"] = int(saved_source) if saved_source.strip().isdigit() else saved_source
     pipeline = VideoPipeline(gate_id, gate_config)
     _pipelines[gate_id] = pipeline
     return pipeline
