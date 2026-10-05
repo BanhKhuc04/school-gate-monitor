@@ -227,3 +227,42 @@ def test_plate_announced_once_per_plate_and_only_after_consensus(pipeline):
     assert message['type'] == 'plate_recognized' and message['plate_read'] == '89F123792'
     assert message['registered'] is False
     assert p._alert_queue.empty()
+
+
+def _cross(p, frame, groups, tid, crossed_at):
+    p._crossing_detector._tracks[tid]=SimpleNamespace(has_crossed=True,crossed_at=crossed_at,rearmed=False)
+    p._process_vehicle_crossings(frame,groups)
+    for f in list(p._crossing_jobs.values()):
+        f.result(timeout=5)
+
+
+def test_one_rider_split_into_two_bike_ids_is_one_event(pipeline,monkeypatch):
+    # 04/10 23:36 front video: the tracker gave one bike ids 1 and 9; both
+    # crossed 0.9 s apart with the same rider and the bike was spoken twice.
+    p=pipeline
+    frame=feed(p,[group(vehicle=7)],monkeypatch)
+    _cross(p,frame,[group(vehicle=7)],7,5)
+    frame=feed(p,[group(vehicle=8)],monkeypatch)
+    _cross(p,frame,[group(vehicle=8)],8,6)
+    assert p._persist_violation.call_count==1
+
+
+def test_duplicate_id_still_reports_a_violation_the_clean_pass_missed(pipeline,monkeypatch):
+    p=pipeline; p.role='front'
+    monkeypatch.setattr('app.cv.gate_pairing.wait_budget', lambda: 0.)
+    clean=[group(vehicle=7,posture='walking_with_bike',helmet='With Helmet')]
+    frame=feed(p,clean,monkeypatch)
+    _cross(p,frame,clean,7,5)
+    p._persist_violation.assert_not_called()
+    frame=feed(p,[group(vehicle=8)],monkeypatch)
+    _cross(p,frame,[group(vehicle=8)],8,6)
+    assert p._persist_violation.call_count==1
+
+
+def test_bare_head_walking_the_bike_is_still_reminded_to_wear_a_helmet(pipeline,monkeypatch):
+    import json
+    p=pipeline; walked=[group(posture='walking_with_bike')]
+    frame=feed(p,walked,monkeypatch)
+    _cross(p,frame,walked,7,5)
+    codes={i['code'] for i in json.loads(p._persist_violation.call_args.args[13]) if i['status']=='confirmed'}
+    assert 'NO_HELMET' in codes and 'RIDING_THROUGH_GATE' not in codes

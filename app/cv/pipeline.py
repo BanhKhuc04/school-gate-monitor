@@ -75,6 +75,10 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 # giờ cắt qua). Admin vẫn vẽ lại vạch thật ở trang ROI.
 _DEFAULT_GATE_LINE = (0.0, 0.65, 1.0, 0.65)
 
+# A rider sealed at the line within this window is the same bike passing
+# once, even when the tracker gave the bike a second id.
+RIDER_DEDUP_SEC = 5.0
+
 
 class _ClipFrames(list):
     """Clip frames plus their wall-clock times and the event time (post-roll)."""
@@ -2942,8 +2946,10 @@ class VideoPipeline:
                     continue
                 yes = any(d.class_name == 'With Helmet' for d in group['helmet_dets'])
                 no = any(d.class_name == 'Without Helmet' for d in group['helmet_dets'])
-                riding = group.get('posture_status') == 'riding'
-                label = 'positive' if riding and no and not yes else 'negative' if riding and yes and not no else 'unknown'
+                # A bare head at the gate is reminded whether the student rides
+                # or walks the bike (owner's rule, 2026-10-05).
+                on_bike = group.get('posture_status') in ('riding', 'walking_with_bike')
+                label = 'positive' if on_bike and no and not yes else 'negative' if on_bike and yes and not no else 'unknown'
                 person_key = (tid, ptid)
                 decision = ledger.update(person_key, 'NO_HELMET', ErrorSample(label, self._frame_seq, now), now)
                 if ledger.confirmed_evidence(person_key, 'NO_HELMET', now):
@@ -2986,6 +2992,28 @@ class VideoPipeline:
                 continue
             if getattr(self, '_last_sealed_crossing', {}).get(tid) == hist.crossed_at or len(self._crossing_jobs) >= 8:
                 continue
+            # ByteTrack can split one bike into two ids that alternate as it
+            # speeds up toward the camera (04/10 23:36 front video: ids 1 and
+            # 9, same rider, crossings 0.9 s apart -> spoken twice). The rider
+            # is the stable identity: one rider, one crossing. A duplicate's
+            # issues merge into the first event; it is only announced when it
+            # carries a violation the first (clean) pass did not.
+            sealed_riders = getattr(self, '_sealed_riders', None)
+            if sealed_riders is None:
+                sealed_riders = self._sealed_riders = {}
+            earlier = [sealed_riders[p] for p in rider_ids
+                       if p in sealed_riders and now - sealed_riders[p][0] < RIDER_DEDUP_SEC]
+            if earlier and (not issues or earlier[0][2]):
+                self._crossing_sealed[eid] = now
+                self._last_sealed_crossing[tid] = hist.crossed_at
+                self.dispatch_late_issues(earlier[0][1], issues)
+                self._diagnostic('decision', 'review', 'duplicate_vehicle_track', tid,
+                                 first_event=earlier[0][1])
+                continue
+            for p in rider_ids:
+                sealed_riders[p] = (now, eid, bool(issues))
+            for p in [p for p, v in sealed_riders.items() if now - v[0] > 60]:
+                del sealed_riders[p]
             self._crossing_sealed[eid] = now
             if not hasattr(self, '_last_sealed_crossing'):
                 self._last_sealed_crossing = {}
