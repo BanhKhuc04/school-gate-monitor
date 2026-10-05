@@ -6,7 +6,7 @@ import numpy as np
 from ultralytics import YOLO
 
 from app.config import DEVICE, USE_FP16, USE_TENSORRT, DETECT_WIDTH
-from app.cv.inference_worker import model_owner
+from app.cv.inference_worker import model_lock, model_owner
 from weakref import WeakValueDictionary
 
 _MODELS = WeakValueDictionary()
@@ -152,9 +152,10 @@ class HelmetPlateDetector:
         # 0.2-0.4, under the person threshold, so it was dropped and the rider
         # was never paired with a bike (270/472 riding frames on gate video).
         floor = min([self.conf_threshold, *self.class_conf.values()])
-        results = self.model(frame, verbose=False, conf=floor,
-                             quantize=16 if USE_FP16 else None,
-                             imgsz=getattr(self, 'imgsz', None) or DETECT_WIDTH)
+        with model_lock(self.model):
+            results = self.model(frame, verbose=False, conf=floor,
+                                 quantize=16 if USE_FP16 else None,
+                                 imgsz=getattr(self, 'imgsz', None) or DETECT_WIDTH)
         detections = []
         for result in results:
             if result.boxes is None:

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ultralytics import YOLO
 
 # One pose instance; all model access runs on the shared owner thread.
-from app.cv.inference_worker import model_owner
+from app.cv.inference_worker import model_lock, model_owner
 _pose_model = None
 
 # Keypoint indices (COCO 17-keypoint format used by YOLOv8-pose)
@@ -463,10 +463,11 @@ class PostureDetector:
 
             def run():
                 # The TensorRT engine takes at most POSE_MAX_BATCH crops a call.
-                return [r for start in range(0, len(crops), POSE_MAX_BATCH)
-                        for r in self.model(crops[start:start+POSE_MAX_BATCH], verbose=False,
-                                            conf=POSE_CONF_THRESHOLD,
-                                            quantize=16 if USE_FP16 else None, imgsz=POSE_IMGSZ)]
+                with model_lock(self.model):
+                    return [r for start in range(0, len(crops), POSE_MAX_BATCH)
+                            for r in self.model(crops[start:start+POSE_MAX_BATCH], verbose=False,
+                                                conf=POSE_CONF_THRESHOLD,
+                                                quantize=16 if USE_FP16 else None, imgsz=POSE_IMGSZ)]
             results = model_owner().run(getattr(self, 'camera_id', 'pose'), run)
         except Exception as e:
             print(f"[Pose] Error during pose detection: {e}")
