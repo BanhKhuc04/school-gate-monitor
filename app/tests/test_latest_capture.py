@@ -140,13 +140,13 @@ class SteadyFile(SlowFile):
 
 
 def test_a_file_source_started_later_joins_the_running_one_in_sync():
-    # Gates start one after another; synced recordings must still line up.
+    # Gates switch one after another; the two test videos must still line up.
     first, second = SteadyFile(), SteadyFile()
-    a = LatestFrameCapture(first)
+    a = LatestFrameCapture(first, sync_group='demo')
     a.start()
     try:
         time.sleep(.6)
-        b = LatestFrameCapture(second)
+        b = LatestFrameCapture(second, sync_group='demo')
         b.start()
         try:
             time.sleep(.5)
@@ -155,3 +155,51 @@ def test_a_file_source_started_later_joins_the_running_one_in_sync():
             b.stop()
     finally:
         a.stop()
+
+
+def test_a_recording_already_playing_does_not_drag_the_test_videos_ahead():
+    # 05/10: the front gate had been showing a night recording for minutes; the
+    # rear test video joined that clock and started far into the video.
+    other = SteadyFile()
+    o = LatestFrameCapture(other)  # not in the test pair
+    o.start()
+    try:
+        time.sleep(.6)
+        video = SteadyFile()
+        v = LatestFrameCapture(video, sync_group='demo')
+        v.start()
+        try:
+            time.sleep(.2)
+            assert video.position_sec() < .35  # starts at its own beginning
+        finally:
+            v.stop()
+    finally:
+        o.stop()
+
+
+class LoopingFile(SteadyFile):
+    """A 0.4 s video that starts again from the top, like a looping test video."""
+    times = [i * .04 for i in range(10)]
+
+    def read_source_frame(self):
+        if self.index + 1 >= len(self.times):
+            self.index = -1  # loop
+        return GappyFile.read_source_frame(self)
+
+
+def test_the_test_videos_start_each_lap_together():
+    first, second = LoopingFile(), LoopingFile()
+    a, b = LatestFrameCapture(first, sync_group='demo'), LatestFrameCapture(second, sync_group='demo')
+    a.start()
+    time.sleep(.1)
+    b.start()
+    try:
+        laps = []
+        for _ in range(12):  # ~3 laps
+            time.sleep(.1)
+            laps.append(abs(first.position_sec() - second.position_sec()))
+        # Out of step by a whole lap would read ~0.36 s at a lap boundary.
+        assert sorted(laps)[len(laps) // 2] < .1
+    finally:
+        a.stop()
+        b.stop()

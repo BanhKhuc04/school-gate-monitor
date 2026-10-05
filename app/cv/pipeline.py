@@ -42,6 +42,7 @@ from app.config import (
 )
 from app.cv.capture import WebcamStream, LatestFrameCapture
 from app.cv.camera_sources import is_network_source
+from app.cv import demo_mode
 from app.cv.detector import HelmetPlateDetector, Detection
 from pathlib import Path  # noqa: E402, used in hot-reload methods
 from app.cv.ocr import read_plate_detailed, validate_plate_format, compute_blur_score
@@ -2136,6 +2137,7 @@ class VideoPipeline:
             scale = min(1., VIDEO_WIDTH/w, VIDEO_HEIGHT/h)
             frame = cv2.resize(raw, (round(w*scale), round(h*scale)), interpolation=cv2.INTER_AREA) if scale < 1 else raw.copy()
             self._last_frame_time = time.time()
+            self._source_position = packet.position
             self._fps_capture_window += 1
             self._metrics_capture.add(packet.read_ms)
             if time.monotonic() - getattr(self, '_last_ai_publish', 0.) < .3:
@@ -2149,7 +2151,10 @@ class VideoPipeline:
                 except queue.Empty:
                     pass
                 self._preview_frame_queue.put_nowait(item)
-        self._capture = LatestFrameCapture(self._webcam, on_frame=received)
+        # The two test videos share one clock so front and rear stay in step.
+        group = 'demo' if demo_mode.is_demo_video(getattr(self.camera_switch, 'source', None)) else None
+        self._source_position = None
+        self._capture = LatestFrameCapture(self._webcam, on_frame=received, sync_group=group)
         self._capture.start()
 
     def _handle_read_error(self, error: BaseException) -> bool:

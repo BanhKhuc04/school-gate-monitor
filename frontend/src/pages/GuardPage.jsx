@@ -70,6 +70,20 @@ export default function GuardPage() {
     };
   }, []);
 
+  // Trong lúc chạy video test: cập nhật vị trí 2 video mỗi giây (xem độ lệch).
+  const demoLive = Boolean(demo?.active || demo?.switching);
+  useEffect(() => {
+    if (!demoLive) return undefined;
+    let cancelled = false;
+    const id = setInterval(async () => {
+      try {
+        const res = await client.get('/api/demo');
+        if (!cancelled) setDemo(res.data);
+      } catch { /* the 5 s poll reports a lost backend */ }
+    }, 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [demoLive]);
+
   const handleAlert = useCallback((data) => {
     idCounter.current += 1;
     setAlertLog((prev) => [{ ...data, _id: idCounter.current }, ...prev].slice(0, MAX_LOG_ITEMS));
@@ -89,9 +103,16 @@ export default function GuardPage() {
     }
   }
 
-  const liveBadge = demo?.active
-    ? { label: 'VIDEO TEST', className: 'bg-warning text-on-warning' }
-    : { label: 'LIVE', className: 'bg-error/90' };
+  const clock = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  // Nhãn góc trái mỗi khung: LIVE, hoặc VIDEO TEST + vị trí đang phát của video đó.
+  const badgeFor = (gateId) => {
+    const g = demo?.gates?.[gateId];
+    if (g?.playing) {
+      return { label: g.position != null ? `VIDEO TEST · ${clock(g.position)}` : 'VIDEO TEST', className: 'bg-warning text-on-warning' };
+    }
+    if (demo?.active) return { label: 'ĐANG CHUYỂN…', className: 'bg-warning/70 text-on-warning' };
+    return { label: 'LIVE', className: 'bg-error/90' };
+  };
 
   return (
     <div className="min-h-screen bg-primary text-inverse-on-surface flex flex-col">
@@ -198,6 +219,18 @@ export default function GuardPage() {
           {demo?.active && (
             <div data-testid="demo-banner" className="mb-2 rounded-lg bg-warning text-on-warning px-3 py-2 text-sm font-bold">
               ĐANG CHẠY VIDEO TEST — hình là video quay sẵn, không phải camera thật. Vi phạm ghi nhận lúc này có nhãn TEST.
+              <span data-testid="demo-sync" className="block font-mono text-[12px] font-semibold mt-0.5">
+                {demo.switching
+                  ? 'Đang chuyển 2 camera sang video test…'
+                  : demo.offset_sec != null
+                    ? `2 video đồng bộ: camera trước ${clock(demo.gates.main?.position ?? 0)} · camera sau ${clock(demo.gates.secondary?.position ?? 0)} · lệch ${demo.offset_sec.toFixed(2)} giây`
+                    : 'Cả 2 camera đang phát video test.'}
+              </span>
+            </div>
+          )}
+          {!demo?.active && demo?.switching && (
+            <div className="mb-2 rounded-lg bg-primary-container text-on-primary-container px-3 py-2 text-sm">
+              Đang chuyển 2 cổng về camera thật…
             </div>
           )}
           {!isSplit && <DebugOverlayControl key={activeGate} gate={activeGate} name={activeGateName} />}
@@ -208,9 +241,9 @@ export default function GuardPage() {
                 <div key={g.id}>
                   <DebugOverlayControl gate={g.id} name={g.name} />
                   <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-                  <div className={`absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[10px] font-bold ${liveBadge.className}`}>
+                  <div className={`absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[10px] font-bold ${badgeFor(g.id).className}`}>
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    {liveBadge.label}
+                    {badgeFor(g.id).label}
                   </div>
                   <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[10px]">
                     {g.name}
@@ -228,9 +261,9 @@ export default function GuardPage() {
             </div>
           ) : (
             <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-              <div className={`absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[11px] font-bold ${liveBadge.className}`}>
+              <div className={`absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[11px] font-bold ${badgeFor(activeGate).className}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                {liveBadge.label}
+                {badgeFor(activeGate).label}
               </div>
               {activePipeline?.last_frame_age_sec != null && (
                 <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">

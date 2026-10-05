@@ -18,7 +18,7 @@ def _existing_pipeline(gate_id):
 
 @router.get('')
 def demo_status(current_user: dict = Depends(require_role('admin', 'security', 'management'))):
-    return demo_mode.status()
+    return demo_mode.status(_existing_pipeline)
 
 
 @router.post('/start')

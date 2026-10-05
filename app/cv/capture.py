@@ -166,31 +166,36 @@ class CapturedFrame:
     seq: int
     captured_at: float
     read_ms: float
+    position: float | None = None  # seconds into a video file; None for a live camera
 
 
-_file_clock = None   # wall time of position 0, shared by file sources
-_file_readers = 0
-_file_clock_lock = threading.Lock()
+_clocks = {}   # sync group -> [monotonic time of position 0, readers]
+_clocks_lock = threading.Lock()
 
 
-def _join_file_clock(candidate):
-    """Gates start one after another (each loads its models first), so two
-    synced recordings began seconds apart. Every file source playing at the
-    same time shares one position-0 instant; a late reader skips ahead."""
-    global _file_clock, _file_readers
-    with _file_clock_lock:
-        if _file_clock is None:
-            _file_clock = candidate
-        _file_readers += 1
-        return _file_clock
+def _join_clock(group, candidate):
+    """Videos of one sync group (the two test recordings) share one position-0
+    instant: the gates switch one after the other, so the later one skips ahead
+    and the pair stays in step. A video outside any group keeps its own clock;
+    sharing with every file playing (as before) let a recording one gate was
+    already showing drag a test video minutes ahead of its partner."""
+    if group is None:
+        return candidate
+    with _clocks_lock:
+        clock = _clocks.setdefault(group, [candidate, 0])
+        clock[1] += 1
+        return clock[0]
 
 
-def _leave_file_clock():
-    global _file_clock, _file_readers
-    with _file_clock_lock:
-        _file_readers -= 1
-        if _file_readers <= 0:
-            _file_clock, _file_readers = None, 0
+def _leave_clock(group):
+    if group is None:
+        return
+    with _clocks_lock:
+        clock = _clocks.get(group)
+        if clock is not None:
+            clock[1] -= 1
+            if clock[1] <= 0:
+                del _clocks[group]
 
 
 class LatestFrameCapture:
@@ -199,8 +204,8 @@ class LatestFrameCapture:
     The caller retains stream lifetime ownership; stop must join successfully
     before releasing/reusing it. File inputs are paced at their recorded FPS.
     """
-    def __init__(self, stream, on_frame=None):
-        self.stream, self.on_frame = stream, on_frame
+    def __init__(self, stream, on_frame=None, sync_group=None):
+        self.stream, self.on_frame, self.sync_group = stream, on_frame, sync_group
         self._condition = threading.Condition()
         self._stop = threading.Event()
         self._latest = None
@@ -229,15 +234,19 @@ class LatestFrameCapture:
                 if position is not None:
                     # Release each file frame at its own timestamp.
                     if zero is None:
-                        zero = _join_file_clock(started - position)
+                        zero = _join_clock(self.sync_group, started - position)
                     elif position < last - 1:  # looped back to the start
-                        zero = started - position
+                        # A synced pair loops together: the next lap starts where
+                        # this one ended on the shared clock, not when this
+                        # reader happened to notice the end.
+                        interval = getattr(self.stream, 'frame_interval', .04)
+                        zero = zero + last + interval if self.sync_group else started - position
                     last = position
                     self._stop.wait(max(0., zero + position - time.monotonic()))
                 if self._stop.is_set():
                     break
                 seq += 1
-                packet = CapturedFrame(image, seq, time.monotonic(), (time.monotonic()-started)*1000)
+                packet = CapturedFrame(image, seq, time.monotonic(), (time.monotonic()-started)*1000, position)
                 with self._condition:
                     self._latest = packet
                     self._condition.notify_all()
@@ -252,7 +261,7 @@ class LatestFrameCapture:
                 self._condition.notify_all()
         finally:
             if zero is not None:
-                _leave_file_clock()
+                _leave_clock(self.sync_group)
 
     def read_latest(self, after=0, timeout=3.5):
         deadline = time.monotonic()+timeout

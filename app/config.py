@@ -89,6 +89,8 @@ if _secondary_source is not None and _secondary_source.strip() != "":
 
 # Public constant — read-only after startup
 GATES: dict[str, dict] = _gate_cfgs
+# Sources as configured in .env; GATES[..]["source"] follows source switches.
+GATE_CONFIGURED_SOURCES = {gate_id: cfg["source"] for gate_id, cfg in _gate_cfgs.items()}
 
 # ─── Camera roles + profiles (Phase 3 — Task 1) ───────────────────────────────
 #
@@ -312,11 +314,12 @@ PLATE_ONLY_DETECT_WIDTH = int(os.environ.get("PLATE_ONLY_DETECT_WIDTH", "1280"))
 DETECT_HEIGHT = 480
 
 # Nút "Chạy video test" (trang Camera trực tiếp): 2 cổng cùng phát 2 video quay
-# đồng bộ (camera trước 1280x720 + camera sau 2688x1664, 04/10 07:55-08:02), lặp
-# lại liên tục. Không lưu: dừng test hoặc khởi động lại app là về camera thật.
+# đồng bộ (camera trước 1280x720 + camera sau 2688x1664, 04/10 07:55-08:02; bản
+# chép y hệt D:\Work\gate_recordings\dongbo_camera_*.mp4), lặp lại liên tục.
+# Không lưu: dừng test hoặc khởi động lại app là về camera thật.
 DEMO_VIDEOS = {
-    "main": os.environ.get("DEMO_VIDEO_FRONT") or str(BASE_DIR / "data" / "demo_videos" / "cam_truoc.mp4"),
-    "secondary": os.environ.get("DEMO_VIDEO_REAR") or str(BASE_DIR / "data" / "demo_videos" / "cam_sau.mp4"),
+    "main": os.environ.get("DEMO_VIDEO_FRONT") or str(BASE_DIR / "data" / "demo_videos" / "dongbo_camera_truoc.mp4"),
+    "secondary": os.environ.get("DEMO_VIDEO_REAR") or str(BASE_DIR / "data" / "demo_videos" / "dongbo_camera_sau.mp4"),
 }
 # Vạch cổng cho khung hình của 2 video test (vạch của camera thật trong DB giữ
 # nguyên, dùng lại khi dừng test): xe đi xuống qua 62% ảnh camera trước, đi lên
