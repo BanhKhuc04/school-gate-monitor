@@ -163,6 +163,8 @@ def test_app(request, tmp_path_factory):
     app.include_router(register_router)
     app.include_router(media_router)  # D6.2
     app.include_router(camera_router)  # Đợt 1 multi-camera mapping
+    from app.api.demo import router as demo_router  # nút chạy video test
+    app.include_router(demo_router)
     app.include_router(recognition_reviews_router)  # FR6
 
     from app.api.training_data import router as training_data_router

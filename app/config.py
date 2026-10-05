@@ -311,6 +311,18 @@ DETECT_WIDTH = 640
 PLATE_ONLY_DETECT_WIDTH = int(os.environ.get("PLATE_ONLY_DETECT_WIDTH", "1280"))
 DETECT_HEIGHT = 480
 
+# Nút "Chạy video test" (trang Camera trực tiếp): 2 cổng cùng phát 2 video quay
+# đồng bộ (camera trước 1280x720 + camera sau 2688x1664, 04/10 07:55-08:02), lặp
+# lại liên tục. Không lưu: dừng test hoặc khởi động lại app là về camera thật.
+DEMO_VIDEOS = {
+    "main": os.environ.get("DEMO_VIDEO_FRONT") or str(BASE_DIR / "data" / "demo_videos" / "cam_truoc.mp4"),
+    "secondary": os.environ.get("DEMO_VIDEO_REAR") or str(BASE_DIR / "data" / "demo_videos" / "cam_sau.mp4"),
+}
+# Vạch cổng cho khung hình của 2 video test (vạch của camera thật trong DB giữ
+# nguyên, dùng lại khi dừng test): xe đi xuống qua 62% ảnh camera trước, đi lên
+# qua 55% ảnh camera sau; không giới hạn vùng nhận diện.
+DEMO_GATE_LINES = {"main": [0.0, 0.62, 1.0, 0.62], "secondary": [0.0, 0.55, 1.0, 0.55]}
+
 # Violation cooldown (seconds)
 VIOLATION_COOLDOWN = 60  # Không cảnh báo lại cùng biển số trong 60 giây (cho DB)
 ALERT_COOLDOWN = 5       # Cooldown cảnh báo WebSocket (giây)

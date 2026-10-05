@@ -19,8 +19,13 @@ export default function GuardPage() {
   const [activeGate, setActiveGate] = useState('main');
   const [viewMode, setViewMode] = useState('single'); // 'single' | 'split'
   const [voiceStatus, setVoiceStatus] = useState({ supported: false, local: false, voice: null });
+  // Nút "Chạy video test": 2 cổng cùng phát 2 video quay sẵn (chỉ admin bấm được).
+  const [demo, setDemo] = useState(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoError, setDemoError] = useState('');
   const idCounter = useRef(0);
   const lease = useAudioLease(activeGate);
+  const isAdmin = user?.role === 'admin';
 
   // gates from API; null = chưa load (hoặc health = null); array = đã load
   const gates = health?.gates ?? null;
@@ -38,6 +43,12 @@ export default function GuardPage() {
         if (!cancelled) setHealth(res.data);
       } catch {
         if (!cancelled) setHealth(null);
+      }
+      try {
+        const res = await client.get('/api/demo');
+        if (!cancelled) setDemo(res.data);
+      } catch {
+        if (!cancelled) setDemo(null);
       }
     }
     poll();
@@ -63,6 +74,24 @@ export default function GuardPage() {
     idCounter.current += 1;
     setAlertLog((prev) => [{ ...data, _id: idCounter.current }, ...prev].slice(0, MAX_LOG_ITEMS));
   }, []);
+
+  async function toggleDemo() {
+    setDemoBusy(true);
+    setDemoError('');
+    try {
+      const res = await client.post(demo?.active ? '/api/demo/stop' : '/api/demo/start');
+      setDemo(res.data);
+      if (res.data.active) setViewMode('split'); // xem cả 2 video cùng lúc
+    } catch (err) {
+      setDemoError(err.response?.data?.detail || 'Không đổi được chế độ video test.');
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  const liveBadge = demo?.active
+    ? { label: 'VIDEO TEST', className: 'bg-warning text-on-warning' }
+    : { label: 'LIVE', className: 'bg-error/90' };
 
   return (
     <div className="min-h-screen bg-primary text-inverse-on-surface flex flex-col">
@@ -126,6 +155,27 @@ export default function GuardPage() {
             {lease.error && (
               <span className="text-[11px] text-error ml-1">{lease.error}</span>
             )}
+            {isAdmin && demo && (
+              <button
+                type="button"
+                onClick={toggleDemo}
+                disabled={demoBusy || (!demo.active && !demo.available)}
+                data-testid="demo-toggle"
+                className={`font-mono text-[11px] font-bold px-2.5 py-1 rounded border disabled:opacity-50 ${
+                  demo.active
+                    ? 'bg-warning border-warning text-on-warning'
+                    : 'bg-transparent border-white/30 text-inverse-on-surface hover:bg-white/10'
+                }`}
+                title={demo.available || demo.active
+                  ? 'Hai cổng cùng phát 2 video quay sẵn (camera trước + camera sau) để kiểm tra hệ thống'
+                  : `Thiếu video test: ${(demo.missing || []).join(', ')} (chép vào data/demo_videos/)`}
+              >
+                {demoBusy ? '…' : demo.active ? '■ Dừng video test' : '▶ Chạy video test'}
+              </button>
+            )}
+            {demoError && (
+              <span className="text-[11px] text-error ml-1">{demoError}</span>
+            )}
             {showGateSelector && (
               <div className="ml-auto flex items-center rounded-lg border border-white/30 overflow-hidden text-[11px] font-mono">
                 <button
@@ -145,6 +195,11 @@ export default function GuardPage() {
               </div>
             )}
           </div>
+          {demo?.active && (
+            <div data-testid="demo-banner" className="mb-2 rounded-lg bg-warning text-on-warning px-3 py-2 text-sm font-bold">
+              ĐANG CHẠY VIDEO TEST — hình là video quay sẵn, không phải camera thật. Vi phạm ghi nhận lúc này có nhãn TEST.
+            </div>
+          )}
           {!isSplit && <DebugOverlayControl key={activeGate} gate={activeGate} name={activeGateName} />}
 
           {isSplit ? (
@@ -153,9 +208,9 @@ export default function GuardPage() {
                 <div key={g.id}>
                   <DebugOverlayControl gate={g.id} name={g.name} />
                   <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-                  <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[10px] font-bold">
+                  <div className={`absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[10px] font-bold ${liveBadge.className}`}>
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    LIVE
+                    {liveBadge.label}
                   </div>
                   <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[10px]">
                     {g.name}
@@ -173,9 +228,9 @@ export default function GuardPage() {
             </div>
           ) : (
             <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-              <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[11px] font-bold">
+              <div className={`absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[11px] font-bold ${liveBadge.className}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                LIVE
+                {liveBadge.label}
               </div>
               {activePipeline?.last_frame_age_sec != null && (
                 <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">

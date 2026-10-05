@@ -529,6 +529,14 @@ def init_db():
             )
         except sqlite3.OperationalError:
             pass
+        # Vi phạm sinh ra khi nguồn là video ghi sẵn (nút "Chạy video test"):
+        # hiện nhãn TEST và xóa riêng được, không lẫn với dữ liệu camera thật.
+        try:
+            cursor.execute(
+                "ALTER TABLE violation_events ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
 
         # UT8: bảng danh sách mã số hợp lệ (admin import trước) — public
         # register page kiểm tra student_id có trong roster mới cho đăng ký.
@@ -778,7 +786,8 @@ def add_violation_event(timestamp: str, plate_read: str = None,
                        observed_at: str | None = None,
                        source_epoch: int | None = None,
                        camera_id: str | None = None,
-                       evidence_state: str | None = None) -> int:
+                       evidence_state: str | None = None,
+                       is_test: bool = False) -> int:
     """
     Thêm sự kiện vi phạm.
 
@@ -806,6 +815,7 @@ def add_violation_event(timestamp: str, plate_read: str = None,
         source_epoch: epoch từ pipeline (E1+R). NULL = record cũ.
         evidence_state: 'pending' | 'persisted' | 'failed' (S5). NULL = record cũ,
             mặc định 'persisted' để không phá nghiệp vụ cũ.
+        is_test: nguồn là video ghi sẵn (chạy video test), không phải camera thật.
 
     Returns:
         ID của sự kiện mới
@@ -830,16 +840,73 @@ def add_violation_event(timestamp: str, plate_read: str = None,
                     snapshot_class = vrow["student_class"]
             cursor.execute(
                 '''INSERT INTO violation_events
-                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path, plate_confidence, gate_id, status, crop_snapshot_path, track_id, encounter_id, issues_json, observed_at, source_epoch, camera_id, evidence_state, student_name_at_event, student_class_at_event)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status, plate_format_valid, clip_path, plate_confidence, gate_id, status, crop_snapshot_path, track_id, encounter_id, issues_json, observed_at, source_epoch, camera_id, evidence_state, student_name_at_event, student_class_at_event, is_test)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (timestamp, plate_read, plate_matched, helmet_status, violation_type, snapshot_path, posture_status,
                  None if plate_format_valid is None else int(plate_format_valid), clip_path,
                  plate_confidence, gate_id, status, crop_snapshot_path, track_id,
                  encounter_id, issues_json, observed_at, source_epoch, camera_id,
-                 evidence_state or 'persisted', snapshot_name, snapshot_class)
+                 evidence_state or 'persisted', snapshot_name, snapshot_class, int(bool(is_test)))
             )
             conn.commit()
             return cursor.lastrowid
+        finally:
+            conn.close()
+
+
+def clear_violations(test_only: bool = False) -> dict:
+    """Xóa bản ghi vi phạm: tất cả, hoặc chỉ những bản ghi từ video test.
+
+    Xóa kèm nhật ký xử lý, phiếu duyệt biển và quan sát cùng lượt xe của
+    chúng. Không đụng tới file ảnh/clip: trả về tên file để caller dời/xóa.
+
+    Returns:
+        {"deleted": số vi phạm đã xóa, "media": [tên file ảnh/clip]}
+    """
+    where = 'is_test = 1' if test_only else '1=1'
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            rows = cursor.execute(
+                f'SELECT id, encounter_id, snapshot_path, crop_snapshot_path, clip_path '
+                f'FROM violation_events WHERE {where}').fetchall()
+            ids = [r['id'] for r in rows]
+            encounters = {r['encounter_id'] for r in rows if r['encounter_id']}
+            media = {os.path.basename(p) for r in rows
+                     for p in (r['snapshot_path'], r['crop_snapshot_path'], r['clip_path']) if p}
+            if encounters:
+                # A pass with both test and real rows keeps its observations.
+                keep = {r[0] for r in cursor.execute(
+                    f'SELECT DISTINCT encounter_id FROM violation_events WHERE NOT ({where}) '
+                    f'AND encounter_id IS NOT NULL')}
+                encounters -= keep
+            for chunk in range(0, len(ids), 500):
+                part = ids[chunk:chunk + 500]
+                marks = ','.join('?' * len(part))
+                cursor.execute(f'DELETE FROM violation_audit_log WHERE violation_id IN ({marks})', part)
+                cursor.execute(
+                    f'DELETE FROM recognition_review_feedback WHERE review_id IN '
+                    f'(SELECT review_id FROM recognition_reviews WHERE violation_id IN ({marks}))', part)
+                cursor.execute(f'DELETE FROM recognition_reviews WHERE violation_id IN ({marks})', part)
+                cursor.execute(f'UPDATE violation_events SET linked_violation_id = NULL '
+                               f'WHERE linked_violation_id IN ({marks})', part)
+                cursor.execute(f'DELETE FROM violation_events WHERE id IN ({marks})', part)
+            encounters = sorted(encounters)
+            for chunk in range(0, len(encounters), 500):
+                part = encounters[chunk:chunk + 500]
+                marks = ','.join('?' * len(part))
+                for r in cursor.execute(
+                        f'SELECT snapshot_path, clip_path FROM encounter_observations '
+                        f'WHERE encounter_id IN ({marks})', part):
+                    media.update(os.path.basename(p) for p in (r[0], r[1]) if p)
+                cursor.execute(f'DELETE FROM encounter_observations WHERE encounter_id IN ({marks})', part)
+            if media:  # never hand out a file a kept record still shows
+                for r in cursor.execute('SELECT snapshot_path, crop_snapshot_path, clip_path FROM violation_events '
+                                        'UNION ALL SELECT snapshot_path, NULL, clip_path FROM encounter_observations'):
+                    media.difference_update(os.path.basename(p) for p in r if p)
+            conn.commit()
+            return {'deleted': len(ids), 'media': sorted(media)}
         finally:
             conn.close()
 

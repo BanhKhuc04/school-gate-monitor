@@ -12,8 +12,10 @@ import json
 import time as _time_module
 import sqlite3
 from datetime import datetime
+from typing import Literal
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.db import (
     add_vehicle, get_vehicle_by_plate, get_vehicle_by_id, list_vehicles,
@@ -749,6 +751,59 @@ def get_violation_audit(
 ):
     """GET /api/violations/{id}/audit-log — lấy lịch sử xử lý vi phạm."""
     return get_violation_audit_log(violation_id)
+
+
+class ClearViolationsRequest(BaseModel):
+    scope: Literal["test", "all"]
+
+
+@violations_router.post("/violations/clear")
+def clear_violations_endpoint(
+    payload: ClearViolationsRequest,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """
+    POST /api/violations/clear — xóa vi phạm.
+    scope=test: chỉ vi phạm của video test (ảnh/clip xóa hẳn).
+    scope=all: tất cả; DB được sao lưu trước, ảnh/clip dời vào
+    data/backups/truoc_khi_xoa_vi_pham_<giờ>/ nên khôi phục được.
+    """
+    import os
+    import shutil
+    import app.db as db
+    from app.config import BACKUP_DIR, BASE_DIR, SNAPSHOTS_DIR
+    started = datetime.now()
+    backup = None
+    if payload.scope == "all":
+        backup = os.path.join(BACKUP_DIR, f"truoc_khi_xoa_vi_pham_{started:%Y%m%d_%H%M%S}")
+        os.makedirs(backup, exist_ok=True)
+        db.backup_database(os.path.join(backup, "app.db"))
+    result = db.clear_violations(test_only=payload.scope == "test")
+    moved = removed = 0
+    for name in result["media"]:
+        path = os.path.join(SNAPSHOTS_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            if backup:
+                shutil.move(path, os.path.join(backup, name))
+                moved += 1
+            else:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass  # a clip still being written; the record itself is gone
+    shown = os.path.relpath(backup, BASE_DIR) if backup else None
+    try:
+        db.log_maintenance_run(
+            "clear_violations", started.isoformat(), datetime.now().isoformat(), True,
+            {"by": current_user.get("username"), "scope": payload.scope,
+             "deleted": result["deleted"], "media_moved": moved, "media_removed": removed,
+             "backup": shown})
+    except Exception:
+        pass
+    return {"deleted": result["deleted"], "media_moved": moved,
+            "media_removed": removed, "backup": shown}
 
 
 # ─── Feature 2 + 6: Violation summary + history ────────────────────────────────

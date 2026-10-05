@@ -38,9 +38,10 @@ from app.config import (
     CONTINUOUS_RECORDING_DIR, FRAME_EDGE_MARGIN_RATIO,
     HELMET_MODEL_HASH_SHA256, HELMET_MODEL_MAPPING,
     get_gate_role, get_gate_profile, crossing_motion,
-    DEBUG_ALERT,
+    DEBUG_ALERT, POSTURE_TEMPORAL_WINDOW_SEC, POSTURE_TEMPORAL_MIN_SAMPLES,
 )
 from app.cv.capture import WebcamStream, LatestFrameCapture
+from app.cv.camera_sources import is_network_source
 from app.cv.detector import HelmetPlateDetector, Detection
 from pathlib import Path  # noqa: E402, used in hot-reload methods
 from app.cv.ocr import read_plate_detailed, validate_plate_format, compute_blur_score
@@ -1309,6 +1310,7 @@ class VideoPipeline:
             if not isinstance(self.camera_switch, CameraSwitch):
                 # Test/mock: bỏ qua
                 return False
+            previous = self.camera_switch.source
             result = self.camera_switch.apply(
                 self._webcam,
                 lambda source: self._open_webcam(
@@ -1318,8 +1320,12 @@ class VideoPipeline:
         except Exception:
             return False
         if result is None:
-            self._start_capture()
-            return False
+            if self.camera_switch.source == previous:
+                self._start_capture()
+                return False
+            # Forced switch (test video -> live camera not reachable yet): the
+            # old stream is released and the loop keeps retrying the new one.
+            result = (None, None)
         self._webcam, frame = result
         self._active_source = self.camera_switch.source
         # Cập nhật GATES dict để polling/reload cũng thấy source mới
@@ -1413,7 +1419,7 @@ class VideoPipeline:
         for stitcher in getattr(self, '_track_stitchers', None) or ():
             stitcher.reset()
         self._start_capture()
-        return True
+        return self._webcam is not None
 
     def _maybe_reload_source(self) -> None:
         """Reload source từ GATES dict (poll mỗi 5s). Không tăng epoch vì đây
@@ -2069,6 +2075,45 @@ class VideoPipeline:
             loop=gate_config.get("loop", True),
         )
 
+    def _publish_offline_frame(self):
+        """Say on the video itself that the camera is not connected, instead of
+        freezing on the last picture (or staying blank) while it is retried."""
+        now = time.time()
+        if now - getattr(self, '_offline_frame_at', 0.) < 5:
+            return
+        self._offline_frame_at = now
+        from app.cv.camera_sources import display_source
+        source = getattr(getattr(self, 'camera_switch', None), 'source', None)
+        lines = [('MẤT KẾT NỐI CAMERA', 64), ('Hệ thống đang tự kết nối lại...', 36),
+                 (display_source(source) if source is not None else '', 28),
+                 (datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y'), 28)]
+        image = np.full((VIDEO_HEIGHT, VIDEO_WIDTH, 3), (40, 30, 25), np.uint8)
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            canvas = Image.fromarray(image)
+            draw = ImageDraw.Draw(canvas)
+            y = VIDEO_HEIGHT // 2 - 120
+            for text, size in lines:
+                font = ImageFont.truetype('arial.ttf', size)
+                width = draw.textlength(text, font=font)
+                draw.text(((VIDEO_WIDTH - width) / 2, y), text, font=font,
+                          fill=(255, 90, 90) if size == 64 else (230, 230, 230))
+                y += size + 28
+            image = np.asarray(canvas)
+        except Exception:  # no TrueType font: plain ASCII
+            cv2.putText(image, 'CAMERA OFFLINE - reconnecting', (80, VIDEO_HEIGHT // 2),
+                        FONT, 1.6, (90, 90, 255), 3)
+        ok, buf = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        lock = getattr(self, '_lock', None)
+        if ok and lock is not None:
+            with lock:
+                self._latest_jpeg = buf.tobytes()
+
+    def _is_test_source(self):
+        """A recorded video, not a live camera: its violations are test data."""
+        source = getattr(getattr(self, 'camera_switch', None), 'source', None)
+        return isinstance(source, str) and not is_network_source(source)
+
     def _stop_capture(self):
         capture = getattr(self, '_capture', None)
         if capture is not None and not capture.stop():
@@ -2142,10 +2187,12 @@ class VideoPipeline:
             try:
                 # Same URL reconnect is a new tracking/source session.
                 self.camera_switch.request(GATES[self.gate_id]['source'], persist=False)
-                self._apply_camera_change()
+                if not self._apply_camera_change():
+                    raise RuntimeError('camera not reachable')
                 print("[Pipeline] Webcam reconnected")
             except Exception as reconnect_err:
                 print(f"[Pipeline] Reconnect failed: {reconnect_err}")
+                self._publish_offline_frame()
             self._consecutive_errors = 0
             # Phase 1: exponential backoff thay vì fixed 2s.
             # Reset về 2s khi reconnect THÀNH CÔNG.
@@ -2196,6 +2243,7 @@ class VideoPipeline:
                 # Webcam chưa sẵn sàng (initial open thất bại, đợi switch) →
                 # backoff rồi quay lại đầu vòng lặp.
                 if self._webcam is None:
+                    self._publish_offline_frame()
                     time.sleep(self._RECONNECT_BACKOFF_SEC)
                     if self._running:
                         try:
@@ -3534,7 +3582,8 @@ class VideoPipeline:
                 status=status, encounter_id=encounter_id, issues_json=issues_json,
                 observed_at=observed_at, source_epoch=source_epoch,
                 camera_id=camera_id or gate_id, track_id=track_id,
-                evidence_state='persisted' if success else 'failed')
+                evidence_state='persisted' if success else 'failed',
+                is_test=self._is_test_source())
             if not success:
                 self._diagnostic('io', 'error', 'evidence_write_failed', track_id, source_epoch=source_epoch, frame_seq=frame_seq)
                 self._violations_skipped_total = getattr(self, '_violations_skipped_total', 0) + 1

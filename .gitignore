@@ -85,3 +85,4 @@ logs_backend.err
 yolo11*.pt
 models/cct/*.onnx
 *.engine
+data/demo_videos/

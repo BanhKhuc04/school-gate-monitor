@@ -17,6 +17,7 @@ from app.api.dev import router as dev_router
 from app.api.system import router as system_router
 from app.api.roi import router as roi_router
 from app.api.camera import router as camera_router
+from app.api.demo import router as demo_router  # nút chạy video test
 from app.api.register import router as register_router  # UT8: public register
 from app.api.media import router as media_router  # D6.2: scoped media endpoint
 from app.api.recognition_reviews import router as recognition_reviews_router  # FR6: review/feedback
@@ -212,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router)
     app.include_router(roi_router)
     app.include_router(camera_router)
+    app.include_router(demo_router)
     app.include_router(roster_router)
     app.include_router(register_router)
     app.include_router(media_router)
