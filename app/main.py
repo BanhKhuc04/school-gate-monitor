@@ -29,6 +29,25 @@ from app.db import init_db
 _pipeline_started = False
 
 
+def _raise_process_priority():
+    """Run the gate monitor above desktop apps (PROCESS_PRIORITY=normal to
+    opt out). Two cameras at 25 fps on the RTX 3050 laptop: the front AI rate
+    dipped to 11.6 fps under Normal while a browser played both streams, and
+    held 23.7-24.7 fps under High."""
+    level = os.environ.get('PROCESS_PRIORITY', 'high').strip().lower()
+    if level == 'normal':
+        return
+    try:
+        import psutil
+        windows = {'high': 'HIGH_PRIORITY_CLASS', 'above_normal': 'ABOVE_NORMAL_PRIORITY_CLASS'}
+        value = getattr(psutil, windows.get(level, ''), None) if os.name == 'nt' else -5
+        if value is not None:
+            psutil.Process().nice(value)
+            print(f"[App] Process priority: {level}")
+    except Exception as e:  # unsupported level, no permission (POSIX), psutil missing
+        print(f"[App] Process priority unchanged: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan - start/stop all pipeline threads (lazy import avoids blocking on missing CV libs).
@@ -90,6 +109,7 @@ async def lifespan(app: FastAPI):
         try:
             from app.cv.pipeline import start_all_pipelines, stop_all_pipelines
             if os.environ.get('CV_PIPELINES_ENABLED', '1') == '1':
+                _raise_process_priority()
                 start_all_pipelines()
                 _stop_pipelines = stop_all_pipelines
                 _pipeline_started = True
