@@ -78,3 +78,80 @@ def test_preview_encodes_new_frames_above_fifteen_fps_without_ai():
     finally:
         pipeline._preview_stop.set()
         worker.join(1)
+
+
+class GappyFile:
+    """A wall-clock recording: frames 50 ms apart, then a 0.6 s dropout."""
+    frame_interval = .05
+    times = [0., .05, .10, .70, .75]
+
+    def __init__(self):
+        self.index = -1
+
+    def read_source_frame(self):
+        if self.index + 1 >= len(self.times):
+            raise EOFError
+        self.index += 1
+        return np.zeros((4, 4, 3), np.uint8)
+
+    def position_sec(self):
+        return self.times[self.index]
+
+
+def test_file_frames_are_released_at_their_timestamps_across_a_dropout():
+    stamps = []
+    capture = LatestFrameCapture(GappyFile(), on_frame=lambda packet: stamps.append(packet.captured_at))
+    capture.start()
+    capture._thread.join(3)
+    offsets = [round(t - stamps[0], 2) for t in stamps]
+    # Paced at a fixed 1/fps the gap shrank to 50 ms and the video ran ahead.
+    assert offsets[3] >= .65 and offsets[4] >= .70
+
+
+class SlowFile(GappyFile):
+    """25 fps file whose every read costs 120 ms: the reader must skip ahead."""
+    frame_interval = .04
+    times = [i * .04 for i in range(200)]
+
+    def read_source_frame(self):
+        time.sleep(.12)
+        return super().read_source_frame()
+
+    def skip_to(self, position):
+        while self.index + 1 < len(self.times) and self.times[self.index + 1] < position:
+            self.index += 1
+
+
+def test_slow_file_reader_drops_frames_to_stay_on_wall_clock():
+    source = SlowFile()
+    capture = LatestFrameCapture(source)
+    capture.start()
+    try:
+        time.sleep(1.5)
+        # Without skipping: ~12 frames read = 0.48 s of video after 1.5 s.
+        assert source.position_sec() > 1.2
+    finally:
+        capture.stop()
+
+
+class SteadyFile(SlowFile):
+    def read_source_frame(self):
+        return GappyFile.read_source_frame(self)
+
+
+def test_a_file_source_started_later_joins_the_running_one_in_sync():
+    # Gates start one after another; synced recordings must still line up.
+    first, second = SteadyFile(), SteadyFile()
+    a = LatestFrameCapture(first)
+    a.start()
+    try:
+        time.sleep(.6)
+        b = LatestFrameCapture(second)
+        b.start()
+        try:
+            time.sleep(.5)
+            assert abs(first.position_sec() - second.position_sec()) < .15
+        finally:
+            b.stop()
+    finally:
+        a.stop()

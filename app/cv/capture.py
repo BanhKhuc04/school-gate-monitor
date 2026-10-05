@@ -87,6 +87,24 @@ class WebcamStream:
             fps = float(self.cap.get(cv2.CAP_PROP_FPS))
             self.frame_interval = 1.0 / fps if fps > 0 else 1.0 / 25
 
+    def position_sec(self):
+        """Timestamp of the frame just read, for video files; None for live
+        sources. Recordings saved on wall-clock time are variable-rate: a 1.6 s
+        Wi-Fi gap in dongbo_camera_truoc.mp4 played as one frame interval, so
+        the front video ran 1.6 s ahead of the rear one after it."""
+        if not self._is_file_or_url or self._network:
+            return None
+        return self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+
+    def skip_to(self, position):
+        """Drop file frames up to `position` seconds without converting them.
+        A live camera drops frames when the reader falls behind; a file must
+        too, or a slow decode plays it in slow motion and two synced gate
+        videos drift apart (2688x1664 rear: 24 ms per read, 2.7 ms per grab)."""
+        while self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 < position:
+            if not self.cap.grab():
+                break
+
     def read_source_frame(self) -> np.ndarray:
         """
         Đọc frame mới nhất từ webcam.
@@ -150,6 +168,31 @@ class CapturedFrame:
     read_ms: float
 
 
+_file_clock = None   # wall time of position 0, shared by file sources
+_file_readers = 0
+_file_clock_lock = threading.Lock()
+
+
+def _join_file_clock(candidate):
+    """Gates start one after another (each loads its models first), so two
+    synced recordings began seconds apart. Every file source playing at the
+    same time shares one position-0 instant; a late reader skips ahead."""
+    global _file_clock, _file_readers
+    with _file_clock_lock:
+        if _file_clock is None:
+            _file_clock = candidate
+        _file_readers += 1
+        return _file_clock
+
+
+def _leave_file_clock():
+    global _file_clock, _file_readers
+    with _file_clock_lock:
+        _file_readers -= 1
+        if _file_readers <= 0:
+            _file_clock, _file_readers = None, 0
+
+
 class LatestFrameCapture:
     """One reader owns capture I/O. Slow consumers receive only the latest frame.
 
@@ -170,11 +213,27 @@ class LatestFrameCapture:
 
     def _run(self):
         seq = 0
+        zero = None  # monotonic time of file position 0 (file sources only)
+        last = None
         try:
             while not self._stop.is_set():
                 started = time.monotonic()
+                skip = getattr(self.stream, 'skip_to', None)
+                if zero is not None and skip is not None and last is not None:
+                    due = started - zero  # file position the wall clock is at
+                    if due - last > 2 * getattr(self.stream, 'frame_interval', .04):
+                        skip(due)
                 reader = getattr(type(self.stream), 'read_source_frame', None)
                 image = self.stream.read_source_frame() if callable(reader) else self.stream.read_frame()
+                position = getattr(self.stream, 'position_sec', lambda: None)()
+                if position is not None:
+                    # Release each file frame at its own timestamp.
+                    if zero is None:
+                        zero = _join_file_clock(started - position)
+                    elif position < last - 1:  # looped back to the start
+                        zero = started - position
+                    last = position
+                    self._stop.wait(max(0., zero + position - time.monotonic()))
                 if self._stop.is_set():
                     break
                 seq += 1
@@ -185,12 +244,15 @@ class LatestFrameCapture:
                 if self.on_frame:
                     self.on_frame(packet)
                 remaining = getattr(self.stream, 'frame_interval', 0.0) - (time.monotonic()-started)
-                if remaining > 0:
+                if position is None and remaining > 0:
                     self._stop.wait(remaining)
         except Exception as exc:
             with self._condition:
                 self._error = exc
                 self._condition.notify_all()
+        finally:
+            if zero is not None:
+                _leave_file_clock()
 
     def read_latest(self, after=0, timeout=3.5):
         deadline = time.monotonic()+timeout
