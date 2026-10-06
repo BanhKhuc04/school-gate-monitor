@@ -2,7 +2,7 @@
 
 ## Context
 
-Bước 1-7 của [TASKS_SPA_AUTH.md](TASKS_SPA_AUTH.md) đã xong và commit (`b26ad45`) — backend đã có auth JWT, CRUD xe/vi phạm/thống kê dạng JSON, bảo vệ video/WS bằng token, CORS. Còn lại **Bước 8-13 (toàn bộ frontend React)** chưa làm.
+Bước 1-7 của [docs/plans/TASKS_SPA_AUTH.md](docs/plans/TASKS_SPA_AUTH.md) đã xong và commit (`b26ad45`) — backend đã có auth JWT, CRUD xe/vi phạm/thống kê dạng JSON, bảo vệ video/WS bằng token, CORS. Còn lại **Bước 8-13 (toàn bộ frontend React)** chưa làm.
 
 Từ giờ trở đi, thay vì tôi giao từng prompt và bạn tự test bằng mắt/tai sau mỗi bước (cách đã làm từ đầu dự án), bạn muốn Cursor **tự chạy liên tục 6 tiếng**: tự code, tự test, tự phát hiện lỗi, tự sửa, tự sang bước kế — không cần bạn ngồi canh từng bước.
 
@@ -20,8 +20,8 @@ Dự án hiện chưa có test nào (`pytest`, `playwright` đều chưa cài). 
 
 - **Test xong mới commit, commit xong mới sang bước kế** — mỗi bước trong Bước 8-13 là 1 commit riêng, message rõ ràng. Không gộp nhiều bước vào 1 commit — nếu có gì sai sau này, dễ `git revert`/`git bisect`.
 - **Không đụng vào**: `app/cv/*` (pipeline, detector, capture, ocr — logic CV đã hoạt động đúng, không phải phạm vi lần này), `app/config.py` phần `CAMERA_INDEX`/model paths (đã cấu hình đúng theo phần cứng thật của người dùng, đụng vào có thể làm hỏng setup OBS đã mất công cấu hình), `data/app.db` (không xóa/reset — có dữ liệu thật), không `git push` (chỉ commit local).
-- **Ghi log liên tục** vào file `CURSOR_RUN_LOG.md` (tạo mới nếu chưa có) — sau MỖI bước, append 1 mục: bước nào, đã làm gì, đã tự test gì (và kết quả), có gì cần người xác nhận thủ công (đánh dấu rõ **[CẦN NGƯỜI KIỂM TRA]**), có blocker gì không. Đây là cách duy nhất tôi và bạn biết chuyện gì đã xảy ra trong 6 tiếng đó.
-- **Time-box mỗi bước**: nếu 1 bước bị kẹt (ví dụ lỗi cài đặt, dependency conflict) quá khoảng 30-45 phút thử các cách khác nhau mà không ra, ghi rõ blocker vào log kèm đã thử gì, rồi **chuyển sang bước độc lập tiếp theo** thay vì đứng im hết 6 tiếng ở 1 chỗ. Không tự ý "sáng tạo" giải pháp khác xa với PLAN_SPA_AUTH.md nếu bị kẹt — ghi lại và đi tiếp.
+- **Ghi log liên tục** vào file `docs/handover/CURSOR_RUN_LOG.md` (tạo mới nếu chưa có) — sau MỖI bước, append 1 mục: bước nào, đã làm gì, đã tự test gì (và kết quả), có gì cần người xác nhận thủ công (đánh dấu rõ **[CẦN NGƯỜI KIỂM TRA]**), có blocker gì không. Đây là cách duy nhất tôi và bạn biết chuyện gì đã xảy ra trong 6 tiếng đó.
+- **Time-box mỗi bước**: nếu 1 bước bị kẹt (ví dụ lỗi cài đặt, dependency conflict) quá khoảng 30-45 phút thử các cách khác nhau mà không ra, ghi rõ blocker vào log kèm đã thử gì, rồi **chuyển sang bước độc lập tiếp theo** thay vì đứng im hết 6 tiếng ở 1 chỗ. Không tự ý "sáng tạo" giải pháp khác xa với docs/plans/PLAN_SPA_AUTH.md nếu bị kẹt — ghi lại và đi tiếp.
 - **Nếu xong cả Bước 8-13 mà vẫn còn thời gian trong 6 tiếng**: chuyển sang danh sách "việc thêm nếu còn giờ" ở cuối file này — KHÔNG tự ý bắt đầu làm 50cc/khuôn mặt/dắt xe (những tính năng đó cần quyết định thêm từ người dùng, không nằm trong phạm vi tự động này).
 
 ## Bước 8-13, có kèm cách tự test cụ thể
@@ -59,6 +59,6 @@ Theo thứ tự ưu tiên, dừng bất cứ lúc nào hết giờ:
 2. Thêm loading state (spinner/skeleton) cho các trang khi đang gọi API — hiện tại có thể đang trắng trang khi chờ load, kiểm tra và thêm nếu thiếu.
 3. Thêm thông báo lỗi rõ ràng ở frontend khi API lỗi (hiện tại kiểm tra xem có "nuốt lỗi" im lặng ở đâu không).
 4. Cập nhật `README.md` với hướng dẫn chạy cả backend + frontend (dev và production), danh sách route mới, cách seed user.
-5. Xóa endpoint test-only `POST /api/dev/trigger-test-alert` HOẶC thêm `require_role("admin")` vào nó nếu quyết định giữ lại — ghi rõ quyết định vào `CURSOR_RUN_LOG.md`.
+5. Xóa endpoint test-only `POST /api/dev/trigger-test-alert` HOẶC thêm `require_role("admin")` vào nó nếu quyết định giữ lại — ghi rõ quyết định vào `docs/handover/CURSOR_RUN_LOG.md`.
 
 **KHÔNG làm** (ngoài phạm vi, cần người quyết định trước): 50cc classification, nhận diện khuôn mặt, phát hiện dắt xe, đổi model CV, đổi cấu hình camera/OBS.

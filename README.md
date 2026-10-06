@@ -108,7 +108,7 @@ Máy không có GPU NVIDIA vẫn chạy được bình thường (tự động d
 - Giao diện đã restyle theo design "Vanguard Campus Security" (landing page, login).
 
 **Đã sửa (trước đây ghi là "bug đã biết"):**
-- `/guard/ws` cảnh báo không tới client: đã thêm test tự động `app/tests/test_guard_ws.py` tái hiện đúng kịch bản điều tra trong `HANDOFF_CURSOR.md` (1 client, 2 client đồng thời + trigger dồn dập) — cả hai đều PASS với code hiện tại. Nhân tiện sửa 2 vấn đề thật tìm thấy trong `app/api/guard.py`: (1) thiếu try/except quanh `decode_access_token` khiến token hết hạn/sai làm WS đóng đột ngột không rõ lý do; (2) `_clients_lock` dùng `threading.Lock` (blocking thật) thay vì `asyncio.Lock` trong code async — tiềm ẩn treo cứng event loop nếu 2 client broadcast trùng lúc. Nếu vẫn gặp alert không hiện trên UI thật, nhiều khả năng do nguyên nhân khác (nhiều process backend chạy song song trên cùng port, trình duyệt cụ thể) — báo lại kèm bước tái hiện để điều tra tiếp.
+- `/guard/ws` cảnh báo không tới client: đã thêm test tự động `app/tests/test_guard_ws.py` tái hiện đúng kịch bản điều tra trong `docs/handover/HANDOFF_CURSOR.md` (1 client, 2 client đồng thời + trigger dồn dập) — cả hai đều PASS với code hiện tại. Nhân tiện sửa 2 vấn đề thật tìm thấy trong `app/api/guard.py`: (1) thiếu try/except quanh `decode_access_token` khiến token hết hạn/sai làm WS đóng đột ngột không rõ lý do; (2) `_clients_lock` dùng `threading.Lock` (blocking thật) thay vì `asyncio.Lock` trong code async — tiềm ẩn treo cứng event loop nếu 2 client broadcast trùng lúc. Nếu vẫn gặp alert không hiện trên UI thật, nhiều khả năng do nguyên nhân khác (nhiều process backend chạy song song trên cùng port, trình duyệt cụ thể) — báo lại kèm bước tái hiện để điều tra tiếp.
 
 **Đã bỏ:**
 - **Nhận diện khuôn mặt** — gỡ hoàn toàn (commit `d4d8dc4`): mở khẩu trang không đeo mặt nạ vẫn xâm phạm dữ liệu sinh trắc học trẻ vị thành niên, rủi ro pháp lý không đáng đánh đổi. Không còn `app/api/faces.py`, `app/cv/face.py`, bảng `face_embeddings`/`face_match_events`, trang `AdminFacesPage`.
@@ -182,6 +182,21 @@ Mở trình duyệt: `http://localhost:8000`
 | `/guard/ws` | WS | security, admin | WebSocket cảnh báo (query: `?token=`) |
 | `/api/dev/trigger-test-alert` | POST | security, admin | Giả lập cảnh báo vi phạm (test) |
 | `/media/{file}` | GET | any | Ảnh snapshot vi phạm |
+
+## Cấu trúc thư mục
+
+```
+app/            Backend FastAPI (api/, cv/ pipeline nhận diện, tests/)
+frontend/       Giao diện React (Vite) + e2e Playwright
+models/         Model đã fine-tune (helmet_best.pt, plate_best.pt)
+datasets/       Cấu hình dataset huấn luyện (data.yaml) — ảnh không commit
+scripts/        Script tiện ích: seed user, train, benchmark, kiểm tra camera
+tests/          Test tích hợp gọi API thật (cần backend đang chạy)
+marketing/      Trang giới thiệu tĩnh
+docs/plans/     Kế hoạch, danh sách task các đợt phát triển
+docs/handover/  Tài liệu bàn giao, nhật ký chạy, việc phần cứng
+data/           Dữ liệu runtime (DB, snapshot, backup) — tự tạo khi chạy, không commit
+```
 
 ## Kiến trúc
 

@@ -146,4 +146,4 @@ Lưu ý: `ultralytics` sẽ tự kéo theo `torch`/`torchvision` (bản CPU trê
 
 ## Cách dùng tài liệu này với Cursor
 
-Mở thư mục `D:\Work\Project_motorbike` trong Cursor. Xem checklist từng bước tại [TASKS.md](TASKS.md) — giao cho Cursor **từng bước một** (không giao hết 1 lần), yêu cầu nó đọc phần kiến trúc/schema ở file này trước khi code, và chỉ đánh dấu hoàn thành khi qua được tiêu chí kiểm tra của bước đó.
+Mở thư mục `D:\Work\Project_motorbike` trong Cursor. Xem checklist từng bước tại [docs/plans/TASKS.md](docs/plans/TASKS.md) — giao cho Cursor **từng bước một** (không giao hết 1 lần), yêu cầu nó đọc phần kiến trúc/schema ở file này trước khi code, và chỉ đánh dấu hoàn thành khi qua được tiêu chí kiểm tra của bước đó.

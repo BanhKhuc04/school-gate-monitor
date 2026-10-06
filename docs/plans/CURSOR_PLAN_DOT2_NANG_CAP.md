@@ -1,7 +1,7 @@
 # Kế hoạch nâng cấp Smart School Gate — Đợt 2 (độ tin cậy biển số, 2 camera, lưu trữ, backup)
 
 > **GỬI CURSOR: Bước 1 đã code xong + 87 test pass (commit `51d418d`). Đọc
-> `DEVELOPMENT_HANDOVER.md` mục "SESSION LOG — 2026-09-29 (đợt 2, Bước 1)" để biết
+> `docs/handover/DEVELOPMENT_HANDOVER.md` mục "SESSION LOG — 2026-09-29 (đợt 2, Bước 1)" để biết
 > chính xác đã làm gì trước khi đọc tiếp plan này. BẮT ĐẦU TỪ BƯỚC 3.**
 > Có video thật để test pipeline (không cần camera vật lý) tại
 > `C:\Users\khucv\Downloads\tranning\` — 14 file `.mp4`, 1280x720 30fps, quay cổng
@@ -12,9 +12,9 @@
 
 ## Context
 
-Dự án đã có 1 nền tảng hoạt động đầy đủ (64/64 test pass, commit `9d81244`): pipeline CV (helmet/plate/pose/OCR), quản lý xe-học sinh, lịch sử vi phạm + audit trail, 4 vai trò phân quyền, health/cleanup cơ bản. `DEVELOPMENT_HANDOVER.md` đã audit chính xác trạng thái từng phần.
+Dự án đã có 1 nền tảng hoạt động đầy đủ (64/64 test pass, commit `9d81244`): pipeline CV (helmet/plate/pose/OCR), quản lý xe-học sinh, lịch sử vi phạm + audit trail, 4 vai trò phân quyền, health/cleanup cơ bản. `docs/handover/DEVELOPMENT_HANDOVER.md` đã audit chính xác trạng thái từng phần.
 
-Người dùng muốn nâng cấp tiếp theo hướng production-ready hơn: biển số đọc chính xác + biết khi nào KHÔNG chắc chắn (không tự đoán), 2 camera trước/sau ghép đúng 1 lượt xe (không tự đoán khi mơ hồ), lưu trữ có kiểm soát dung lượng (kể cả ghi hình liên tục), backup an toàn cho SQLite đang chạy, tất cả **tái dùng tối đa code/pattern đã có**, không thêm dependency khi stdlib/code sẵn có đủ dùng, và triển khai từng lát mỏng — mỗi bước tự chạy test + commit + cập nhật `DEVELOPMENT_HANDOVER.md` trước khi sang bước kế.
+Người dùng muốn nâng cấp tiếp theo hướng production-ready hơn: biển số đọc chính xác + biết khi nào KHÔNG chắc chắn (không tự đoán), 2 camera trước/sau ghép đúng 1 lượt xe (không tự đoán khi mơ hồ), lưu trữ có kiểm soát dung lượng (kể cả ghi hình liên tục), backup an toàn cho SQLite đang chạy, tất cả **tái dùng tối đa code/pattern đã có**, không thêm dependency khi stdlib/code sẵn có đủ dùng, và triển khai từng lát mỏng — mỗi bước tự chạy test + commit + cập nhật `docs/handover/DEVELOPMENT_HANDOVER.md` trước khi sang bước kế.
 
 Nguyên tắc xuyên suốt: **reuse > extend > refactor > build new**. Phần liên quan tới mất dữ liệu, ghép sai xe (correlation), và backup ưu tiên đúng-đắn hơn số dòng code ngắn gọn — chấp nhận thêm 1 chút code nếu đó là cách an toàn hơn.
 
@@ -228,7 +228,7 @@ def backup_database(dest_path: str) -> None:
 
 **Acceptance criteria:** backup file mở được, dữ liệu đọc lại đúng; backup không làm pipeline camera bị đứng khung hình đáng kể (đo `last_frame_age_sec` trước/sau lúc backup chạy).
 
-**Rủi ro regression:** thấp — hàm mới, không đụng code cũ. Rủi ro thật nằm ở vận hành (quên bật `BACKUP_ENABLED` trên máy thật) — ghi rõ trong `DEVELOPMENT_HANDOVER.md` sau khi xong.
+**Rủi ro regression:** thấp — hàm mới, không đụng code cũ. Rủi ro thật nằm ở vận hành (quên bật `BACKUP_ENABLED` trên máy thật) — ghi rõ trong `docs/handover/DEVELOPMENT_HANDOVER.md` sau khi xong.
 
 ---
 
@@ -291,6 +291,6 @@ CONTINUOUS_RECORDING_RETENTION_DAYS = 7
 
 ## Trình tự thực thi & xác nhận sau mỗi bước
 
-Mỗi bước: code → `pytest app/tests/ -v` (phải pass hết, bao gồm test cũ) → verify tay qua browser nếu có phần UI → **commit riêng** (không gộp 2 bước vào 1 commit) → cập nhật `DEVELOPMENT_HANDOVER.md` (mục 5 Feature Status, mục 15 Completed Development thêm dòng, mục 24 Current Handover Summary) → mới sang bước kế tiếp.
+Mỗi bước: code → `pytest app/tests/ -v` (phải pass hết, bao gồm test cũ) → verify tay qua browser nếu có phần UI → **commit riêng** (không gộp 2 bước vào 1 commit) → cập nhật `docs/handover/DEVELOPMENT_HANDOVER.md` (mục 5 Feature Status, mục 15 Completed Development thêm dòng, mục 24 Current Handover Summary) → mới sang bước kế tiếp.
 
 Thứ tự: **Bước 1 → Bước 3 → Bước 4 → Bước 5 → Bước 6 → Bước 7**, đúng theo mức độ phụ thuộc (Bước 3 cần `gate_id`/`plate_confidence` từ Bước 1; Bước 4/5/6 độc lập nhau, làm trước Bước 7 vì Bước 7 sẽ tận dụng lại `MaintenanceWorker` của Bước 4 cho việc dọn recording cũ).

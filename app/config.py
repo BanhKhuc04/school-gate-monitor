@@ -182,7 +182,7 @@ BACKUP_MEDIA_ENABLED = os.environ.get("BACKUP_MEDIA_ENABLED", "0") == "1"
 # Đợt 2, Bước 7: ghi hình liên tục (continuous recording)
 # MẶC ĐỊNH TẮT — benchmark FPS/latency thật trước khi đề xuất bật cho máy thật
 # (xem bài học _clip_buffer: ghi MP4 qua cv2.VideoWriter chiếm CPU đáng kể, có thể
-# làm AI pipeline chậm). Xem docs/CURSOR_PLAN_DOT2_NANG_CAP.md mục "Bước 7".
+# làm AI pipeline chậm). Xem docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md mục "Bước 7".
 CONTINUOUS_RECORDING_ENABLED = os.environ.get("CONTINUOUS_RECORDING_ENABLED", "0") == "1"
 CONTINUOUS_RECORDING_SEGMENT_MINUTES = int(os.environ.get("CONTINUOUS_RECORDING_SEGMENT_MINUTES", "5"))
 CONTINUOUS_RECORDING_FPS = int(os.environ.get("CONTINUOUS_RECORDING_FPS", "10"))

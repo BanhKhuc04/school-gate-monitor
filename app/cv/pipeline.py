@@ -657,7 +657,7 @@ class VideoPipeline:
         0. Chặn theo loại phương tiện — không có xe hoặc đi xe đạp thì không bắt mũ/biển số
         1. OCR đọc biển số
         2. Tra whitelist trong DB
-        3. Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
+        3. Xác định violation_type theo thứ tự ưu tiên trong docs/plans/PLAN.md
         4. Kiểm tra cooldown ghi log
         5. Lưu snapshot + ghi log vào DB
         6. Đẩy cảnh báo WebSocket
@@ -717,7 +717,7 @@ class VideoPipeline:
         else:
             helmet_status = "unknown"
 
-        # Xác định violation_type theo thứ tự ưu tiên trong PLAN.md
+        # Xác định violation_type theo thứ tự ưu tiên trong docs/plans/PLAN.md
         violation_types = []
 
         # 1. Không có plate_det → xe không có biển số trong khung hình

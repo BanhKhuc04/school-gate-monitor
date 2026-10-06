@@ -5,7 +5,7 @@ Thread pattern giống VideoPipeline: threading.Thread(daemon=True) + cờ _runn
 join() khi stop() để graceful shutdown. Mỗi job chạy trong một try/except riêng
 (exception isolation) — lỗi 1 job KHÔNG được làm chết thread nền.
 
-Đợt 2, Bước 4 — xem docs/CURSOR_PLAN_DOT2_NANG_CAP.md.
+Đợt 2, Bước 4 — xem docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md.
 
 Bài học từ bug Bước 3 (fix trong commit 739f215): mọi job phải exercise đúng
 end-to-end qua _run_loop / _run_job_safely, không chỉ test helper riêng lẻ.

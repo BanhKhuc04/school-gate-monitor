@@ -1,6 +1,6 @@
 # Checklist: model biển số + đa camera + deploy VPS
 
-> Đọc [PLAN_NEXT_ROUND.md](PLAN_NEXT_ROUND.md) trước. Mỗi bước test độc lập được trước khi sang bước sau. Làm đến khi hết danh sách hoặc gặp mục [CẦN NGƯỜI KIỂM TRA] thì dừng lại chờ.
+> Đọc [docs/plans/PLAN_NEXT_ROUND.md](docs/plans/PLAN_NEXT_ROUND.md) trước. Mỗi bước test độc lập được trước khi sang bước sau. Làm đến khi hết danh sách hoặc gặp mục [CẦN NGƯỜI KIỂM TRA] thì dừng lại chờ.
 
 - [x] **1** — ~~Chờ candidate~~ ĐÃ XONG: nhận file `best.pt` (plate) + `best (1).pt` (helmet) từ Kaggle.
 - [x] **2** — ĐÃ XONG (làm trực tiếp thay vì script riêng): test cả 2 model cũ/mới trên toàn bộ 875 ảnh thật `data/snapshots/*.jpg` (đếm ảnh có ≥1 detection).

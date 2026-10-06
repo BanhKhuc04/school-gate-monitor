@@ -1,6 +1,6 @@
 # Checklist: React SPA + đăng nhập phân quyền
 
-> Đọc [PLAN_SPA_AUTH.md](PLAN_SPA_AUTH.md) trước. Giao từng bước 1 cho Cursor, test xong mới sang bước sau — đặc biệt bước 8-13 (frontend) vì mỗi trang phụ thuộc trang trước chạy đúng.
+> Đọc [docs/plans/PLAN_SPA_AUTH.md](docs/plans/PLAN_SPA_AUTH.md) trước. Giao từng bước 1 cho Cursor, test xong mới sang bước sau — đặc biệt bước 8-13 (frontend) vì mỗi trang phụ thuộc trang trước chạy đúng.
 
 - [ ] **1** — Bảng `users` + `app/auth.py` + `seed_user.py` + `POST /api/auth/login`
 - [ ] **2** — `require_role` + `GET /api/auth/me`

@@ -1,6 +1,6 @@
 """
 Database operations using sqlite3 thuần.
-Schema: registered_vehicles, violation_events (xem PLAN.md)
+Schema: registered_vehicles, violation_events (xem docs/plans/PLAN.md)
 """
 import sqlite3
 import threading

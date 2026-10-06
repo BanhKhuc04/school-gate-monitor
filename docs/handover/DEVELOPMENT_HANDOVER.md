@@ -308,7 +308,7 @@ Lịch sử theo commit thật (không theo khuôn Phase 0-6 vì project không 
 
 - Xây pipeline CV cơ bản (helmet/plate/OCR/gate helmet theo vehicle_type), face recognition (sau đó gỡ bỏ hoàn toàn), posture detection (riding/standing), multi-rider detection, fine-tune model biển số VN thật.
 - Restyle toàn bộ UI theo 1 design system ("School Gate Monitor"), thêm landing page, SPA auth.
-- **Session gần nhất (commit `4174e30` + `9d81244`)**: 11 tính năng theo kế hoạch `docs/CURSOR_PLAN_11_FEATURES.md` (NO_PLATE/PLATE_OBSCURED, lịch sử vi phạm học sinh + tái phạm, âm thanh ưu tiên, video clip, autocomplete, timeline, health mở rộng, cleanup preview, vai trò giáo viên, audit trail, CSV dry-run) + mở quyền Ban giám hiệu xem camera/vi phạm/xe. Đã fix 2 bug thật phát hiện qua verify tay: AdminHealthPage crash trắng trang, AdminVehiclesPage lộ nút admin cho giáo viên.
+- **Session gần nhất (commit `4174e30` + `9d81244`)**: 11 tính năng theo kế hoạch `docs/plans/CURSOR_PLAN_11_FEATURES.md` (NO_PLATE/PLATE_OBSCURED, lịch sử vi phạm học sinh + tái phạm, âm thanh ưu tiên, video clip, autocomplete, timeline, health mở rộng, cleanup preview, vai trò giáo viên, audit trail, CSV dry-run) + mở quyền Ban giám hiệu xem camera/vi phạm/xe. Đã fix 2 bug thật phát hiện qua verify tay: AdminHealthPage crash trắng trang, AdminVehiclesPage lộ nút admin cho giáo viên.
 
 Commit hiện tại: `9d81244`
 
@@ -486,7 +486,7 @@ Commit: (xem commit ngay sau entry này)
 
 ### SESSION LOG — 2026-09-29 (đợt 2, Bước 4)
 
-Goal: Triển khai Bước 4 — tự động cleanup snapshot/clip cũ theo lịch qua background thread, không thêm dependency ngoài. Xem `docs/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 4" để lấy thiết kế đầy đủ.
+Goal: Triển khai Bước 4 — tự động cleanup snapshot/clip cũ theo lịch qua background thread, không thêm dependency ngoài. Xem `docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 4" để lấy thiết kế đầy đủ.
 
 Completed:
 - **Module mới `app/background.py`** chứa `MaintenanceWorker` (thread nền pattern giống `VideoPipeline`): `start()`/`stop(timeout)` lifecycle, `_run_loop` ngủ `CLEANUP_INTERVAL_HOURS*3600` giây giữa các lần chạy, `_run_job_safely(job_fn)` bọc try/except + ghi audit row, `_job_lock` (threading.Lock, `acquire(blocking=False)`) chống chạy đè — không queue, không xếp hàng. `_sleep_interruptible()` ngủ theo lát 0.5s để `stop()` phản ứng nhanh thay vì đợi hết interval.
@@ -522,7 +522,7 @@ Commit: (xem commit ngay sau entry này)
 
 ### SESSION LOG — 2026-09-29 (đợt 2, Bước 5)
 
-Goal: Triển khai Bước 5 — hiện dung lượng đĩa thật (total/used/free) + breakdown storage theo extension, để admin biết được disk còn trống bao nhiêu và storage đang phân bổ thế nào. Xem `docs/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 5".
+Goal: Triển khai Bước 5 — hiện dung lượng đĩa thật (total/used/free) + breakdown storage theo extension, để admin biết được disk còn trống bao nhiêu và storage đang phân bổ thế nào. Xem `docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 5".
 
 Completed:
 - **`app/api/system.py`** thêm 2 helper stdlib:
@@ -533,7 +533,7 @@ Completed:
 - **Frontend `AdminHealthPage.jsx`** thêm section "Dung lượng đĩa" giữa "Lưu trữ" và "Dọn ảnh cũ" — 3 stat-cell (Tổng / Đã dùng / Còn trống) + list "Phân bổ theo loại file" (Ảnh snapshot / Clip vi phạm / Khác), dùng đúng pattern `bg-[#f4f6f9] rounded-xl` + `StatCell` đã có.
 
 Files changed:
-- Sửa: `app/api/system.py` (2 helper + 4 field Pydantic + return thêm), `app/tests/test_system.py` (3 test mới), `frontend/src/pages/AdminHealthPage.jsx` (1 section mới), `DEVELOPMENT_HANDOVER.md`
+- Sửa: `app/api/system.py` (2 helper + 4 field Pydantic + return thêm), `app/tests/test_system.py` (3 test mới), `frontend/src/pages/AdminHealthPage.jsx` (1 section mới), `docs/handover/DEVELOPMENT_HANDOVER.md`
 
 Tests: **130/130 pass** (127 cũ + 3 mới):
 - `test_health_has_disk_usage_fields`: 3 field disk đều có, type số, >=0.
@@ -550,7 +550,7 @@ Commit: (xem commit ngay sau entry này)
 
 ### SESSION LOG — 2026-09-29 (đợt 2, Bước 6)
 
-Goal: Triển khai Bước 6 — backup SQLite an toàn (không copy file thô khi DB đang được ghi). Xem `docs/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 6".
+Goal: Triển khai Bước 6 — backup SQLite an toàn (không copy file thô khi DB đang được ghi). Xem `docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md` mục "Bước 6".
 
 Completed:
 - **`app/db.py::backup_database(dest_path)`**: dùng `sqlite3.Connection.backup()` (stdlib API chính thức SQLite từ Python 3.7+). Chặn bởi `_write_lock` (an toàn kép — dù `.backup()` tự nó đã an toàn ở cấp SQLite). KHÔNG tự mkdir — caller quyết định policy. `list_backup_files(backup_dir)` glob `app_*.db`, trả `[{filename, path, size_mb, mtime_iso}]` sort DESC theo mtime.
@@ -560,7 +560,7 @@ Completed:
 - **API mới `POST /api/system/backup/run`** (admin): chạy backup NGAY (không chờ lịch) — dùng khi admin muốn snapshot trước migration. **`GET /api/system/backup/list`** (admin): liệt kê file backup, mới nhất trước.
 
 Files changed:
-- Sửa: `app/db.py` (`backup_database`, `list_backup_files`), `app/background.py` (import os + BACKUP_* + `_backup_job` + counter trong `_run_loop` + check BACKUP_ENABLED), `app/api/system.py` (2 endpoint + import datetime/timezone), `DEVELOPMENT_HANDOVER.md`
+- Sửa: `app/db.py` (`backup_database`, `list_backup_files`), `app/background.py` (import os + BACKUP_* + `_backup_job` + counter trong `_run_loop` + check BACKUP_ENABLED), `app/api/system.py` (2 endpoint + import datetime/timezone), `docs/handover/DEVELOPMENT_HANDOVER.md`
 - Mới: `app/tests/test_backup.py` (11 test)
 
 Tests: **141/141 pass** (130 cũ + 11 mới):
@@ -593,7 +593,7 @@ Completed:
 
 Files changed:
 - Mới: `app/cv/recorder.py`, `app/tests/test_recorder.py`, `scripts/benchmark_recording.py`
-- Sửa: `app/config.py` (7 constant), `app/cv/pipeline.py` (mount + import), `app/background.py` (cleanup recordings job + counter), `app/api/system.py` (recording field + helper), `app/tests/test_system.py` (assert recording field), `DEVELOPMENT_HANDOVER.md`
+- Sửa: `app/config.py` (7 constant), `app/cv/pipeline.py` (mount + import), `app/background.py` (cleanup recordings job + counter), `app/api/system.py` (recording field + helper), `app/tests/test_system.py` (assert recording field), `docs/handover/DEVELOPMENT_HANDOVER.md`
 
 Tests: **147/147 pass** (141 cũ + 6 mới):
 - `push_frame_does_not_block_when_queue_full`: push 100 frame, elapsed <0.5s + `frames_dropped > 0`.
@@ -636,7 +636,7 @@ Completed:
 - **`frontend/src/pages/AdminRoiPage.jsx`** (mới): canvas overlay lên `<img>` video feed MJPEG thật, click thêm điểm, "Hoàn tác điểm cuối"/"Xoá vùng"/"Lưu vùng". Route `/admin/roi` + menu sidebar "Vùng nhận diện".
 - **`.env.example`** (mới): liệt kê biến môi trường bật cổng camera thứ 2.
 
-Files changed: `app/cv/roi.py`, `app/api/roi.py`, `app/tests/test_roi.py` (mới); `app/db.py`, `app/cv/pipeline.py`, `app/main.py`, `app/tests/conftest.py`, `frontend/src/App.jsx`, `frontend/src/components/Sidebar.jsx`, `frontend/src/pages/AdminRoiPage.jsx` (mới), `.env.example` (mới), `DEVELOPMENT_HANDOVER.md`.
+Files changed: `app/cv/roi.py`, `app/api/roi.py`, `app/tests/test_roi.py` (mới); `app/db.py`, `app/cv/pipeline.py`, `app/main.py`, `app/tests/conftest.py`, `frontend/src/App.jsx`, `frontend/src/components/Sidebar.jsx`, `frontend/src/pages/AdminRoiPage.jsx` (mới), `.env.example` (mới), `docs/handover/DEVELOPMENT_HANDOVER.md`.
 
 Tests: **161/161 pass** (147 cũ + 14 mới trong `test_roi.py`: unit test thuần cho `roi.py` + API round-trip/403/400).
 

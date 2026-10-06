@@ -196,7 +196,7 @@
 │ Hash     │ Mô tả │
 │----------|--------|
 │ `e816df5` │ Add pytest API error tests (34 cases) + fix alert trigger auth in test suite │
-│ `2cb6d27` │ Update CURSOR_RUN_LOG.md: document 4 root-cause fixes + 41/41 test results │
+│ `2cb6d27` │ Update docs/handover/CURSOR_RUN_LOG.md: document 4 root-cause fixes + 41/41 test results │
 │ `6a0f021` │ Fix 4 test failures + add auth coverage for dev endpoint │
 │ `6e18f8d` │ Extras: secure dev endpoint, update README │
 │ `eb4b1a3` │ Build complete: React SPA + role-based auth (Bước 8-13) │
@@ -211,7 +211,7 @@
 
 ---
 
-## Round 2 — 24 Steps (TASKS_NEXT_ROUND.md)
+## Round 2 — 24 Steps (docs/plans/TASKS_NEXT_ROUND.md)
 
 ### Step 1 ✅ — Fix AdminViolationsPage error swallowing
 Already done in prev session: commit `32b1968`. Verified: `AdminViolationsPage.jsx` has explicit error state + red banner on API failure.

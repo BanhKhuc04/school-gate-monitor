@@ -1,9 +1,9 @@
 # Checklist thực thi MVP — giao từng bước cho Cursor
 
-> Đọc [PLAN.md](PLAN.md) trước (kiến trúc, cấu trúc thư mục, schema DB, requirements.txt) rồi mới bắt đầu. Làm **tuần tự từng bước**, không nhảy cóc — mỗi bước phải qua được "Tiêu chí kiểm tra" mới đánh dấu `[x]` và chuyển sang bước sau.
+> Đọc [docs/plans/PLAN.md](docs/plans/PLAN.md) trước (kiến trúc, cấu trúc thư mục, schema DB, requirements.txt) rồi mới bắt đầu. Làm **tuần tự từng bước**, không nhảy cóc — mỗi bước phải qua được "Tiêu chí kiểm tra" mới đánh dấu `[x]` và chuyển sang bước sau.
 
 - [ ] **Bước 0 — Chuẩn bị môi trường**
-  - Cài Python 3.10/3.11 (64-bit), tạo `venv`, `pip install -r requirements.txt` (tạo `requirements.txt` theo PLAN.md nếu chưa có).
+  - Cài Python 3.10/3.11 (64-bit), tạo `venv`, `pip install -r requirements.txt` (tạo `requirements.txt` theo docs/plans/PLAN.md nếu chưa có).
   - Tiêu chí: script OpenCV 5 dòng mở webcam, hiện `cv2.imshow` thành công.
 
 - [x] **Bước 1 — Mốc 1: cửa sổ phát hiện YOLOv8 thô (helmet)**
@@ -22,11 +22,11 @@
 
 - [x] **Bước 5 — SQLite + CRUD admin** — đã test trực tiếp add/get/delete_vehicle, chuẩn hóa biển số đúng, dữ liệu ghi/xóa đúng trong `data/app.db`.
 
-- [x] **Bước 6 — Đối chiếu đầy đủ + ghi log vi phạm** — code review phát hiện bug (ghi log vi phạm cả khi phòng trống không ai), đã fix (guard `helmet_dets` rỗng → bỏ qua). Logic OCR→whitelist→violation_type→cooldown→snapshot→DB→alert đã đúng theo PLAN.md.
+- [x] **Bước 6 — Đối chiếu đầy đủ + ghi log vi phạm** — code review phát hiện bug (ghi log vi phạm cả khi phòng trống không ai), đã fix (guard `helmet_dets` rỗng → bỏ qua). Logic OCR→whitelist→violation_type→cooldown→snapshot→DB→alert đã đúng theo docs/plans/PLAN.md.
 
 - [x] **Bước 7 — Hoàn thiện** — README.md, .gitignore, git init + commit đầu tiên đã xong. **MVP hoàn chỉnh.**
 
-## Lộ trình giai đoạn sau (chưa làm, chỉ để tham khảo — xem chi tiết trong PLAN.md)
+## Lộ trình giai đoạn sau (chưa làm, chỉ để tham khảo — xem chi tiết trong docs/plans/PLAN.md)
 
 - [ ] Fine-tune OCR / train model nhận diện ký tự
 - [ ] Module phân loại xe ≤50cc

@@ -65,3 +65,7 @@ tools/OmniRoute/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime data / ảnh mẫu cục bộ (không commit dữ liệu thật)
+data/
+.claude/scheduled_tasks.lock

@@ -1,7 +1,7 @@
 """
 pytest tests for /guard/ws alert delivery.
 
-Regression coverage for a bug tracked in HANDOFF_CURSOR.md / README.md
+Regression coverage for a bug tracked in docs/handover/HANDOFF_CURSOR.md / README.md
 ("WS alerts not delivering"): confirms a connected client actually receives
 alerts pushed via POST /api/dev/trigger-test-alert, including with multiple
 concurrent clients (the scenario the original investigation suspected).

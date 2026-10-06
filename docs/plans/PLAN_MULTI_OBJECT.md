@@ -2,7 +2,7 @@
 
 ## Context
 
-MVP hiện tại (xem [PLAN.md](PLAN.md)) hoạt động đúng với **1 người/1 xe trong khung hình** (test bằng webcam). Ở quy mô trường học thật, giờ cao điểm có nhiều xe xếp hàng cùng lúc qua cổng. `VideoPipeline._process_violations()` hiện dùng `any()` toàn cục (không phân biệt xe nào với xe nào) + chỉ lấy 1 biển số confidence cao nhất — sai hoàn toàn khi có ≥2 xe trong khung hình.
+MVP hiện tại (xem [docs/plans/PLAN.md](docs/plans/PLAN.md)) hoạt động đúng với **1 người/1 xe trong khung hình** (test bằng webcam). Ở quy mô trường học thật, giờ cao điểm có nhiều xe xếp hàng cùng lúc qua cổng. `VideoPipeline._process_violations()` hiện dùng `any()` toàn cục (không phân biệt xe nào với xe nào) + chỉ lấy 1 biển số confidence cao nhất — sai hoàn toàn khi có ≥2 xe trong khung hình.
 
 Đây là hạ tầng bắt buộc phải có **trước** khi mở rộng các tính năng khác (50cc, khuôn mặt, dắt xe) vì tất cả đều cần biết "phát hiện này thuộc về xe/người nào" ở cùng 1 khung hình.
 

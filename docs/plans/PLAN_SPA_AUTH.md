@@ -69,4 +69,4 @@ Production: `npm run build` → `frontend/dist/`, `main.py` mount static + route
 - `JWT_SECRET_KEY` cứng trong code — chuyển ra `.env` nếu repo public sau này.
 - Route catch-all SPA fallback sai thứ tự sẽ nuốt mất API.
 
-## Xem chi tiết 13 bước build → [TASKS_SPA_AUTH.md](TASKS_SPA_AUTH.md)
+## Xem chi tiết 13 bước build → [docs/plans/TASKS_SPA_AUTH.md](docs/plans/TASKS_SPA_AUTH.md)
