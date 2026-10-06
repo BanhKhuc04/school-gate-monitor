@@ -350,6 +350,23 @@ def init_db():
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gate_cameras_gate ON gate_cameras(gate_id)')
 
+        # Lượt vào/ra cổng theo người, CẢ 2 chiều (app/cv/gate_passage.py).
+        # Tách khỏi violation_events: lượt ra/lượt đi bộ hợp lệ không phải vi phạm.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gate_passages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                gate_id     TEXT NOT NULL,
+                camera_id   TEXT,
+                crossed_at  TEXT NOT NULL,
+                direction   TEXT NOT NULL CHECK (direction IN ('enter', 'exit')),
+                object_type TEXT NOT NULL CHECK (object_type IN ('pedestrian', 'vehicle')),
+                persons     INTEGER NOT NULL DEFAULT 1,
+                track_ref   TEXT,
+                status      TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'review'))
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_gate_passages_time ON gate_passages(gate_id, crossed_at)')
+
         # Compatibility with both recovered and deployed camera schemas.
         observation_columns = {r[1] for r in cursor.execute("PRAGMA table_info(encounter_observations)")}
         for name, definition in {
@@ -3605,3 +3622,43 @@ def record_review_feedback(
             }
         finally:
             conn.close()
+
+
+def add_gate_passage(gate_id: str, camera_id: str | None, crossed_at: str, direction: str,
+                     object_type: str, persons: int = 1, track_ref: str | None = None,
+                     status: str = 'ok') -> int:
+    """Ghi 1 lượt vào/ra cổng. crossed_at: ISO UTC."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                '''INSERT INTO gate_passages
+                       (gate_id, camera_id, crossed_at, direction, object_type, persons, track_ref, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (gate_id, camera_id, crossed_at, direction, object_type, persons, track_ref, status))
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+
+def get_gate_passage_summary(start_utc: str, end_utc: str, gate_id: str | None = None) -> dict:
+    """Tổng lượt vào/ra trong [start_utc, end_utc): theo chiều × loại, kèm số người."""
+    sql = '''SELECT direction, object_type, COUNT(*), COALESCE(SUM(persons), 0),
+                    SUM(status = 'review')
+             FROM gate_passages WHERE crossed_at >= ? AND crossed_at < ?'''
+    args: list = [start_utc, end_utc]
+    if gate_id:
+        sql += ' AND gate_id = ?'
+        args.append(gate_id)
+    sql += ' GROUP BY direction, object_type'
+    out = {d: {'pedestrian': 0, 'vehicle': 0, 'persons': 0, 'review': 0} for d in ('enter', 'exit')}
+    conn = get_connection()
+    try:
+        for direction, object_type, n, persons, review in conn.execute(sql, args):
+            out[direction][object_type] = n
+            out[direction]['persons'] += persons
+            out[direction]['review'] += review or 0
+    finally:
+        conn.close()
+    return out

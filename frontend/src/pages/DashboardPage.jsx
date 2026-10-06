@@ -15,12 +15,17 @@ function shortDate(isoDate) {
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [passages, setPassages] = useState(null);
 
   useEffect(() => {
     client.get('/api/stats/summary')
       .then(res => setStats(res.data))
       .catch(() => setStats(null))
       .finally(() => setLoading(false));
+    // Lượt vào/ra theo người (cả 2 chiều) — lỗi thì chỉ ẩn khối này.
+    client.get('/api/stats/passages')
+      .then(res => setPassages(res.data))
+      .catch(() => setPassages(null));
   }, []);
 
   if (loading) {
@@ -87,6 +92,24 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
+
+        {passages && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            {[['enter', 'Lượt vào hôm nay', 'text-primary'], ['exit', 'Lượt ra hôm nay', 'text-on-surface']].map(([dir, label, color]) => {
+              const p = passages[dir] || {};
+              return (
+                <div key={dir} className="bg-surface rounded-lg shadow-sm border border-outline-variant p-5">
+                  <p className="text-xs uppercase tracking-wide text-on-surface-variant mb-1 font-mono">{label}</p>
+                  <p className={`text-4xl font-bold ${color}`}>{p.persons ?? 0}</p>
+                  <p className="text-xs text-on-surface-variant mt-1">
+                    người · {p.vehicle ?? 0} xe · {p.pedestrian ?? 0} đi bộ
+                    {p.review ? ` · ${p.review} cần xem lại` : ''}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Trend line — 14 ngày gần nhất */}
         <div className="bg-surface rounded-lg shadow-sm border border-outline-variant p-6 mb-6">

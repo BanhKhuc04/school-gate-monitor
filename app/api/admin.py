@@ -541,6 +541,21 @@ def get_stats_summary(current_user: dict = Depends(require_role("management", "a
     return get_violation_stats()
 
 
+@stats_router.get("/passages")
+def get_passage_stats(date: str | None = None, gate_id: str | None = None,
+                      current_user: dict = Depends(require_role("management", "admin", "security"))):
+    """GET /api/stats/passages?date=YYYY-MM-DD&gate_id= — số lượt VÀO/RA theo
+    người trong 1 ngày (giờ VN, mặc định hôm nay), tách đi bộ / đi xe."""
+    from app.db import get_gate_passage_summary, vn_to_utc_range, vn_today_range
+    if date is not None:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=422, detail="date phải có dạng YYYY-MM-DD")
+    start, end = vn_to_utc_range(date) if date else vn_today_range()
+    return get_gate_passage_summary(start, end, gate_id)
+
+
 # ─── Feature 10: Violation status + audit log ───────────────────────────────────
 
 _VIOLATION_STATUSES = {"reviewed", "resolved", "reopened"}

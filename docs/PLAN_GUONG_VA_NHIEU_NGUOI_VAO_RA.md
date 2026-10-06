@@ -21,7 +21,7 @@ Vấn đề khi **1 người vào + 1 người ra cùng lúc** (đã đọc code
 
 | # | Vấn đề | Chỗ trong code | Hậu quả |
 |---|---|---|---|
-| 1 | Loa cảnh báo tức thì không kiểm tra chiều: chỉ cần đổi phía so với vạch là phát | `_check_instant_line_crossing` (`last_side != side`) | Người **đi ra** cũng bị loa nhắc như người đi vào |
+| 1 | ~~Loa cảnh báo tức thì không kiểm tra chiều~~ — **kiểm tra lại: hàm `_check_instant_gate_alert` không được vòng lặp chính gọi (code chết)**. Cảnh báo thật đi qua `_process_vehicle_crossings`, vốn đã lọc chiều qua `has_crossed` | `_check_instant_line_crossing` | Không ảnh hưởng thực tế — người đi ra **không** bị loa nhắc |
 | 2 | Chỉ ghi nhận 1 chiều: `crossing_motion()` mặc định `down` (camera trước) / `up` (camera sau) → `allowed_direction` loại bỏ chiều còn lại | `app/config.py` `crossing_motion`, `_make_crossing_detector` | Người đi ra **không được ghi lại**, không đếm được ra/vào |
 | 3 | Người đi bộ (không có xe) không bao giờ qua `CrossingDetector` | `_update_crossing`: `if vehicle is None: return False` | Không đếm được người đi bộ vào/ra |
 | 4 | `_pedestrian_count` / `_rider_count` cộng **mỗi frame** mỗi group | `pipeline.py` ~dòng 2489 | Số đếm là "số lần thấy", không phải "số người" |
@@ -69,12 +69,12 @@ c03_lot_qua.mp4,4.5,pedestrian,exit,1
 - Lùi xe: đã đi qua vạch (`enter`) rồi lùi ngược lại (`exit`) trong < N giây
   với cùng track → ghi là "quay đầu", huỷ lượt vào.
 
-### A2. Sửa loa cảnh báo tức thì (bug #1)
+### A2. Cảnh báo chỉ cho chiều VÀO (đã đúng sẵn)
 
-`_check_instant_line_crossing` chỉ trả `True` khi đổi phía **từ phía ngoài
-sang phía trong** (đúng chiều `enter` của camera). Thêm test:
-- Xe đi ra qua vạch → không có alert `gate_crossed`.
-- Xe vào và xe ra cùng frame → đúng 1 alert, gắn đúng track xe vào.
+Đọc lại code: cảnh báo/vi phạm chỉ seal khi `has_crossed`, mà `has_crossed`
+chỉ bật cho chiều `allowed_direction` (chiều vào). Hàm loa tức thì
+`_check_instant_gate_alert` là code chết. Đã thêm test khẳng định lượt RA
+không bao giờ bật `has_crossed`.
 
 ### A3. Người đi bộ cũng được tính qua vạch (bug #3)
 
@@ -230,3 +230,36 @@ auto-match (`GATE_MATCHER_ENABLED`) cho đến khi có cặp lượt kiểm ch�
 | 6 | B2: gán nhãn 300 ảnh + quay dữ liệu cổng | 2–4 ngày |
 | 7 | B3: train YOLO11n `mirror` + logic quyết định | 1–2 ngày |
 | 8 | B4: shadow → review-only → bật cảnh báo | 1–2 tuần theo dõi |
+
+---
+
+## Tiến độ (cập nhật 2026-10-06)
+
+**Phần A — đã làm:**
+- [x] A1: `CrossingDetector` ghi nhận CẢ 2 chiều vào `passages` (chiều ra
+      không tạo vi phạm) — `app/cv/crossing.py`.
+- [x] A2: xác nhận chiều ra không bao giờ cảnh báo (test).
+- [x] A3: người đi bộ qua vạch bằng điểm chân, key `('ped', id)` riêng.
+- [x] A4 (một phần): khôi phục lượt khi 2 người lướt qua nhau và tracker tráo
+      ID đúng tại vạch ("2 lượt bật lại ngược phía cùng lúc cùng chỗ" →
+      1 vào + 1 ra, status `review`). Cấu hình `CROSSING_BOUNCE_BAND`.
+- [x] Lượt chốt ở CẢ 2 chiều đều latch: track vừa đi RA rồi quay đầu (hoặc bị
+      tráo sang người đi vào) không còn sinh thêm lượt VÀO giả / vi phạm giả.
+- [x] Bug #6: key dự phòng theo người đổi thành `('rider', id)`, không còn đụng ID xe.
+- [x] A5: `PassageLedger` đếm theo người (người trên xe không bị đếm thêm
+      như người đi bộ), bảng `gate_passages`, API
+      `GET /api/stats/passages?date=YYYY-MM-DD&gate_id=`.
+- [ ] A0: quay clip tại cổng + đáp án → replay đo độ chính xác thật.
+- [ ] A4 phần còn lại (2 vạch, BoT-SORT): chỉ làm nếu A0 cho thấy còn sai.
+- [ ] Hiển thị số vào/ra trên Dashboard.
+
+**Phần B — đã làm:**
+- [x] `app/cv/mirror.py`: trái/phải theo người lái từ chiều đi; quyết định
+      theo K frame; `unknown` mặc định, không bao giờ cảnh báo từ `unknown`.
+- [x] `scripts/prepare_mirror_dataset.py`: tạo task CVAT từ bộ 300 ảnh (90 ảnh
+      xe < 60 px tự gắn `too_small`), chuyển nhãn CVAT → YOLO, chia train/val
+      theo ảnh gốc.
+- [x] `scripts/train_mirror.py`: YOLO11n 1 lớp `mirror`, imgsz 320.
+- [ ] Gán nhãn gương trong CVAT (cần người làm).
+- [ ] Quay dữ liệu tại cổng, train, đo precision.
+- [ ] Nối `MirrorVote` vào pipeline ở chế độ shadow (sau khi có `models/mirror_best.pt`).

@@ -30,7 +30,7 @@ from app.config import (
     PLATE_VOTE_WINDOW_SEC, PLATE_VOTE_MIN_AGREE, PLATE_MIN_CONFIDENCE_SINGLE,
     PLATE_CROP_PAD_X, PLATE_CROP_PAD_Y, PLATE_BEST_CROP_PAD, PLATE_MIN_BLUR_SCORE, DEBUG_PLATE_OCR,
     CROSSING_EDGE_MARGIN, CROSSING_MIN_FRAMES_PER_SIDE, CROSSING_REARM_DISTANCE,
-    CROSSING_COOLDOWN_SEC, CROSSING_ALLOWED_DIRECTION, DEBUG_CROSSING,
+    CROSSING_COOLDOWN_SEC, CROSSING_ALLOWED_DIRECTION, CROSSING_BOUNCE_BAND, DEBUG_CROSSING,
     CROSSING_MIN_FRAMES_EXIT_SIDE, CROSSING_MAX_TRANSITION_SEC,
     CORRELATION_TIME_WINDOW_SEC, CORRELATION_MIN_SIMILARITY,
     CONTINUOUS_RECORDING_ENABLED, CONTINUOUS_RECORDING_SEGMENT_MINUTES,
@@ -508,6 +508,9 @@ class VideoPipeline:
         # hành vi cũ). set_roi() cập nhật sống khi admin lưu vùng mới, không
         # cần restart pipeline.
         self._crossing_detector = self._make_crossing_detector(get_gate_line(gate_id), crossing_motion(gate_id))
+        # Đếm lượt vào/ra theo người, cả 2 chiều (xem _update_gate_passages).
+        from app.cv.gate_passage import PassageLedger
+        self._passage_ledger = PassageLedger()
         self._roi_points = get_gate_roi(gate_id)
         self._roi_polygon_px = to_pixel_polygon(self._roi_points, VIDEO_WIDTH, VIDEO_HEIGHT)
 
@@ -2041,6 +2044,9 @@ class VideoPipeline:
             "persist_pending": len(getattr(self, "_persist_pending", {})),
             "pedestrian_count": self._pedestrian_count,
             "rider_count": self._rider_count,
+            # Số lượt vào/ra thật (theo người, cả 2 chiều) kể từ khi pipeline chạy.
+            "passages": (self._passage_ledger.snapshot()
+                         if getattr(self, '_passage_ledger', None) is not None else None),
             # Phase 0 (Task 1): metrics chi tiết
             "metrics": metrics,
             # Phase 3 (Task 1): expose role/profile cho UI/system page biết
@@ -2544,6 +2550,7 @@ class VideoPipeline:
                     if DEBUG_CROSSING:
                         self._draw_crossing_debug(frame, group, frame_w, frame_h)
                 self._process_vehicle_crossings(source_frame, groups)
+                self._update_gate_passages(groups, frame_w, frame_h)
 
                 # Vẽ box helmet — chỉ những helmet đã khớp vùng đầu 1 person
                 # (matched_helmet_dets), không vẽ raw helmet_dets để tránh vẽ
@@ -2855,6 +2862,7 @@ class VideoPipeline:
             allowed_direction=direction_for_motion(line, motion) or CROSSING_ALLOWED_DIRECTION,
             min_frames_exit_side=CROSSING_MIN_FRAMES_EXIT_SIDE,
             max_transition_sec=CROSSING_MAX_TRANSITION_SEC,
+            bounce_band=CROSSING_BOUNCE_BAND,
         )
 
     def set_gate_line(self, line):
@@ -2872,7 +2880,11 @@ class VideoPipeline:
         # lịch sử crossing. detector.update() tự bỏ qua lần gọi thứ 2 trong
         # cùng frame_seq (xem CrossingDetector.update), nên gọi 2 lần/frame
         # cho cùng key vẫn an toàn, không cần cache riêng ở đây.
-        tid = group.get('vehicle_track_id') or group.get('track_id')
+        tid = group.get('vehicle_track_id')
+        if tid is None and group.get('track_id') is not None:
+            # Xe chưa có track ID: key theo người nhưng TÁCH không gian key —
+            # số ID người có thể trùng số ID một xe khác trong cùng bảng.
+            tid = ('rider', group.get('track_id'))
         if detector is None or tid is None or vehicle is None:
             return False
         ax, ay = vehicle_anchor(vehicle.bbox)
@@ -2882,6 +2894,66 @@ class VideoPipeline:
         hist = detector._tracks.get(tid)
         # Crossing stays valid for this encounter while the issue ledger confirms.
         return bool(hist and hist.has_crossed)
+
+    def _update_gate_passages(self, groups, frame_w, frame_h):
+        """Đếm lượt VÀO và RA (cả 2 chiều cùng lúc) theo người.
+
+        - Xe: lịch sử crossing đã được _update_crossing cập nhật (key = int
+          vehicle_track_id); ở đây chỉ gom người trên xe để đếm.
+        - Người đi bộ (không ghép được xe, không đang 'riding'): đưa chân
+          người (đáy giữa bbox) qua CHÍNH CrossingDetector đó với key
+          ('ped', person_track_id) — không đụng lịch sử của xe/biển số.
+        - Rút toàn bộ lượt đã chốt (kể cả chiều không tạo vi phạm, kể cả
+          lượt khôi phục từ tráo ID) → PassageLedger → DB (gate_passages).
+        Lượt chiều RA không bao giờ tạo vi phạm/cảnh báo: chỉ has_crossed
+        (lọc theo allowed_direction) mới seal sự kiện ở _process_vehicle_crossings.
+        """
+        from app.cv.crossing import vehicle_anchor
+        detector = getattr(self, '_crossing_detector', None)
+        ledger = getattr(self, '_passage_ledger', None)
+        if detector is None or ledger is None or not detector.is_configured:
+            return
+        riders: dict = {}
+        for g in groups:
+            vtid = g.get('vehicle_track_id')
+            ptid = g.get('track_id')
+            if g.get('_vehicle') is not None and vtid is not None:
+                riders.setdefault(vtid, set()).add(ptid)
+            elif (g.get('_vehicle') is None and ptid is not None and g.get('_person') is not None
+                    and g.get('posture_status') != 'riding'):
+                ax, ay = vehicle_anchor(g['_person'].bbox)
+                detector.update(('ped', ptid), ax / frame_w, ay / frame_h, time.monotonic(),
+                                frame_seq=getattr(self, '_frame_seq', None), frame_size=(frame_w, frame_h))
+        committed = []
+        for p in detector.drain_passages():
+            key = p['track_id']
+            if isinstance(key, tuple) and key[0] == 'ped':
+                ledger.record_pedestrian(key[1], p['direction'], p['timestamp'], p['swap_recovered'])
+            elif isinstance(key, tuple) and key[0] == 'rider':
+                event = ledger.record_vehicle(key, p['direction'], p['timestamp'], (key[1],), p['swap_recovered'])
+                if event:
+                    committed.append(event)
+            elif not isinstance(key, tuple):
+                event = ledger.record_vehicle(key, p['direction'], p['timestamp'],
+                                              riders.get(key, ()), p['swap_recovered'])
+                if event:
+                    committed.append(event)
+        committed += ledger.flush(time.monotonic())
+        pool = getattr(self, '_io_pool', None)
+        if not committed or pool is None:
+            return
+        from app.db import add_gate_passage
+        now_wall, now_mono = time.time(), time.monotonic()
+        for e in committed:
+            # Lượt đi bộ được chốt trễ hold_sec — ghi đúng lúc qua vạch.
+            crossed_at = datetime.datetime.fromtimestamp(now_wall - (now_mono - e['timestamp']),
+                                                         datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            try:
+                pool.submit(add_gate_passage, self.gate_id, getattr(self, 'camera_id', None), crossed_at,
+                            e['direction'], e['object_type'], e['persons'],
+                            f"{e['object_type']}:{e['track_id']}", e['status'])
+            except RuntimeError:  # pool đã shutdown khi pipeline dừng
+                return
 
     def _check_instant_gate_alert(self, group, frame_w, frame_h, crossed_gate):
         """Phát cảnh báo loa NGAY khi xe vừa chạm/cán qua vạch mốc (gate_line

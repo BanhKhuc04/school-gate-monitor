@@ -31,6 +31,7 @@ ROI và biên khung hình KHÔNG thuộc phạm vi module này — detector ch�
 anchor + đường cắt, không biết gì về ROI polygon hay mép ảnh (xem comment ở
 app/cv/pipeline.py _is_touching_frame_edge/_update_crossing).
 """
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -126,11 +127,18 @@ class _TrackState:
     crossed_direction: str = Direction.UNKNOWN.value
     crossing_latched: bool = False
     rearmed: bool = True           # True = sẵn sàng cho 1 lần crossing MỚI
+    latched_at: float | None = None  # lúc chốt lượt gần nhất (CẢ 2 chiều) — mốc cooldown
     max_dist_since_crossing: float = 0.0
     # Phase 4 (Task 1): timestamp lần đầu tiên anchor rời khỏi phía ổn định
     # — dùng để enforce `max_transition_sec`. Nếu streak phía đích chưa đủ
     # mẫu trong cửa sổ → reset, không chốt.
     transition_started_at: float | None = None
+    # Lượt "bật lại": anchor đã vào dải sát vạch rồi quay về đúng phía cũ. Hai
+    # lượt bật lại NGƯỢC phía, cùng lúc, cùng chỗ trên vạch = 2 người lướt
+    # qua nhau và tracker tráo ID ngay tại vạch (xem _record_bounce).
+    band_since: float | None = None
+    band_t: float | None = None
+    armed_far: bool = False        # đã ở xa vạch (ngoài band) kể từ lần đổi phía gần nhất
 
 
 class CrossingDetector:
@@ -154,6 +162,10 @@ class CrossingDetector:
         cooldown_sec: float = 2.0,
         allowed_direction: str | None = None,  # None = cả 2 chiều; 'enter'/'exit' = chỉ tính chiều đó
         segment_margin: float = 0.0,
+        # Bề rộng dải "tiến sát vạch" để nhận lượt bật lại (tỉ lệ đường chéo,
+        # cùng đơn vị edge_margin). Rộng hơn dead-zone vì tráo ID thường xảy
+        # ra khi 2 người còn cách vạch vài chục px chứ không đúng trên vạch.
+        bounce_band: float = 0.04,
         # Phase 4 (Task 1): chốt lượt đúng 3+3. Phía đích cũng cần
         # `min_frames_exit_side` mẫu ổn định (mặc định 3) — KHÔNG chốt
         # ngay frame đầu tiên ra khỏi dead-zone. Set =1 để legacy 3+1.
@@ -173,7 +185,13 @@ class CrossingDetector:
         self.cooldown_sec = cooldown_sec
         self.allowed_direction = allowed_direction
         self.segment_margin = segment_margin
+        self.bounce_band = max(bounce_band, edge_margin)
         self._tracks: dict[int, _TrackState] = {}
+        # Mọi lượt qua vạch đã chốt, CẢ 2 chiều (kể cả chiều không nằm trong
+        # allowed_direction — chiều đó không tạo vi phạm/cảnh báo nhưng vẫn
+        # phải được đếm ra/vào). Pipeline rút ra bằng drain_passages().
+        self.passages: deque = deque(maxlen=256)
+        self._bounces: deque = deque(maxlen=32)
 
     @property
     def is_configured(self) -> bool:
@@ -218,14 +236,17 @@ class CrossingDetector:
             side_point = (cx_normalized * w, cy_normalized * h)
             side_line = ((x1 * w, y1 * h), (x2 * w, y2 * h))
             deadzone = self.edge_margin * (w * w + h * h) ** 0.5
+            band = self.bounce_band * (w * w + h * h) ** 0.5
         else:
             side_point = (cx_normalized, cy_normalized)
             side_line = ((x1, y1), (x2, y2))
             deadzone = self.edge_margin
+            band = self.bounce_band
         raw = get_line_side(side_point, *side_line,
                             deadzone=deadzone, segment_margin=self.segment_margin)
 
         crossed = False
+        self._track_bounce(track_id, state, raw, side_point, side_line, band, timestamp)
         if raw != 0:
             if raw == state.streak_value:
                 state.streak_count += 1
@@ -261,18 +282,34 @@ class CrossingDetector:
                 elif state.streak_count >= self.min_frames_exit_side:
                     if not (state.crossing_latched and not state.rearmed):
                         direction = self._direction(state.stable_side, raw)
-                        if self.allowed_direction is None or direction == self.allowed_direction:
+                        allowed = self.allowed_direction is None or direction == self.allowed_direction
+                        self.passages.append({'track_id': track_id, 'direction': direction,
+                                              'timestamp': timestamp, 'allowed': allowed,
+                                              'swap_recovered': False})
+                        if allowed:
                             crossed = True
                             state.has_crossed = True
                             state.crossed_at = timestamp
                             state.crossed_direction = direction
-                            state.crossing_latched = True
-                            state.rearmed = False
-                            state.max_dist_since_crossing = 0.0
+                        # Latch CẢ 2 chiều: track vừa chốt lượt RA mà quay
+                        # đầu ngay (hoặc bị tráo ID sang người đi ngược
+                        # lại) không được bắn thêm 1 lượt VÀO giả.
+                        state.crossing_latched = True
+                        state.rearmed = False
+                        state.latched_at = timestamp
+                        state.max_dist_since_crossing = 0.0
                         state.stable_side = raw
                         state.streak_value = raw
                         state.streak_count = 1
                         state.transition_started_at = timestamp  # neo timer mới
+                    else:
+                        # Đang latch mà đã quay về phía kia: hấp thụ (đổi
+                        # phía nền, không bắn). Nếu không, lượt quay đầu sẽ
+                        # bị bắn trễ ngay khi rearm dù track không đi qua vạch lần nữa.
+                        state.stable_side = raw
+                        state.streak_value = raw
+                        state.streak_count = 1
+                        state.transition_started_at = timestamp
                 # else: chưa đủ mẫu phía đích → tiếp tục đếm, KHÔNG reset
                 # stable_side để chờ thêm frame cùng phía đích.
             else:
@@ -285,11 +322,67 @@ class CrossingDetector:
             dist, _, _ = _signed_side_and_projection(cx_normalized, cy_normalized, x1, y1, x2, y2)
             state.max_dist_since_crossing = max(state.max_dist_since_crossing, abs(dist))
             if (state.max_dist_since_crossing >= self.rearm_distance
-                    and timestamp - (state.crossed_at or timestamp) >= self.cooldown_sec):
+                    and timestamp - (state.latched_at or timestamp) >= self.cooldown_sec):
                 state.rearmed = True
                 state.crossing_latched = False
 
         return _SIDE_ENUM.get(raw if raw != 0 else state.stable_side, Side.ON), crossed
+
+    # Hai lượt bật lại được coi là 1 cặp tráo ID khi lệch nhau tối đa chừng
+    # này (giây) và chỗ chạm vạch cách nhau tối đa chừng này (tỉ lệ độ dài vạch).
+    BOUNCE_PAIR_SEC = 0.8
+    BOUNCE_PAIR_T = 0.25
+
+    def _track_bounce(self, track_id, state: _TrackState, raw: int,
+                      point, line, band: float, timestamp: float) -> None:
+        dist, _, t_proj = _signed_side_and_projection(*point, *line[0], *line[1])
+        if not 0.0 <= t_proj <= 1.0 or state.stable_side == 0:
+            return
+        near = abs(dist) <= band
+        if state.band_since is None:
+            if not near:
+                state.armed_far = raw == state.stable_side
+            elif state.armed_far:
+                state.band_since, state.band_t, state.armed_far = timestamp, t_proj, False
+            return
+        if raw == -state.stable_side:
+            # Sang hẳn phía bên kia = lượt qua vạch bình thường, không phải bật lại.
+            state.band_since = state.band_t = None
+        elif not near:
+            if raw == state.stable_side:
+                self._record_bounce(track_id, state, timestamp)
+                state.armed_far = True
+            state.band_since = state.band_t = None
+
+    def _record_bounce(self, track_id, state: _TrackState, timestamp: float) -> None:
+        """Anchor vào dải sát vạch rồi quay lại phía cũ. Một mình nó là người
+        đi tới vạch rồi quay lại (không tính). Nhưng nếu cùng lúc có 1 track
+        khác bật lại từ PHÍA ĐỐI DIỆN tại cùng chỗ trên vạch thì đây là 2
+        người đi ngược chiều lướt qua nhau đúng lúc tracker tráo ID: mỗi
+        track mang người kia quay về phía mình. Thực tế có 1 lượt vào + 1
+        lượt ra — ghi lại cả 2 (đánh dấu swap_recovered để còn xem lại)."""
+        bounce = (track_id, state.stable_side, state.band_since, timestamp, state.band_t)
+        for other in list(self._bounces):
+            o_tid, o_side, o_start, o_end, o_t = other
+            if (o_tid != track_id and o_side == -bounce[1]
+                    and abs(o_end - timestamp) <= self.BOUNCE_PAIR_SEC
+                    and o_t is not None and bounce[4] is not None
+                    and abs(o_t - bounce[4]) <= self.BOUNCE_PAIR_T):
+                self._bounces.remove(other)
+                for tid, side in ((o_tid, o_side), (track_id, bounce[1])):
+                    direction = self._direction(side, -side)
+                    self.passages.append({
+                        'track_id': tid, 'direction': direction, 'timestamp': timestamp,
+                        'allowed': self.allowed_direction is None or direction == self.allowed_direction,
+                        'swap_recovered': True})
+                return
+        self._bounces.append(bounce)
+
+    def drain_passages(self) -> list[dict]:
+        """Lấy (và xóa) các lượt qua vạch đã chốt kể từ lần gọi trước."""
+        out = list(self.passages)
+        self.passages.clear()
+        return out
 
     @staticmethod
     def _direction(from_side: int, to_side: int) -> str:
@@ -302,6 +395,8 @@ class CrossingDetector:
     def reset(self) -> None:
         """Xóa toàn bộ track history (dùng khi restart pipeline hoặc đổi gate_line)."""
         self._tracks.clear()
+        self.passages.clear()
+        self._bounces.clear()
 
     def get_crossing_count(self) -> int:
         """Số track đã crossing (cho debug/health)."""

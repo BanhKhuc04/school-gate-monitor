@@ -439,6 +439,9 @@ CROSSING_MIN_FRAMES_PER_SIDE = 3     # phía TRƯỚC vạch cần ổn định 
 CROSSING_REARM_DISTANCE = 0.05       # xe phải rời vạch xa hơn mức này mới tính crossing LẦN MỚI
 CROSSING_COOLDOWN_SEC = 2.0          # + đủ thời gian này mới rearm — chống anchor jitter tạo nhiều event
 CROSSING_ALLOWED_DIRECTION = None    # None = tính cả 2 chiều; 'enter' hoặc 'exit' = chỉ tính chiều đó
+# Dải "tiến sát vạch" (tỉ lệ đường chéo) để nhận 2 người đi ngược chiều lướt
+# qua nhau mà tracker tráo ID ngay tại vạch — vẫn đếm đủ 1 vào + 1 ra.
+CROSSING_BOUNCE_BAND = float(os.environ.get("CROSSING_BOUNCE_BAND", "0.04"))
 
 
 def crossing_motion(gate_id: str) -> str:
