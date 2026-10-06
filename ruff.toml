@@ -1,0 +1,66 @@
+# Backend lint configuration (D7.2)
+# Run: ruff check app/
+
+line-length = 88
+target-version = "py311"
+
+[lint]
+select = [
+  "E",     # pycodestyle errors
+  "F",     # Pyflakes (F821, F811 — must be clean)
+  "I",     # isort
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "C4",    # flake8-comprehensions
+  "SIM",   # flake8-simplify
+  "RUF",   # Ruff-specific rules
+]
+ignore = [
+  # Style only (fixable with --fix, not blocking CI)
+  "E501",   # line too long
+  "I001",   # unsorted-imports
+  "F401",   # unused-import (fixable)
+  "UP006",   # non-peg585-annotation
+  "UP017",   # datetime-timezone-utc
+  "UP035",   # deprecated-import
+  "UP037",   # quoted-annotation
+  "UP045",   # non-pep604-annotation-optional
+  "UP032",   # f-string
+  "B008",   # do not perform function calls in argument defaults
+  "SIM102", # collapsible if statements
+  "SIM105", # suppressible-exception
+  "SIM117", # multiple-with-statements
+  "SIM401", # if-else-block-instead-of-dict-get
+  "SIM108", # if-else-block-instead-of-if-exp
+  "C408",   # unnecessary-collection-call
+  "C416",   # unnecessary-comprehension
+  "RUF002", # ambiguous-unicode-character-docstring
+  "RUF003", # ambiguous-unicode-character-comment
+  "RUF005", # collection-literal-concatenation
+  "RUF012", # mutable-class-default
+  "RUF013", # implicit-optional
+  "RUF034", # useless-if-else
+  "RUF059", # unused-unpacked-variable
+  "W292",   # missing-newline-at-end-of-file
+  "W293",   # blank-line-with-whitespace
+  "W605",   # invalid-escape-sequence
+  "E401",   # multiple-imports-on-one-line
+  "E702",   # multiple-statements-on-one-line-semicolon
+  "F541",   # f-string-without-placeholders
+  # Must be manually reviewed (non-fixable or semantic)
+  "B904",   # raise-without-from-inside-except
+  "B017",   # assert-raises-exception
+  "B023",   # function-uses-loop-variable
+  "B905",   # zip-without-explicit-strict
+  "F841",   # unused-variable
+  "RUF013", # implicit-optional
+  "UP042",  # replace-str-enum
+  "E402",   # module-import-not-at-top-of-file (OK for test/conftest patterns)
+]
+
+[lint.isort]
+known-first-party = ["app"]
+
+[lint.per-file-ignores]
+"app/tests/*" = ["S101", "ANN", "F401", "B008"]  # assert OK; no type hints; unused imports from conftest
+"app/__init__.py" = ["F401"]     # re-exports are intentional

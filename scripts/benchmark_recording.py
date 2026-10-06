@@ -13,7 +13,7 @@ trong VideoPipeline chạy thật với video training.
   - File `benchmark_recording_result.json`: số liệu chi tiết (cho AI/dev review sau).
 
 Cách dùng:
-  1. Set CAMERA_SOURCE trỏ tới 1 file video (xem docs/handover/DEVELOPMENT_HANDOVER.md mục 5).
+  1. Set CAMERA_SOURCE trỏ tới 1 file video (xem DEVELOPMENT_HANDOVER.md mục 5).
   2. Set GATES theo `app/config.py::GATES` — script dùng gate 'main' mặc định.
   3. Chạy: `./venv/Scripts/python.exe scripts/benchmark_recording.py`
   4. Sau khi chạy xong, AI/dev sẽ review số liệu → quyết định có bật

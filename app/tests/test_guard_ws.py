@@ -1,15 +1,32 @@
 """
 pytest tests for /guard/ws alert delivery.
 
-Regression coverage for a bug tracked in docs/handover/HANDOFF_CURSOR.md / README.md
+Regression coverage for a bug tracked in HANDOFF_CURSOR.md / README.md
 ("WS alerts not delivering"): confirms a connected client actually receives
 alerts pushed via POST /api/dev/trigger-test-alert, including with multiple
 concurrent clients (the scenario the original investigation suspected).
 """
 import json
 import threading
+import pytest
 
 from app.tests.conftest import auth_headers
+
+
+@pytest.fixture(autouse=True)
+def enable_mocked_cv_endpoints(monkeypatch):
+    monkeypatch.setenv('CV_PIPELINES_ENABLED', '1')
+    import queue
+    from types import SimpleNamespace
+    import app.cv.pipeline as pipelines
+    alerts = queue.Queue()
+    def get_alert():
+        try:
+            return alerts.get_nowait()
+        except queue.Empty:
+            return None
+    fake = SimpleNamespace(_alert_queue=alerts, get_alert=get_alert)
+    monkeypatch.setattr(pipelines, 'get_pipeline', lambda gate_id='main': fake)
 
 
 def _recv_async(ws, out, key, n=1):

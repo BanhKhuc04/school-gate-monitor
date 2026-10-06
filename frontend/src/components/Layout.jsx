@@ -1,17 +1,20 @@
+import { Suspense } from 'react';
+import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopStatusBar from './TopStatusBar';
 
 /**
  * Wraps authenticated pages with the left Sidebar nav + top status bar
  * (command-center layout — see stitch_school_gate_monitor_landing_page mockups).
+ * Uses <Outlet /> so React Router v6 nested routes can render the matched child.
  */
-export default function Layout({ children }) {
+export default function Layout() {
   return (
     <div className="min-h-screen bg-surface-container-low">
       <Sidebar />
-      <div className="ml-64 flex flex-col min-h-screen">
+      <div className="md:ml-64 min-w-0 flex flex-col min-h-screen">
         <TopStatusBar />
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 min-w-0"><Suspense fallback={<p role="status" className="p-6 text-sm">Đang tải trang…</p>}><Outlet /></Suspense></main>
       </div>
     </div>
   );

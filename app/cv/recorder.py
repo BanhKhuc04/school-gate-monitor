@@ -1,7 +1,7 @@
 """
 ContinuousRecorder — ghi hình liên tục độc lập với luồng AI detect.
 
-Đợt 2, Bước 7 — xem docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md.
+Đợt 2, Bước 7 — xem docs/CURSOR_PLAN_DOT2_NANG_CAP.md.
 
 Nguyên tắc:
 - Nhận MỌI frame đọc từ camera (kể cả frame bị FRAME_SKIP bỏ qua hay không có person).

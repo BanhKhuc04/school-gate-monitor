@@ -10,6 +10,8 @@ const ICONS = {
   users: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 2.7-5 6-5s6 2 6 5m2 0c0-2.5 2-4.5 6-4.5s6 2 6 4.5',
   zone: 'M4 6h16v12H4V6Zm3 3 4 4 3-3 3 5',
   logout: 'M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3m5-4 4-4-4-4m4 4H9',
+  // Task 3 — database icon (collection/folder for training data)
+  database: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 6c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0 1.7-3.6 3-8 3s-8-1.3-8-3v6zm0 6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6c0 1.7-3.6 3-8 3s-8-1.3-8-3v6z',
 };
 
 function Icon({ path, className }) {
@@ -28,26 +30,18 @@ export default function Sidebar() {
 
   const links = [];
   if (user.role === 'security' || user.role === 'admin' || user.role === 'management') {
-    links.push({ to: '/guard', label: 'Giám sát trực tiếp', icon: 'camera' });
+    links.push({ to: '/guard', label: 'Giám sát', icon: 'camera' });
   }
   if (user.role === 'admin' || user.role === 'management') {
-    links.push({ to: '/admin/violations', label: 'Nhật ký vi phạm', icon: 'alert' });
-    links.push({ to: '/admin/vehicles', label: 'Phương tiện đăng ký', icon: 'truck' });
-  }
-  if (user.role === 'management' || user.role === 'admin') {
-    links.push({ to: '/dashboard', label: 'Báo cáo & Thống kê', icon: 'chart' });
-  }
-  if (user.role === 'admin') {
-    links.push({ to: '/admin/health', label: 'Sức khỏe & Lưu trữ', icon: 'shield' });
-    links.push({ to: '/admin/roi', label: 'Vùng nhận diện', icon: 'zone' });
-    links.push({ to: '/admin/camera', label: 'Cấu hình Camera', icon: 'camera' });
-    links.push({ to: '/admin/users', label: 'Quản lý tài khoản', icon: 'users' });
+    links.push({ to: '/admin/violations', label: 'Vi phạm', icon: 'alert' });
+    links.push({ to: '/admin/vehicles', label: 'Xe đăng ký', icon: 'truck' });
   }
   // Feature 9: teacher — scoped views for homeroom class
   if (user.role === 'teacher') {
     links.push({ to: '/teacher/violations', label: 'Vi phạm lớp tôi', icon: 'alert' });
     links.push({ to: '/teacher/vehicles', label: 'Danh sách xe lớp tôi', icon: 'truck' });
   }
+  links.push({ to: '/settings', label: 'Cài đặt', icon: 'shield' });
 
   const roleLabel = {
     admin: 'Quản trị viên',
@@ -57,19 +51,19 @@ export default function Sidebar() {
   }[user.role] || user.role;
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-primary text-inverse-on-surface flex flex-col shrink-0">
+    <aside className="md:fixed left-0 top-0 md:h-screen w-full md:w-64 bg-primary text-inverse-on-surface flex flex-col shrink-0">
       <div className="flex items-center gap-3 px-5 h-16 border-b border-white/10">
         <img src="/favicon.svg" alt="" className="w-8 h-8 rounded bg-surface" />
         <div className="leading-tight">
           <div className="font-bold text-sm">School Gate Monitor</div>
-          <div className="text-[10px] uppercase tracking-wider text-on-primary-container font-mono">
+          <div className="text-[10px] uppercase tracking-wider text-inverse-on-surface/70 font-mono">
             Điều hành cổng trường AI
           </div>
         </div>
       </div>
 
       <div className="px-5 py-4 border-b border-white/10">
-        <div className="text-[10px] uppercase tracking-wider text-on-primary-container font-mono mb-1">
+        <div className="text-[10px] uppercase tracking-wider text-inverse-on-surface/70 font-mono mb-1">
           Vai trò hiện tại
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -78,13 +72,14 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+      <nav aria-label="Menu chính" className="flex flex-wrap md:block flex-1 px-3 py-3 md:space-y-1 overflow-y-auto">
         {links.map(({ to, label, icon }) => {
-          const active = location.pathname === to;
+          const active = location.pathname === to || location.pathname.startsWith(`${to}/`);
           return (
             <Link
               key={to}
               to={to}
+              aria-current={active ? 'page' : undefined}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                 active ? 'bg-secondary text-on-secondary' : 'text-inverse-on-surface/80 hover:bg-white/10 hover:text-inverse-on-surface'
               }`}

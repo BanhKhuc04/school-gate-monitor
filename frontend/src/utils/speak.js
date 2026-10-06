@@ -1,36 +1,63 @@
-// Đọc to tiếng Việt (Web Speech API), tự tìm giọng nữ nếu máy có — dùng chung
-// cho AlertBanner (cảnh báo tự động) và các nơi khác cần đọc to (chi tiết vi phạm).
+// Đọc to tiếng Việt (Web Speech API), ưu tiên giọng LOCAL đã cài sẵn trên
+// máy để chạy được khi WAN/Internet bị ngắt. Nếu không có, fallback các
+// giọng vi-VN remote (có thể fail khi offline); cuối cùng vẫn trả về text
+// để UI tự hiển thị + fallback sang clip audio local.
+//
+// Lưu ý: `localService` là tín hiệu cấu hình — không thay thế việc nghe
+// thử khi WAN tắt. Khi build nghiệm thu cần cold-start trình duyệt rồi bật
+// loa thật để xác nhận.
 
-// Tên giọng nữ tiếng Việt phổ biện theo hệ điều hành/trình duyệt (Windows,
-// Google, Edge). Không có tên khớp nào → rơi về giọng vi-VN đầu tiên trình
-// duyệt có (không phải giọng nào cũng khai giới tính trong tên).
 const FEMALE_VOICE_HINTS = ['hoaimy', 'nữ', 'female', 'linh', 'mai', 'huyền'];
-
-// Máy thường có NHIỀU giọng vi-VN cài sẵn (Windows + Edge/Chrome mỗi cái 1
-// giọng riêng) — nếu chọn lại giọng ở MỖI lần đọc, có lúc getVoices() trả về
-// thứ tự khác nhau (danh sách nạp bất đồng bộ) → 2 lần cảnh báo liên tiếp có
-// thể đọc bằng 2 giọng khác nhau, nghe như 2 người. Chốt 1 giọng ngay khi có
-// đủ danh sách rồi DÙNG LẠI mãi cho tới khi tải lại trang.
 let cachedVoice = null;
+let lastFallbackClip = null;  // URL clip local lần phát gần nhất (tránh cùng clip stale)
 
 function pickVietnameseFemaleVoice() {
+  if (!('speechSynthesis' in window)) return null;
   const voices = window.speechSynthesis.getVoices();
   const viVoices = voices.filter((v) => v.lang?.toLowerCase().startsWith('vi'));
-  const female = viVoices.find((v) =>
+  if (!viVoices.length) return null;
+
+  // 1) Ưu tiên LOCAL + female (chạy offline)
+  const localFemale = viVoices.find((v) =>
+    v.localService === true &&
     FEMALE_VOICE_HINTS.some((hint) => v.name.toLowerCase().includes(hint))
   );
-  return female || viVoices[0] || null;
+  if (localFemale) return localFemale;
+
+  // 2) Bất kỳ LOCAL vi-VN
+  const local = viVoices.find((v) => v.localService === true);
+  if (local) return local;
+
+  // 3) Female remote (có thể không ổn định khi WAN tắt)
+  const remoteFemale = viVoices.find((v) =>
+    FEMALE_VOICE_HINTS.some((hint) => v.name.toLowerCase().includes(hint))
+  );
+  if (remoteFemale) return remoteFemale;
+
+  // 4) Bất kỳ vi-VN
+  return viVoices[0] || null;
+}
+
+export function getVietnameseVoiceStatus() {
+  if (!('speechSynthesis' in window)) {
+    return { supported: false, local: false, voice: null };
+  }
+  const voice = cachedVoice || pickVietnameseFemaleVoice();
+  return {
+    supported: true,
+    local: !!(voice && voice.localService === true),
+    voice: voice ? voice.name : null,
+  };
 }
 
 export function speakVietnamese(text, options = {}) {
   try {
-    if (!window.speechSynthesis) return;
+    if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'vi-VN';
     if (!cachedVoice) cachedVoice = pickVietnameseFemaleVoice();
     if (cachedVoice) utterance.voice = cachedVoice;
-    // Feature 3: priority-based rate/pitch — high = faster/higher pitch
     if (options.rate != null) utterance.rate = options.rate;
     if (options.pitch != null) utterance.pitch = options.pitch;
     if (options.volume != null) utterance.volume = options.volume;
@@ -40,11 +67,41 @@ export function speakVietnamese(text, options = {}) {
   }
 }
 
-// Chrome nạp danh sách giọng đọc bất đồng bộ — gọi 1 lần sớm (ví dụ lúc app
-// khởi động) để chốt sẵn 1 giọng trước khi cần đọc, và lắng nghe
-// 'voiceschanged' cho trường hợp danh sách nạp xong sau đó.
+// Fallback phát file clip WAV/MP3 local (đường dẫn do caller truyền).
+// Dùng khi Web Speech không khả dụng (Edge không có voice vi-VN local, WAN
+// tắt không lấy được remote voice). Trả về Promise resolve khi audio bắt
+// đầu phát (hoặc reject nếu không có file).
+export async function speakFallbackClip(clipUrl, options = {}) {
+  return new Promise((resolve, reject) => {
+    if (!clipUrl) { reject(new Error('no_clip_url')); return; }
+    try {
+      const audio = new Audio(clipUrl);
+      lastFallbackClip = clipUrl;
+      audio.preload = 'auto';
+      audio.onstart = () => {
+        if (options.onstart) try { options.onstart(); } catch {}
+      };
+      audio.onend = () => {
+        if (options.onend) try { options.onend(); } catch {}
+        resolve({ played: true, source: 'clip' });
+      };
+      audio.onerror = (e) => {
+        if (options.onerror) try { options.onerror(e); } catch {}
+        reject(new Error(`clip_error: ${clipUrl}`));
+      };
+      audio.play().catch((e) => reject(e));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export function stopSpeech() {
+  try { window.speechSynthesis?.cancel(); } catch {}
+}
+
 export function warmUpVoices() {
-  if (!window.speechSynthesis) return;
+  if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.getVoices();
   if (!cachedVoice) cachedVoice = pickVietnameseFemaleVoice();
   window.speechSynthesis.onvoiceschanged = () => {

@@ -1,0 +1,94 @@
+# TASK 1 — Checklist thực thi
+
+Kế hoạch/prompt: `tasks/task-01/plan.md`. Ngày bàn giao: 02/10/2026.
+
+Trạng thái hiện tại: **Phase 0 + Phase 1 + Phase 2 đã hoàn thành, đang sang Phase 3**.
+
+- [x] Đăng ký ownership, kiểm tra các task đang sửa, ghi baseline và hợp đồng.
+- [x] **Phase 0**: metrics đúng, health chỉ đọc, baseline một/hai nguồn.
+  - [x] `_pipeline_status()` dùng `get_existing_pipeline()` (no model/camera load).
+  - [x] Storage cache TTL 60s + cross-path invalidation.
+  - [x] `pipeline_metrics.MetricsBuffer` (p50/p95), `ResourceSampler`, `PipelineMetrics`.
+  - [x] Capture/AI FPS tách biệt; JPEG new vs repeat; frames_dropped_{stale,encode}.
+  - [x] `get_status()` trả `metrics` (latency, queues, counters, rss/vram).
+  - [x] `test_task01_phase0_metrics.py` — 24/24 PASS.
+- [x] **Checkpoint 0**: 79/79 PASS cho Phase 0 + R + B2 + pipeline loop.
+- [x] **Phase 1**: latest-frame, hiển thị độc lập, bộ nhớ hữu hạn, stop/reconnect.
+  - [x] `_run_generation` counter — start()/stop() tăng để invalidate callback cũ.
+  - [x] `_persist_violation(run_generation=...)` short-circuit nếu stale.
+  - [x] `_finish_crossing_event` check `frozen['run_generation']`.
+  - [x] Exponential backoff cho reconnect: 2^n giây, cap 30s, reset khi read OK.
+  - [x] `_recognition_results` TTL 30s prune (chạy trong `_maybe_update_fps`).
+  - [x] `get_status()` expose `run_generation`, `reconnect_failures`.
+  - [x] `test_task01_phase1_latest_frame.py` — 20/20 PASS.
+  - [x] `_persist_violation` defensive getattr cho `_violations_skipped_total`, `_metrics_persistence`, `_metrics_dispatch`, `_violations_persisted_total` để tương thích test fixtures cũ build qua `__new__` (test_vehicle_gate, test_vehicle_crossing_aggregation).
+- [x] **Checkpoint 1**: 102/102 PASS cho Phase 0+1 + dot_R + B2 + loop + Phase 2.
+- [x] **Phase 2**: rear OCR độc lập người/vạch; nhiều crop/consensus; review thật.
+  - [x] `PlateConsensusStore` (app/cv/plate_consensus.py) — top 3–5 crop khác frame + diversity gap + TTL + max tracks cap + max crops cap + quality filter.
+  - [x] Wire `_consensus_ingest()` trong `_observe_best_plate` — BestPlateStore vẫn chạy song song.
+  - [x] Config: `PLATE_CONSENSUS_*` (env-driven, default on).
+  - [x] Source-change reset `_plate_consensus`.
+  - [x] `get_status()` expose `metrics.plate_consensus`.
+  - [x] PlateReviewPanel wired vào GuardPage (tab "Duyệt biển").
+  - [x] `test_task01_phase2_plate_consensus.py` — 23/23 PASS.
+- [x] **Checkpoint 2**: 149/149 PASS cho Phase 0+1+2 + R + B2 + loop + vehicle tests.
+- [x] **Phase 3**: runtime camera/role, mũ đúng model, temporal hành vi bốn trạng thái.
+  - [x] `get_gate_role()` / `get_gate_profile()` env-driven: GATE_{id}_ROLE / GATE_{id}_PROFILE.
+  - [x] Default: `gate_id="main"` → front + full; các gate khác → rear + ocr_only.
+  - [x] `_sha256_file(path)` — trả None nếu missing/empty; hex 64 ký tự nếu OK.
+  - [x] Helmet model integrity: `HELMET_MODEL_HASH_SHA256` + `HELMET_MODEL_MAPPING` ở config.
+  - [x] `parse_mapping()` + `validate_helmet_mapping(names, mapping_str)` trong `app/cv/helmet_contract.py` — phát hiện silent inversion "With Helmet"/"Without Helmet".
+  - [x] Pipeline profile-aware loading:
+    - `full`     → helmet + plate + person detector + 3-worker pool.
+    - `ocr_only` → plate only + 1-worker pool (rear camera).
+    - `minimal`  → không load plate / person (aux camera).
+  - [x] `get_status()` expose `role`, `profile`, `posture_state`, `posture_confidence`.
+  - [x] 4-state posture temporal ledger (`_posture_window`):
+    - Window 1.5s × 30fps maxlen; `POSTURE_TEMPORAL_MIN_SAMPLES=4`.
+    - Vote mode của non-UNKNOWN samples; UNKNOWN là "không có signal" → không phá ledger.
+    - Confirm state chỉ khi `count ≥ MIN_SAMPLES` (RIDING/PUSHING/WALKING/UNKNOWN).
+  - [x] `test_task01_phase3_posture.py` — 32/32 PASS (role/profile resolution, helmet mapping inversion, SHA256, posture ledger vote & prune, end-to-end).
+  - [x] Defensive `getattr` cho `role`/`profile`/`_posture_confirmed`/`_posture_confidence` để tương thích test fixtures cũ build qua `__new__`.
+- [x] **Checkpoint 3**: 247/247 PASS cho Phase 0+1+2+3 + best_plate + camera_mapping + crossing + gate_line + plate + correlator + event_manager + evidence.
+- [x] **Phase 4**: chốt lượt 3+3, finalization không mất lỗi, evidence trước loa, UI/âm thanh.
+  - [x] `CrossingDetector` hỗ trợ `min_frames_exit_side` (3+3 mặc định) + `max_transition_sec=5.0` chống bug "17 giây giãn cách vẫn nhận crossing".
+  - [x] Phase 4 chốt lượt đúng: cả phía đầu (≥3 frame) VÀ phía đích (≥3 frame, mặc định) mới xác nhận. Transition quá 5s → reset stable_side, KHÔNG chốt.
+  - [x] Config: `CROSSING_MIN_FRAMES_EXIT_SIDE=3`, `CROSSING_MAX_TRANSITION_SEC=5.0` (env-driven).
+  - [x] Late-issue merge: `pipeline.dispatch_late_issues(eid, issues)` UPDATE cùng DB row qua `app.db.update_violation_issues()` — mũ đủ mẫu đến 100ms sau crossing seal được merge vào event, KHÔNG tạo alert mới, KHÔNG tăng event version.
+  - [x] `_crossing_event_to_db_id` map bounded 2048 entries (LRU-style prune, đủ cho ca 12h).
+  - [x] Source change reset `_crossing_event_to_db_id` để map mới nguồn.
+  - [x] `test_task01_phase4_crossing_finalize.py` — 19/19 PASS (3+3 mode, 17s bug, max_transition reset, late-issue DB plumbing, eid bounded).
+  - [x] Defensive getattr cho legacy test fixtures.
+- [x] **Checkpoint 4**: 266/266 PASS cho Phase 0+1+2+3+4 + best_plate + camera_mapping + crossing + gate_line + plate + correlator + event_manager + evidence.
+- [x] **Phase 5**: phối hợp trước/sau và hoàn thiện màn giám sát.
+  - [x] `app/cv/gate_event_matcher.py` (mới) — `GateEventMatcher` class với multi-factor scoring (time + direction + lane + plate exact/fuzzy).
+  - [x] Auto-match MẶC ĐỊNH TẮT (`GATE_MATCHER_ENABLED=0` env) cho đến khi có calibration + cặp lượt có nhãn.
+  - [x] Direction guard: opposite direction KHÔNG match kể cả exact plate (xe ngược chiều = 2 xe khác).
+  - [x] Multi-candidate ambiguous: nếu ≥2 candidate đạt điểm trong `AMBIGUOUS_GAP=1.0` → 'ambiguous', không tự ghép.
+  - [x] Plate exact + same direction → MATCHED (short-circuit).
+  - [x] Plate fuzzy (ratio ≥ 0.9) + time + direction → NEEDS_REVIEW.
+  - [x] Single-factor (chỉ plate, chỉ time) → no match (an toàn).
+  - [x] needs_review status (Bước 1) blocks auto-match.
+  - [x] Wired vào `VideoPipeline.__init__` + exposed trong `get_status()['gate_matcher']`.
+  - [x] `test_task01_phase5_gate_matcher.py` — 21/21 PASS.
+- [x] **Checkpoint 5**: 202/202 PASS cho Phase 0+1+2+3+4+5 + crossing + event_correlator + event_manager.
+- [x] **Phase 6**: tối ưu có đối chứng và benchmark 30 phút cách ly.
+  - [x] `app/cv/gpu_profiler.py` (mới) — `get_runtime_config()`, `GpuMemoryProfiler`, `InferenceTimer`, `profile_inference()`.
+  - [x] Runtime config snapshot: device, fp16, cudnn_enabled/benchmark, torch version, GPU name, VRAM total.
+  - [x] GPU memory profiler: rolling 600 samples (10 phút), percentile p50/p95/peak.
+  - [x] InferenceTimer context manager: GPU sync để đo chính xác (không bị async ảo).
+  - [x] `profile_inference()`: warmup + N samples, trả median/p95/min/max.
+  - [x] Wired vào `VideoPipeline.__init__` + `_sample_gpu_runtime_snapshot()` (throttled 1Hz).
+  - [x] `get_status()` expose `gpu_runtime` (device/fp16/cudnn/vram stats).
+  - [x] `test_task01_phase6_gpu_profiler.py` — 20/20 PASS.
+- [x] **Checkpoint 6**: 222/222 PASS cho Phase 0+1+2+3+4+5+6 + crossing + event_correlator + event_manager.
+- [x] **Review-fix pass** (02/10/2026):
+  - [x] `pipeline._persist_violation`: defensive `getattr(self, '_crossing_event_to_db_id', {})` để tương thích test fixtures cũ build qua `__new__`. Sửa AttributeError cho `test_vehicle_gate` + `test_vehicle_crossing_aggregation`.
+  - [x] `pipeline.dispatch_late_issues`: defensive `getattr` cho `_crossing_event_to_db_id` (cùng lý do trên).
+  - [x] `test_recognition_log.py::test_wrong_helmet_model_disables_only_helmet`: chấp nhận cả `helmet_model_wrong_mapping` (Phase 3) lẫn `helmet_model_wrong_classes` để test PASS qua cả hai Phase 3 mapping check và classes check.
+  - [x] `test_pre_e3_regressions.py::test_crossing_fires_on_first_clear_sample_of_the_new_side`: thêm `min_frames_exit_side=1` explicit để verify legacy 3+1 mode vẫn khả dụng khi cần. Phase 4 default 3+3 đã được test qua `test_task01_phase4`.
+  - [x] Full backend suite: **873 passed, 1 pre-existing schema mismatch** (`test_system.py::test_cleanup_admin_ok` — Task 2 scope, documented as unrelated).
+- [ ] F01–F08 runtime fixes chưa chạy đủ video test, đo 30 phút, nghiệm thu hai camera và ghi nhận acceptance.
+- [ ] V0/V1/V2 video tests + 30-min two-source soak.
+- [ ] ACCEPTANCE_REPORT, VIDEO_TEST_REPORT, HANDOFF đã cập nhật.
+- [ ] Nghiệm thu Imou thật theo lịch và ca 12 giờ; ghi chưa đo nếu thiếu điều kiện.

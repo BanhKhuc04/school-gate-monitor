@@ -5,7 +5,7 @@ Thread pattern giống VideoPipeline: threading.Thread(daemon=True) + cờ _runn
 join() khi stop() để graceful shutdown. Mỗi job chạy trong một try/except riêng
 (exception isolation) — lỗi 1 job KHÔNG được làm chết thread nền.
 
-Đợt 2, Bước 4 — xem docs/plans/CURSOR_PLAN_DOT2_NANG_CAP.md.
+Đợt 2, Bước 4 — xem docs/CURSOR_PLAN_DOT2_NANG_CAP.md.
 
 Bài học từ bug Bước 3 (fix trong commit 739f215): mọi job phải exercise đúng
 end-to-end qua _run_loop / _run_job_safely, không chỉ test helper riêng lẻ.
@@ -24,7 +24,7 @@ from app.config import (
 )
 from app.db import (
     clear_violation_snapshot_paths, log_maintenance_run,
-    backup_database, list_backup_files,
+    backup_database, list_backup_files, list_backup_sets,
 )
 
 
@@ -56,6 +56,8 @@ class MaintenanceWorker:
         # Job lock: blocking=False để khi lock bận thì lần wake-up sau skip,
         # không xếp hàng. Đây là CỐ TÝNH khác với hành vi queue mặc định của Lock.
         self._job_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._next_backup_at = 0.0
 
     # ─── Lifecycle (giống VideoPipeline.start/stop) ─────────────────────────────
 
@@ -64,6 +66,7 @@ class MaintenanceWorker:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run_loop, daemon=True, name="MaintenanceWorker",
         )
@@ -80,6 +83,7 @@ class MaintenanceWorker:
         if not self._running:
             return
         self._running = False
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=timeout)
         self._thread = None
@@ -102,7 +106,11 @@ class MaintenanceWorker:
           - Recording cleanup (Bước 7) chạy MỖI `recording_every_n_loops` lần lặp,
             tương tự backup (tách retention policy vì recording không có DB record).
         """
-        backup_every_n_loops = max(1, -(-BACKUP_INTERVAL_HOURS // max(CLEANUP_INTERVAL_HOURS, 1)))
+        # Complete markers persist the schedule across restart/reload.
+        sets = list_backup_sets(BACKUP_DIR)
+        latest = max((datetime.fromisoformat(s['mtime_iso']).timestamp()
+                      for s in sets if s.get('mtime_iso')), default=0)
+        self._next_backup_at = latest + BACKUP_INTERVAL_HOURS * 3600
         # Recording cleanup interval mặc định 6h (4 lần/ngày) — không cần thường
         # vì recording chỉ xóa file cũ hơn retention_days (mặc định 7 ngày).
         _RECORDING_CLEANUP_INTERVAL_HOURS = 6
@@ -110,11 +118,13 @@ class MaintenanceWorker:
         loop_count = 0
         recording_loop_count = 0
         while self._running:
-            self._run_job_safely(self._cleanup_job)
+            if CLEANUP_ENABLED:
+                self._run_job_safely(self._cleanup_job)
             loop_count += 1
-            if loop_count >= backup_every_n_loops:
+            if BACKUP_ENABLED and time.time() >= self._next_backup_at:
                 loop_count = 0
                 self._run_job_safely(self._backup_job)
+                self._next_backup_at = time.time() + max(60, BACKUP_INTERVAL_HOURS * 3600)
             recording_loop_count += 1
             if recording_loop_count >= recording_every_n_loops:
                 recording_loop_count = 0
@@ -122,7 +132,8 @@ class MaintenanceWorker:
                 # log rỗng khi chưa bật CONTINUOUS_RECORDING_ENABLED)
                 if CONTINUOUS_RECORDING_ENABLED:
                     self._run_job_safely(self._cleanup_recordings_job)
-            self._sleep_interruptible(CLEANUP_INTERVAL_HOURS * 3600)
+            self._sleep_interruptible(max(.05, min(CLEANUP_INTERVAL_HOURS,
+                                                  BACKUP_INTERVAL_HOURS) * 3600))
 
     def _sleep_interruptible(self, seconds: float) -> None:
         """
@@ -189,10 +200,15 @@ class MaintenanceWorker:
         """
         started_at = datetime.now(timezone.utc).isoformat()
         try:
-            updated = clear_violation_snapshot_paths(CLEANUP_RETENTION_DAYS)
+            result = clear_violation_snapshot_paths(CLEANUP_RETENTION_DAYS)
             detail = {
                 "retention_days": CLEANUP_RETENTION_DAYS,
-                "updated_records": updated,
+                "attempted": result.get("attempted", 0),
+                "deleted": result.get("deleted", 0),
+                "missing": result.get("missing", 0),
+                "failed": result.get("failed", 0),
+                "held": result.get("held", 0),
+                "paths_failed_count": len(result.get("paths_failed", [])),
             }
             log_maintenance_run(
                 job_name="_cleanup_job",
@@ -210,61 +226,91 @@ class MaintenanceWorker:
 
     def _backup_job(self) -> None:
         """
-        Backup SQLite online qua `sqlite3.Connection.backup()`.
+        R3 — Backup theo bộ DB + media + manifest + complete marker atomic.
 
-        Bước 6, đợt 2: chạy song song với cleanup, interval riêng (`BACKUP_INTERVAL_HOURS`).
+        Chạy song song với cleanup, interval riêng (`BACKUP_INTERVAL_HOURS`).
         Mỗi lần chạy:
-          1. Backup `app.db` → `data/backups/app_{timestamp}.db`.
-          2. Xóa các file backup cũ hơn N bản gần nhất (`BACKUP_KEEP_COUNT`).
+          1. Tạo bộ backup qua `create_backup_set()` (DB + media + photos +
+             manifest SHA256 + complete marker atomic).
+          2. Dọn các bộ backup cũ hơn `BACKUP_KEEP_COUNT` qua
+             `prune_backup_sets()` (xóa TOÀN BỘ subdir bộ).
           3. Ghi audit log với danh sách file backup còn lại.
 
-        KHÔNG backup media (`SNAPSHOTS_DIR`) theo mặc định — `BACKUP_MEDIA_ENABLED=False`
-        vì dung lượng lớn, không phải ai cũng cần. Bật qua env khi cần.
-
+        KHÔNG dùng `backup_database()` trực tiếp — flow này đã tích hợp
+        helper R3 mới. Helper sẽ raise nếu DB fail; nuốt OSError còn lại
+        và log incomplete.
         Raises re-raise để `_run_job_safely` ghi log success=False khi fail.
         """
-        from app.config import BACKUP_MEDIA_ENABLED, SNAPSHOTS_DIR, BASE_DIR
+        from app.config import SNAPSHOTS_DIR, BASE_DIR
+        import app.db as _db
 
         started_at = datetime.now(timezone.utc).isoformat()
         os.makedirs(BACKUP_DIR, exist_ok=True)
 
-        # 1. Backup DB
-        ts_filename = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        dest_db = os.path.join(BACKUP_DIR, f"app_{ts_filename}.db")
-        backup_database(dest_db)
-        db_size_mb = round(os.path.getsize(dest_db) / (1024 * 1024), 2)
+        # Thư mục ảnh hồ sơ học sinh — sibling của snapshots, có thể không có
+        student_photos_dir = os.path.join(
+            os.path.dirname(SNAPSHOTS_DIR), "student_photos"
+        )
+        photos_arg = student_photos_dir if os.path.isdir(student_photos_dir) else None
 
-        # 2. (Optional) Backup media — tắt mặc định
-        media_backup_path = None
-        if BACKUP_MEDIA_ENABLED:
-            from shutil import copytree
-            media_dest = os.path.join(BACKUP_DIR, f"snapshots_{ts_filename}")
-            copytree(SNAPSHOTS_DIR, media_dest, dirs_exist_ok=True)
-            media_backup_path = media_dest
+        from app.storage_budget import require_space
+        expected = sum(os.path.getsize(os.path.join(root, name))
+                       for root in (SNAPSHOTS_DIR, student_photos_dir)
+                       if os.path.isdir(root) for name in os.listdir(root)
+                       if os.path.isfile(os.path.join(root, name)))
+        require_space(BACKUP_DIR, expected + 16 * 1024**2)
 
-        # 3. Dọn backup cũ — giữ BACKUP_KEEP_COUNT bản gần nhất (theo mtime)
-        existing = list_backup_files(BACKUP_DIR)
-        keep_files = existing[:BACKUP_KEEP_COUNT]
-        deleted = []
-        for old in existing[BACKUP_KEEP_COUNT:]:
-            try:
-                os.unlink(old["path"])
-                deleted.append(old["filename"])
-            except OSError:
-                pass
+        # 1. Tạo bộ backup (DB + media + manifest + complete marker)
+        try:
+            result = _db.create_backup_set(
+                backup_root=BACKUP_DIR,
+                snapshots_dir=SNAPSHOTS_DIR,
+                student_photos_dir=photos_arg,
+                include_media=True,  # R3: media là phần bắt buộc của bộ
+                label="hourly",
+                cancel_event=self._stop_event,
+            )
+            db_size_mb = round(
+                sum(f["size_bytes"] for f in result["files"]
+                    if f.get("role") == "db") / (1024 * 1024),
+                2,
+            )
+            media_count = sum(1 for f in result["files"]
+                              if f.get("role") in ("media", "photo"))
+        except Exception as e:
+            # Helper raise khi DB fail hoàn toàn
+            tb = traceback.format_exc()
+            print(f"[Maintenance] Backup set failed: {tb}")
+            log_maintenance_run(
+                job_name="_backup_job",
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                success=False,
+                detail={"error": str(e)},
+            )
+            raise
+
+        # 2. Dọn bộ backup cũ (giữ BACKUP_KEEP_COUNT bộ gần nhất)
+        deleted_sets = _db.prune_backup_sets(BACKUP_DIR, keep_count=max(2, BACKUP_KEEP_COUNT))
+        remaining = _db.list_backup_sets(BACKUP_DIR)
 
         detail = {
-            "backup_file": os.path.basename(dest_db),
+            "set_dir": os.path.basename(result["set_dir"]),
+            "complete": result["complete"],
             "db_size_mb": db_size_mb,
-            "media_backup": media_backup_path,
-            "kept_count": len(keep_files),
-            "deleted_old": deleted,
+            "media_count": media_count,
+            "files_total": len(result["files"]),
+            "paths_failed_count": len(result["paths_failed"]),
+            "deleted_sets": deleted_sets,
+            "remaining_sets": [s["set_dir"] for s in remaining],
         }
+        # Chỉ log success=True khi marker complete + không có path_fail
+        success_flag = bool(result["complete"]) and len(result["paths_failed"]) == 0
         log_maintenance_run(
             job_name="_backup_job",
             started_at=started_at,
             finished_at=datetime.now(timezone.utc).isoformat(),
-            success=True,
+            success=success_flag,
             detail=detail,
         )
 

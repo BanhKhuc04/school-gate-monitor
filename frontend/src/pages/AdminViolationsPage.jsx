@@ -374,6 +374,10 @@ export default function AdminViolationsPage() {
   const [selectedViolation, setSelectedViolation] = useState(null);
   const [linkedViolation, setLinkedViolation] = useState(null);
   const [filterVehicle, setFilterVehicle] = useState(null); // selected vehicle from autocomplete
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [clearing, setClearing] = useState(false);
+  const [notice, setNotice] = useState('');
 
   // Bước 3: mở modal violation theo id (khi click "Mở vi phạm #X" trong modal).
   // Thử tìm trong list hiện tại trước để khỏi gọi API thừa (list đã load qua
@@ -450,6 +454,27 @@ export default function AdminViolationsPage() {
     }
   }
 
+  // Xóa vi phạm: "test" = chỉ bản ghi sinh ra khi chạy video test (nhãn TEST);
+  // "all" = tất cả (backend sao lưu DB + dời ảnh/clip vào data/backups trước).
+  async function handleClear(scope) {
+    const question = scope === 'test'
+      ? 'Xóa tất cả vi phạm có nhãn TEST (sinh ra khi chạy video test)?'
+      : 'Xóa TOÀN BỘ vi phạm? Dữ liệu và ảnh/clip được sao lưu vào data/backups trước khi xóa.';
+    if (!window.confirm(question)) return;
+    setClearing(true);
+    setNotice('');
+    try {
+      const { data } = await client.post('/api/violations/clear', { scope });
+      setNotice(`Đã xóa ${data.deleted} vi phạm${data.backup ? ` (sao lưu: ${data.backup})` : ''}.`);
+      setOffset(0);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || 'Không xóa được vi phạm');
+    } finally {
+      setClearing(false);
+    }
+  }
+
   function clearFilters() {
     setFilterPlate('');
     setFilterType('');
@@ -471,6 +496,31 @@ export default function AdminViolationsPage() {
             <span className="w-2.5 h-2.5 rounded-full bg-[#c92035] animate-pulse" />
             <h1 className="text-xl font-bold text-[#374151]">Nhật ký Giám sát &amp; Vi phạm Cổng trường</h1>
           </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleClear('test')}
+                disabled={clearing}
+                data-testid="clear-test-violations"
+                className="bg-[#fef3c7] hover:bg-[#fde68a] disabled:opacity-50 text-[#92400e] border border-[#fcd34d] text-[12px] font-semibold py-2 px-3 rounded-lg transition-colors"
+                title="Xóa các vi phạm có nhãn TEST (từ video test)"
+              >
+                {clearing ? 'Đang xóa...' : 'Xóa vi phạm test'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleClear('all')}
+                disabled={clearing}
+                data-testid="clear-all-violations"
+                className="bg-white hover:bg-[#f8d7dc] disabled:opacity-50 text-[#c92035] border border-[#f0aab3] text-[12px] font-semibold py-2 px-3 rounded-lg transition-colors"
+                title="Xóa toàn bộ vi phạm (có sao lưu trước khi xóa)"
+              >
+                Xóa tất cả vi phạm
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={handleExport}
@@ -482,7 +532,14 @@ export default function AdminViolationsPage() {
             </svg>
             {exporting ? 'Đang xuất...' : 'Xuất Excel'}
           </button>
+          </div>
         </div>
+
+        {notice && (
+          <div className="mb-4 bg-[#e7f6ec] border border-[#a7dcb9] text-[#1e6b3a] px-4 py-2 rounded-xl text-[12px] font-semibold">
+            {notice}
+          </div>
+        )}
 
         {/* Stats row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -671,6 +728,10 @@ export default function AdminViolationsPage() {
                       </td>
                       <td className="py-3 px-2">
                         <ViolationBadge type={v.violation_type} />
+                        {v.is_test ? (
+                          <span className="ml-1 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#fde68a] text-[#92400e]"
+                            title="Ghi nhận khi chạy video test, không phải camera thật">TEST</span>
+                        ) : null}
                       </td>
                       <td className="py-3 px-2">
                         <StatusBadge status={v.status || 'pending'} />

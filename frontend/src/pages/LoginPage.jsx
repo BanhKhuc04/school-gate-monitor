@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import safetyBanner from '../assets/students-safety-banner.jpg';
+import schoolLogo from '../assets/school-gate-logo.jpg';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -40,67 +42,79 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex bg-surface font-sans">
-      {/* Left panel — branding + camera HUD illustration, hidden below lg */}
-      <div className="hidden lg:flex lg:w-[46%] xl:w-[42%] flex-col justify-between bg-primary text-inverse-on-surface p-10">
+      {/* Keep the banner in the build so its URL follows the deployed assets. */}
+      <aside className="hidden lg:flex lg:w-[45%] shrink-0 flex-col justify-between gap-8 border-r border-outline-variant bg-primary/5 p-8 xl:p-10">
         <div>
-          <div className="flex items-center gap-3 mb-10">
-            <img src="/favicon.svg" alt="" className="w-10 h-10 rounded-lg bg-surface shrink-0" />
-            <div className="flex flex-col leading-tight">
-              <span className="font-bold text-base">School Gate Monitor</span>
-              <span className="text-xs uppercase tracking-wider text-on-primary-container font-mono">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <img src={schoolLogo} alt="" width="48" height="48" className="w-12 h-12 rounded-2xl border border-outline-variant bg-surface p-1 shrink-0 shadow-sm" />
+              <div className="flex flex-col gap-1">
+                <span className="font-bold text-lg text-primary">School Gate Monitor</span>
+                <span className="text-xs uppercase tracking-wide text-on-surface-variant">
                 Hệ thống AI giám sát cổng trường
-              </span>
-            </div>
-          </div>
-
-          {/* Camera HUD mock */}
-          <div className="relative rounded-xl overflow-hidden bg-primary-container aspect-[4/3] mb-8">
-            <div className="absolute top-0 left-0 right-0 p-3 flex items-center justify-between font-mono text-[10px] text-on-primary-container">
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-error animate-pulse" />
-                CAM_01 · CỔNG CHÍNH
-              </span>
-              <span>AI_ON</span>
-            </div>
-            <div className="absolute bottom-3 left-3 right-3 bg-primary/85 backdrop-blur-sm rounded-lg p-3">
-              <div className="flex items-center gap-1.5 text-tertiary-fixed font-mono text-[11px] font-bold mb-1">
-                <svg viewBox="0 0 24 24" fill="none" className="w-3.5 h-3.5">
-                  <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                CỔNG TRƯỜNG AN TOÀN
+                </span>
               </div>
-              <p className="text-xs text-on-primary-container">
-                Nhận diện mũ bảo hiểm, biển số &amp; tư thế lên xe theo thời gian thực.
-              </p>
             </div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-error-container px-3 py-1.5 text-[11px] font-bold uppercase text-on-error-container">
+              <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
+              Cổng trường an toàn
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg bg-primary-container p-3">
-              <span className="block text-[10px] uppercase tracking-wider text-on-primary-container font-mono mb-1">
-                Loại vi phạm phân biệt
-              </span>
-              <span className="text-xl font-bold font-mono">3</span>
+          <figure className="overflow-hidden rounded-3xl border border-outline-variant bg-surface p-3 shadow-sm mb-6">
+            <img
+              src={safetyBanner}
+              alt="Học sinh đội mũ bảo hiểm trước cổng Trung tâm GDNN-GDTX Mỹ Hào. Cổng trường an toàn — Vững bước tương lai."
+              width="1024"
+              height="576"
+              fetchPriority="high"
+              className="block w-full aspect-video rounded-2xl object-contain"
+            />
+          </figure>
+
+          <section aria-label="Giải pháp giám sát cổng trường" className="rounded-3xl border border-outline-variant bg-surface p-6 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-primary">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-secondary" />
+                Giải pháp giám sát &amp; nhận diện thông minh
+              </h2>
+              <span className="rounded-full bg-primary-container px-2.5 py-1 text-[11px] font-medium text-on-primary-container">AI tại cổng trường</span>
             </div>
-            <div className="rounded-lg bg-primary-container p-3">
-              <span className="block text-[10px] uppercase tracking-wider text-on-primary-container font-mono mb-1">
-                Xử lý tại chỗ
-              </span>
-              <span className="text-xl font-bold font-mono">Không cần internet</span>
+            <p className="text-sm leading-relaxed text-on-surface mb-5">
+              Hệ thống tự động nhận diện mũ bảo hiểm, biển số và phương tiện vào cổng,
+              góp phần xây dựng văn hóa giao thông học đường văn minh.
+            </p>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-2xl border border-outline-variant bg-primary-container px-2 py-4 text-primary">
+                <p className="text-base xl:text-lg font-bold mb-1">Tức thời</p>
+                <p className="text-xs">Nhận diện trực tiếp</p>
+              </div>
+              <div className="rounded-2xl bg-secondary px-2 py-4 text-on-secondary">
+                <p className="text-base xl:text-lg font-bold mb-1">Tại chỗ</p>
+                <p className="text-xs">Xử lý trên máy</p>
+              </div>
+              <div className="rounded-2xl border border-outline-variant bg-surface-container-low px-2 py-4 text-on-surface">
+                <p className="text-base xl:text-lg font-bold mb-1">An toàn</p>
+                <p className="text-xs">Bảo vệ học sinh</p>
+              </div>
             </div>
-          </div>
+          </section>
         </div>
 
-        <p className="text-xs text-on-primary-container">
+        <p className="border-t border-outline-variant pt-5 text-xs leading-relaxed text-on-surface-variant">
           Dữ liệu giám sát vận hành theo{' '}
-          <span className="text-inverse-on-surface font-semibold">Nghị định 13/2023/NĐ-CP</span>{' '}
+          <span className="text-primary font-semibold">Nghị định 13/2023/NĐ-CP</span>{' '}
           về bảo vệ dữ liệu cá nhân.
         </p>
-      </div>
+      </aside>
 
       {/* Right panel — real login form */}
-      <div className="flex-1 flex items-center justify-center p-6">
+      <main className="min-w-0 flex-1 flex items-center justify-center p-6 lg:p-10">
         <div className="w-full max-w-sm">
+          <div className="flex items-center gap-3 mb-8 lg:hidden">
+            <img src={schoolLogo} alt="" width="40" height="40" className="w-10 h-10 rounded-xl border border-outline-variant p-1" />
+            <span className="font-bold text-primary">School Gate Monitor</span>
+          </div>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container text-secondary font-mono text-[11px] font-semibold uppercase tracking-wider mb-5">
             <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
             Cổng thông tin nội bộ
@@ -111,7 +125,7 @@ export default function LoginPage() {
           </p>
 
           {error && (
-            <div className="bg-error-container text-on-error-container px-4 py-3 rounded-lg mb-4 text-sm">
+            <div role="alert" className="bg-error-container text-on-error-container px-4 py-3 rounded-lg mb-4 text-sm">
               {error}
             </div>
           )}
@@ -168,7 +182,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              className="w-full bg-secondary hover:bg-secondary-container text-on-secondary font-semibold py-2.5 px-4 rounded-lg transition-colors disabled:opacity-50"
+              className="w-full bg-secondary hover:bg-secondary/90 text-on-secondary font-semibold py-2.5 px-4 rounded-lg transition-colors disabled:opacity-50"
               disabled={loading}
             >
               {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
@@ -198,11 +212,11 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <p className="text-xs text-outline mt-4 font-mono">
-            Phiên đăng nhập dùng JWT, tự hết hạn sau 12 giờ.
+          <p className="text-xs text-on-surface-variant mt-4">
+            Phiên đăng nhập tự hết hạn sau 12 giờ.
           </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
