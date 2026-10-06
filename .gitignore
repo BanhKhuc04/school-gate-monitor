@@ -69,3 +69,8 @@ Thumbs.db
 # Runtime data / ảnh mẫu cục bộ (không commit dữ liệu thật)
 data/
 .claude/scheduled_tasks.lock
+
+# Agent skills cài từ ngoài (npx skills add ...) — không phải code dự án
+.agents/
+.claude/skills/
+skills-lock.json
