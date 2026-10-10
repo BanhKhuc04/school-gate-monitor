@@ -1,4 +1,5 @@
 import { formatDate } from '../utils/format';
+import { useLang } from '../i18n/LanguageContext';
 
 /**
  * Feature 2+6: Vertical timeline component for violation audit log.
@@ -8,10 +9,11 @@ import { formatDate } from '../utils/format';
  *   compact: boolean — render a smaller version (for table rows)
  */
 export default function ViolationTimeline({ entries = [], compact = false }) {
+  const { lang, t } = useLang();
   if (!entries.length) {
     return (
       <p className="text-[11px] font-mono text-[#9ca3af] italic py-1">
-        Chưa có lịch sử xử lý
+        {t('Chưa có lịch sử xử lý', 'No handling history yet')}
       </p>
     );
   }
@@ -24,9 +26,9 @@ export default function ViolationTimeline({ entries = [], compact = false }) {
   };
 
   const ACTION_LABELS = {
-    reviewed: 'Đã xem',
-    resolved: 'Đã xử lý',
-    reopened: 'Mở lại',
+    reviewed: t('Đã xem', 'Reviewed'),
+    resolved: t('Đã xử lý', 'Resolved'),
+    reopened: t('Mở lại', 'Reopened'),
   };
 
   if (compact) {
@@ -39,7 +41,7 @@ export default function ViolationTimeline({ entries = [], compact = false }) {
             <span
               key={entry.id}
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${s.bg} ${s.text}`}
-              title={`${entry.actor_username} — ${formatDate(entry.created_at)}`}
+              title={`${entry.actor_username} — ${formatDate(entry.created_at, lang)}`}
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
               {ACTION_LABELS[entry.action] || entry.action}
@@ -69,7 +71,7 @@ export default function ViolationTimeline({ entries = [], compact = false }) {
                   <span className="text-[12px] font-semibold text-[#374151] font-mono">
                     {entry.actor_username}
                   </span>
-                  <span className="text-[12px] text-[#6b7280]">đã</span>
+                  <span className="text-[12px] text-[#6b7280]">{t('đã', 'marked')}</span>
                   <span className={`text-[12px] font-semibold font-mono ${s.text}`}>
                     {ACTION_LABELS[entry.action] || entry.action}
                   </span>
@@ -80,7 +82,7 @@ export default function ViolationTimeline({ entries = [], compact = false }) {
                   )}
                 </div>
                 <span className="text-[10px] font-mono text-[#9ca3af]">
-                  {formatDate(entry.created_at)}
+                  {formatDate(entry.created_at, lang)}
                 </span>
               </div>
             </div>

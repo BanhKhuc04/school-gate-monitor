@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {useLang} from '../../i18n/LanguageContext';
 
 /**
  * BBoxEditor — Training component (Slice A) cho phép chỉnh bbox chuẩn hoá
@@ -79,6 +80,7 @@ export default function BBoxEditor({
   busy = false,
   hints = null,
 }) {
+  const {t} = useLang();
   const containerRef = useRef(null);
   const imgRef = useRef(null);
   const [bbox, setBBox] = useState(() => normalizeBBox(initialBBox) || defaultBBox());
@@ -216,10 +218,10 @@ export default function BBoxEditor({
     <div className="rounded border border-slate-300 bg-white p-3">
       <div className="mb-2 flex items-center justify-between text-sm text-slate-700">
         <div>
-          <strong>Box chuẩn hoá</strong> ({imageKind}){' '}
+          <strong>{t('Box chuẩn hoá', 'Normalized box')}</strong> ({imageKind}){' '}
           {imageSize.w > 0 && (
             <span className="text-xs text-slate-500">
-              · ảnh gốc {imageSize.w}×{imageSize.h}px
+              · {t('ảnh gốc', 'original')} {imageSize.w}×{imageSize.h}px
             </span>
           )}
         </div>
@@ -246,7 +248,7 @@ export default function BBoxEditor({
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">
-            Chưa có ảnh
+            {t('Chưa có ảnh', 'No image yet')}
           </div>
         )}
         {imgReady && (
@@ -295,13 +297,13 @@ export default function BBoxEditor({
           </>
         )}
       </div>
-      {imageError && <p role="alert" className="mt-2 text-sm text-rose-700">Không tải được ảnh nguồn. Bổ sung ảnh trước khi sửa bbox.</p>}
+      {imageError && <p role="alert" className="mt-2 text-sm text-rose-700">{t('Không tải được ảnh nguồn. Bổ sung ảnh trước khi sửa bbox.', 'Could not load the source image. Add the image before editing the bbox.')}</p>}
       <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-600">
         <div>
           <span data-testid="bbox-coords">
             [{x1.toFixed(3)}, {y1.toFixed(3)}, {x2.toFixed(3)}, {y2.toFixed(3)}]
           </span>{' '}
-          {!valid && <span className="text-rose-600">· bbox không hợp lệ</span>}
+          {!valid && <span className="text-rose-600">· {t('bbox không hợp lệ', 'invalid bbox')}</span>}
         </div>
         {onSubmit && (
           <button
@@ -310,7 +312,7 @@ export default function BBoxEditor({
             onClick={handleSubmit}
             className="rounded bg-emerald-600 px-3 py-1 text-white shadow disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {busy ? 'Đang lưu…' : 'Lưu bbox'}
+            {busy ? t('Đang lưu…', 'Saving…') : t('Lưu bbox', 'Save bbox')}
           </button>
         )}
       </div>

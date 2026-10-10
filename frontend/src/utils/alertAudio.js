@@ -1,14 +1,16 @@
 import { speakableIssues } from './alertFilter.js';
 
-export function buildAlertMessage(data) {
+export function buildAlertMessage(data, lang = 'vi') {
+  const t=(vi,en)=>(lang==='en'?en:vi);
   const codes = new Set(speakableIssues(data));
   const helmet=codes.has('NO_HELMET'), riding=codes.has('RIDING_THROUGH_GATE');
   const parts=[];
-  if(helmet && riding) parts.push('Không đội mũ, vui lòng dắt xe.');
-  else if(helmet) parts.push('Vui lòng đội mũ.');
-  else if(riding) parts.push('Vui lòng dắt xe.');
-  for(const [code,text] of [['MISSING_MIRROR','Mời kiểm tra gương trái.'],
-    ['TOO_MANY_RIDERS','Mời kiểm tra số người trên xe.'],['PLATE_NOT_REGISTERED','Mời kiểm tra đăng ký xe.']]) {
+  if(helmet && riding) parts.push(t('Không đội mũ, vui lòng dắt xe.','No helmet, please walk your bike.'));
+  else if(helmet) parts.push(t('Vui lòng đội mũ.','Please wear a helmet.'));
+  else if(riding) parts.push(t('Vui lòng dắt xe.','Please walk your bike.'));
+  for(const [code,text] of [['MISSING_MIRROR',t('Mời kiểm tra gương trái.','Please check the left mirror.')],
+    ['TOO_MANY_RIDERS',t('Mời kiểm tra số người trên xe.','Please check the number of riders.')],
+    ['PLATE_NOT_REGISTERED',t('Mời kiểm tra đăng ký xe.','Please check the bike registration.')]]) {
     if(codes.has(code))parts.push(text);
   }
   // A gate pass (no violation) still announces its plate: one sentence per
@@ -18,11 +20,11 @@ export function buildAlertMessage(data) {
   const match=(data.plate_read || '').match(/^(\d{2})([A-Z]\d?|[A-Z]{2})(\d{4,5})$/);
   const plateValid=data.plate_status==='CONFIRMED' || (data.plate_status==null && data.plate_format_valid===true);
   if(match && plateValid)parts.unshift(`${match[1]} ${match[2]} ${match[3].slice(0,-2)} ${match[3].slice(-2)}.`);
-  else parts.unshift('Không đọc được biển số.');
+  else parts.unshift(t('Không đọc được biển số.','Plate unreadable.'));
   return parts.join(' ');
 }
 
-export function createAlertAudio({beep, speak, cancel, config={rate:1.30,volume:1}, dedupKeys=new Set(),
+export function createAlertAudio({beep, speak, cancel, config={rate:1.30,volume:1}, dedupKeys=new Set(), lang='vi',
   now=Date.now, setTimer=setTimeout, clearTimer=clearTimeout}) {
   const spoken=dedupKeys, batches=new Map(), timers=new Set();
   let disposed=false, settings=config;
@@ -58,7 +60,7 @@ export function createAlertAudio({beep, speak, cancel, config={rate:1.30,volume:
       const dispatch=()=>{
         batches.delete(key);
         if(now()-batch.received>5000 || spoken.has(key))return;
-        const text=buildAlertMessage(batch.data);
+        const text=buildAlertMessage(batch.data,lang);
         if(!text)return;
         spoken.add(key);
         while(spoken.size>4096)spoken.delete(spoken.values().next().value);

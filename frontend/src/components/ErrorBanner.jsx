@@ -1,6 +1,9 @@
 import React from 'react';
+import { useLang } from '../i18n/LanguageContext';
 
-export default function ErrorBanner({ message = "Đã xảy ra lỗi khi kết nối với máy chủ.", onRetry }) {
+export default function ErrorBanner({ message, onRetry }) {
+  const { t } = useLang();
+  message ??= t('Đã xảy ra lỗi khi kết nối với máy chủ.', 'Could not connect to the server.');
   return (
     <div className="bg-[#C92035]/10 border border-[#C92035]/20 rounded-xl p-4 my-4 flex items-center justify-between">
       <div className="flex items-center gap-3">
@@ -10,7 +13,7 @@ export default function ErrorBanner({ message = "Đã xảy ra lỗi khi kết n
           </svg>
         </div>
         <div>
-          <h4 className="text-[13px] font-bold text-[#C92035] uppercase tracking-wider">Lỗi hệ thống</h4>
+          <h4 className="text-[13px] font-bold text-[#C92035] uppercase tracking-wider">{t('Lỗi hệ thống', 'System error')}</h4>
           <p className="text-[12px] text-[#C92035] mt-1 font-mono">{message}</p>
         </div>
       </div>
@@ -19,7 +22,7 @@ export default function ErrorBanner({ message = "Đã xảy ra lỗi khi kết n
           onClick={onRetry}
           className="px-4 py-2 bg-[#C92035] text-white text-[12px] font-bold rounded-lg hover:bg-opacity-90 transition-colors"
         >
-          Thử lại
+          {t('Thử lại', 'Retry')}
         </button>
       )}
     </div>

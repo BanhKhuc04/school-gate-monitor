@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import client, { API_BASE_URL } from '../api/client';
+import { useLang } from '../i18n/LanguageContext';
 
 /**
  * Vẽ vùng nhận diện (ROI) đa giác trên khung hình camera — vật thể có tâm
@@ -10,6 +11,7 @@ import client, { API_BASE_URL } from '../api/client';
  */
 export default function AdminRoiPage() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [gates, setGates] = useState([]);
   const [activeGate, setActiveGate] = useState('main');
   const [mode, setMode] = useState('roi'); // 'roi' | 'line'
@@ -120,7 +122,7 @@ export default function AdminRoiPage() {
   async function handleSave() {
     if (mode === 'line') {
       if (linePoints.length !== 2) {
-        setMsg('Lỗi: cần đúng 2 điểm để tạo vạch mốc.');
+        setMsg(t('Lỗi: cần đúng 2 điểm để tạo vạch mốc.', 'Error: exactly 2 points are needed for the gate line.'));
         return;
       }
       setSaving(true);
@@ -128,16 +130,16 @@ export default function AdminRoiPage() {
       try {
         const line = [linePoints[0].x, linePoints[0].y, linePoints[1].x, linePoints[1].y];
         await client.post(`/api/roi/${activeGate}/line`, { line });
-        setMsg('Đã lưu vạch mốc.');
+        setMsg(t('Đã lưu vạch mốc.', 'Gate line saved.'));
       } catch (err) {
-        setMsg('Lỗi: ' + (err.response?.data?.detail || err.message));
+        setMsg(t('Lỗi: ', 'Error: ') + (err.response?.data?.detail || err.message));
       } finally {
         setSaving(false);
       }
       return;
     }
     if (points.length > 0 && points.length < 3) {
-      setMsg('Lỗi: cần ít nhất 3 điểm để tạo vùng.');
+      setMsg(t('Lỗi: cần ít nhất 3 điểm để tạo vùng.', 'Error: at least 3 points are needed for a zone.'));
       return;
     }
     setSaving(true);
@@ -145,9 +147,9 @@ export default function AdminRoiPage() {
     try {
       const body = { points: points.map(p => [p.x, p.y]) };
       await client.post(`/api/roi/${activeGate}`, body);
-      setMsg('Đã lưu vùng nhận diện.');
+      setMsg(t('Đã lưu vùng nhận diện.', 'Detection zone saved.'));
     } catch (err) {
-      setMsg('Lỗi: ' + (err.response?.data?.detail || err.message));
+      setMsg(t('Lỗi: ', 'Error: ') + (err.response?.data?.detail || err.message));
     } finally {
       setSaving(false);
     }
@@ -160,9 +162,9 @@ export default function AdminRoiPage() {
       try {
         await client.delete(`/api/roi/${activeGate}/line`);
         setLinePoints([]);
-        setMsg('Đã xoá vạch mốc.');
+        setMsg(t('Đã xoá vạch mốc.', 'Gate line cleared.'));
       } catch (err) {
-        setMsg('Lỗi: ' + (err.response?.data?.detail || err.message));
+        setMsg(t('Lỗi: ', 'Error: ') + (err.response?.data?.detail || err.message));
       } finally {
         setSaving(false);
       }
@@ -173,9 +175,9 @@ export default function AdminRoiPage() {
     try {
       await client.post(`/api/roi/${activeGate}`, { points: [] });
       setPoints([]);
-      setMsg('Đã xoá vùng — detect toàn khung hình.');
+      setMsg(t('Đã xoá vùng — detect toàn khung hình.', 'Zone cleared — detecting on the full frame.'));
     } catch (err) {
-      setMsg('Lỗi: ' + (err.response?.data?.detail || err.message));
+      setMsg(t('Lỗi: ', 'Error: ') + (err.response?.data?.detail || err.message));
     } finally {
       setSaving(false);
     }
@@ -184,12 +186,12 @@ export default function AdminRoiPage() {
   return (
     <div className="min-h-screen bg-[#ffffff] p-6">
       <div className="max-w-3xl mx-auto">
-        <p className="font-mono text-xs uppercase tracking-wider text-[#c92035] mb-1">Hạ tầng biên</p>
-        <h1 className="text-2xl font-bold text-[#374151] mb-1">Vùng nhận diện (ROI) &amp; Vạch mốc</h1>
+        <p className="font-mono text-xs uppercase tracking-wider text-[#c92035] mb-1">{t('Hạ tầng biên', 'Edge infrastructure')}</p>
+        <h1 className="text-2xl font-bold text-[#374151] mb-1">{t('Vùng nhận diện (ROI) & Vạch mốc', 'Detection zone (ROI) & Gate line')}</h1>
         <p className="text-sm text-[#6b7280] mb-4">
           {mode === 'roi'
-            ? 'Click lên khung hình để vẽ vùng — vật thể có tâm nằm ngoài vùng này sẽ không bị bắt lỗi. Để trống = detect toàn khung hình.'
-            : 'Click 2 điểm để vẽ vạch cổng (màu cam). Hệ thống dùng vạch này để theo dõi xe đi qua cổng.'}
+            ? t('Click lên khung hình để vẽ vùng — vật thể có tâm nằm ngoài vùng này sẽ không bị bắt lỗi. Để trống = detect toàn khung hình.', 'Click on the frame to draw a zone — objects whose centre is outside it are not flagged. Leave empty = detect on the full frame.')
+            : t('Click 2 điểm để vẽ vạch cổng (màu cam). Hệ thống dùng vạch này để theo dõi xe đi qua cổng.', 'Click 2 points to draw the gate line (orange). The system uses it to track bikes passing through the gate.')}
         </p>
 
         <div className="flex gap-2 mb-4">
@@ -198,14 +200,14 @@ export default function AdminRoiPage() {
             aria-pressed={mode === 'roi'}
             className={`text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors ${mode === 'roi' ? 'bg-[#123B6D] text-white' : 'bg-[#f4f6f9] text-[#374151] hover:bg-[#eceff3]'}`}
           >
-            Vùng nhận diện (ROI)
+            {t('Vùng nhận diện (ROI)', 'Detection zone (ROI)')}
           </button>
           <button
             onClick={() => setMode('line')}
             aria-pressed={mode === 'line'}
             className={`text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors ${mode === 'line' ? 'bg-[#ff9900] text-white' : 'bg-[#f4f6f9] text-[#374151] hover:bg-[#eceff3]'}`}
           >
-            Vạch mốc (cảnh báo sớm)
+            {t('Vạch mốc (cảnh báo sớm)', 'Gate line (early warning)')}
           </button>
         </div>
 
@@ -242,26 +244,26 @@ export default function AdminRoiPage() {
             disabled={(mode === 'line' ? linePoints.length : points.length) === 0}
             className="bg-[#f4f6f9] hover:bg-[#eceff3] text-[#374151] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
           >
-            Hoàn tác điểm cuối
+            {t('Hoàn tác điểm cuối', 'Undo last point')}
           </button>
           <button
             onClick={handleClear}
             disabled={saving}
             className="bg-[#f8d7dc] hover:bg-[#c92035] hover:text-white text-[#7a1422] text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
           >
-            {mode === 'line' ? 'Xoá vạch mốc' : 'Xoá vùng'}
+            {mode === 'line' ? t('Xoá vạch mốc', 'Clear gate line') : t('Xoá vùng', 'Clear zone')}
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
             className="bg-[#c92035] hover:bg-[#a0172b] disabled:opacity-50 text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
           >
-            {saving ? 'Đang lưu...' : mode === 'line' ? 'Lưu vạch mốc' : 'Lưu vùng'}
+            {saving ? t('Đang lưu...', 'Saving...') : mode === 'line' ? t('Lưu vạch mốc', 'Save gate line') : t('Lưu vùng', 'Save zone')}
           </button>
         </div>
 
         {msg && (
-          <p className={`mt-3 text-[12px] font-mono ${msg.includes('Lỗi') ? 'text-[#c92035]' : 'text-[#10b981]'}`}>
+          <p className={`mt-3 text-[12px] font-mono ${(msg.includes('Lỗi') || msg.includes('Error')) ? 'text-[#c92035]' : 'text-[#10b981]'}`}>
             {msg}
           </p>
         )}

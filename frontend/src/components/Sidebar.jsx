@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/LanguageContext';
 
 const ICONS = {
   camera: 'M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Zm8 2.25a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Z',
@@ -24,30 +25,31 @@ function Icon({ path, className }) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
+  const { t } = useLang();
   const location = useLocation();
 
   if (!user) return null;
 
   const links = [];
   if (user.role === 'security' || user.role === 'admin' || user.role === 'management') {
-    links.push({ to: '/guard', label: 'Giám sát', icon: 'camera' });
+    links.push({ to: '/guard', label: t('Giám sát', 'Live monitor'), icon: 'camera' });
   }
   if (user.role === 'admin' || user.role === 'management') {
-    links.push({ to: '/admin/violations', label: 'Vi phạm', icon: 'alert' });
-    links.push({ to: '/admin/vehicles', label: 'Xe đăng ký', icon: 'truck' });
+    links.push({ to: '/admin/violations', label: t('Vi phạm', 'Violations'), icon: 'alert' });
+    links.push({ to: '/admin/vehicles', label: t('Xe đăng ký', 'Registered bikes'), icon: 'truck' });
   }
   // Feature 9: teacher — scoped views for homeroom class
   if (user.role === 'teacher') {
-    links.push({ to: '/teacher/violations', label: 'Vi phạm lớp tôi', icon: 'alert' });
-    links.push({ to: '/teacher/vehicles', label: 'Danh sách xe lớp tôi', icon: 'truck' });
+    links.push({ to: '/teacher/violations', label: t('Vi phạm lớp tôi', 'My class violations'), icon: 'alert' });
+    links.push({ to: '/teacher/vehicles', label: t('Danh sách xe lớp tôi', 'My class bikes'), icon: 'truck' });
   }
-  links.push({ to: '/settings', label: 'Cài đặt', icon: 'shield' });
+  links.push({ to: '/settings', label: t('Cài đặt', 'Settings'), icon: 'shield' });
 
   const roleLabel = {
-    admin: 'Quản trị viên',
-    security: 'Bảo vệ ca sáng',
-    management: 'Ban giám hiệu',
-    teacher: 'Giáo viên chủ nhiệm',
+    admin: t('Quản trị viên', 'Administrator'),
+    security: t('Bảo vệ ca sáng', 'Morning-shift guard'),
+    management: t('Ban giám hiệu', 'School management'),
+    teacher: t('Giáo viên chủ nhiệm', 'Homeroom teacher'),
   }[user.role] || user.role;
 
   return (
@@ -57,14 +59,14 @@ export default function Sidebar() {
         <div className="leading-tight">
           <div className="font-bold text-sm">School Gate Monitor</div>
           <div className="text-[10px] uppercase tracking-wider text-inverse-on-surface/70 font-mono">
-            Điều hành cổng trường AI
+            {t('Điều hành cổng trường AI', 'AI school gate control')}
           </div>
         </div>
       </div>
 
       <div className="px-5 py-4 border-b border-white/10">
         <div className="text-[10px] uppercase tracking-wider text-inverse-on-surface/70 font-mono mb-1">
-          Vai trò hiện tại
+          {t('Vai trò hiện tại', 'Current role')}
         </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
@@ -72,7 +74,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav aria-label="Menu chính" className="flex flex-wrap md:block flex-1 px-3 py-3 md:space-y-1 overflow-y-auto">
+      <nav aria-label={t('Menu chính', 'Main menu')} className="flex flex-wrap md:block flex-1 px-3 py-3 md:space-y-1 overflow-y-auto">
         {links.map(({ to, label, icon }) => {
           const active = location.pathname === to || location.pathname.startsWith(`${to}/`);
           return (
@@ -96,7 +98,7 @@ export default function Sidebar() {
         className="flex items-center gap-3 px-5 py-4 border-t border-white/10 text-sm text-inverse-on-surface/70 hover:text-inverse-on-surface transition-colors"
       >
         <Icon path={ICONS.logout} className="w-4.5 h-4.5" />
-        Đăng xuất ca trực
+        {t('Đăng xuất ca trực', 'End shift and sign out')}
       </button>
     </aside>
   );
