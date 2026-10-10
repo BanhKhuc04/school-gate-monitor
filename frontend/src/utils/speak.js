@@ -1,5 +1,6 @@
-// Đọc to tiếng Việt (Web Speech API), tự tìm giọng nữ nếu máy có — dùng chung
-// cho AlertBanner (cảnh báo tự động) và các nơi khác cần đọc to (chi tiết vi phạm).
+// Đọc to cảnh báo (Web Speech API) theo ngôn ngữ giao diện — tiếng Việt thì tự
+// tìm giọng nữ nếu máy có. Dùng chung cho AlertBanner (cảnh báo tự động) và các
+// nơi khác cần đọc to (chi tiết vi phạm).
 
 // Tên giọng nữ tiếng Việt phổ biện theo hệ điều hành/trình duyệt (Windows,
 // Google, Edge). Không có tên khớp nào → rơi về giọng vi-VN đầu tiên trình
@@ -11,25 +12,31 @@ const FEMALE_VOICE_HINTS = ['hoaimy', 'nữ', 'female', 'linh', 'mai', 'huyền'
 // thứ tự khác nhau (danh sách nạp bất đồng bộ) → 2 lần cảnh báo liên tiếp có
 // thể đọc bằng 2 giọng khác nhau, nghe như 2 người. Chốt 1 giọng ngay khi có
 // đủ danh sách rồi DÙNG LẠI mãi cho tới khi tải lại trang.
-let cachedVoice = null;
+// Chốt riêng cho từng ngôn ngữ ('vi' / 'en').
+const cachedVoices = {};
 
-function pickVietnameseFemaleVoice() {
-  const voices = window.speechSynthesis.getVoices();
-  const viVoices = voices.filter((v) => v.lang?.toLowerCase().startsWith('vi'));
-  const female = viVoices.find((v) =>
+function pickVoice(lang) {
+  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith(lang));
+  if (lang !== 'vi') return voices[0] || null;
+  const female = voices.find((v) =>
     FEMALE_VOICE_HINTS.some((hint) => v.name.toLowerCase().includes(hint))
   );
-  return female || viVoices[0] || null;
+  return female || voices[0] || null;
 }
 
-export function speakVietnamese(text, options = {}) {
+function cachedVoice(lang) {
+  if (!cachedVoices[lang]) cachedVoices[lang] = pickVoice(lang);
+  return cachedVoices[lang];
+}
+
+export function speak(text, lang = 'vi', options = {}) {
   try {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'vi-VN';
-    if (!cachedVoice) cachedVoice = pickVietnameseFemaleVoice();
-    if (cachedVoice) utterance.voice = cachedVoice;
+    utterance.lang = lang === 'en' ? 'en-US' : 'vi-VN';
+    const voice = cachedVoice(lang);
+    if (voice) utterance.voice = voice;
     // Feature 3: priority-based rate/pitch — high = faster/higher pitch
     if (options.rate != null) utterance.rate = options.rate;
     if (options.pitch != null) utterance.pitch = options.pitch;
@@ -46,8 +53,15 @@ export function speakVietnamese(text, options = {}) {
 export function warmUpVoices() {
   if (!window.speechSynthesis) return;
   window.speechSynthesis.getVoices();
-  if (!cachedVoice) cachedVoice = pickVietnameseFemaleVoice();
+  cachedVoice('vi');
+  cachedVoice('en');
   window.speechSynthesis.onvoiceschanged = () => {
-    if (!cachedVoice) cachedVoice = pickVietnameseFemaleVoice();
+    cachedVoice('vi');
+    cachedVoice('en');
   };
+}
+
+// Giữ tên cũ cho các nơi gọi chưa chuyển sang speak(text, lang).
+export function speakVietnamese(text, options = {}) {
+  speak(text, 'vi', options);
 }
