@@ -57,7 +57,7 @@ def test_repeat_offender_flag(client):
 
     # Add 4 violations in the last 30 days
     now = datetime.now(timezone.utc).isoformat()
-    for i in range(4):
+    for _i in range(4):
         add_violation_event(
             timestamp=now,
             plate_read=plate,
@@ -88,7 +88,7 @@ def test_non_repeat_offender_flag(client):
     add_vehicle(plate, "Test Student 2", "10A2")
 
     now = datetime.now(timezone.utc).isoformat()
-    for i in range(2):
+    for _i in range(2):
         add_violation_event(
             timestamp=now,
             plate_read=plate,

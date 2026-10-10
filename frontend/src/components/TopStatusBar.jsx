@@ -48,7 +48,7 @@ export default function TopStatusBar({ activeGate = 'main' }) {
   const timeStr = now.toLocaleTimeString('vi-VN', { hour12: false });
 
   return (
-    <header className="h-14 bg-surface border-b border-outline-variant flex items-center justify-between px-6 gap-4 text-sm">
+    <header className="min-h-14 bg-surface border-b border-outline-variant flex flex-wrap md:flex-nowrap items-center justify-between px-4 md:px-6 py-3 gap-3 text-sm">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`w-2 h-2 rounded-full ${pipeline?.running ? 'bg-emerald-500' : 'bg-outline'}`} />
         <span className="font-mono text-xs text-on-surface-variant">

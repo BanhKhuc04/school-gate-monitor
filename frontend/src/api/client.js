@@ -1,18 +1,29 @@
 /**
  * Axios client for the School Gate Monitor API.
  *
- * baseURL hardcoded to http://localhost:8000 — no .env file for this small project.
- * All API calls go through this instance so the auth interceptor is shared.
+ * baseURL dùng '' (relative) để axios tự lấy cùng origin với frontend (window.location).
+ * Dev: Vite proxy config (`/api`, `/media`, `/guard/*`) chuyển tiếp sang backend
+ *      đang chạy ở `http://localhost:8000` (xem vite.config.js).
+ * Prod: reverse proxy cùng domain trỏ `/api`, `/media` về backend FastAPI.
+ *
+ * T2.2 — không hardcode URL localhost vào request gửi đi; axios tự resolve
+ * theo base URL của page hiện tại. Khi cần ép dùng cùng origin (vd. môi trường
+ * LAN với IP khác) thì không cần đổi code — chỉ cần frontend được serve qua
+ * reverse proxy trỏ về backend.
+ *
+ * Lưu ý tương thích:
+ * - URL kiểu `http://localhost:8000/...` đã có sẵn trong code (vd. trong
+ *   components/RecognitionLogPanel/PlateReviewPanel của Task 1) vẫn hoạt động
+ *   với Vite proxy và IP LAN trong dev. KHÔNG sửa những URL đó trong Task 2.
  */
 import axios from 'axios';
 
-// ponytail: export as constant so GuardPage + AlertBanner can reuse it
-// instead of hardcoding 'http://localhost:8000' in multiple places.
-export const API_BASE_URL = 'http://localhost:8000';
+export const API_BASE_URL = '';
 
 const client = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
+  withCredentials: true, // receive the HttpOnly session used by protected images/clips
 });
 
 // ── Request interceptor: attach JWT from localStorage ──────────────────────────

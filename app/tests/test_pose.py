@@ -108,6 +108,29 @@ def test_posture_detector_isolated_exception():
         pytest.fail("detect_pose should handle None gracefully")
 
 
+def test_detect_pose_batch_one_model_call_and_order_preserved(monkeypatch):
+    """N crops → 1 model call; result i maps to crop i; empty crops stay []."""
+    import torch
+    from types import SimpleNamespace
+    from app.cv import pose
+    calls = []
+
+    def fake_model(crops, **kwargs):
+        calls.append(len(crops))
+        out = []
+        for crop in crops:
+            v = float(crop[0, 0, 0])
+            data = torch.full((1, 17, 3), v)
+            out.append(SimpleNamespace(keypoints=SimpleNamespace(data=data, conf=None)))
+        return out
+
+    monkeypatch.setattr(pose, '_get_pose_model', lambda: fake_model)
+    crops = [np.full((40, 30, 3), 7, np.uint8), None, np.full((40, 30, 3), 9, np.uint8)]
+    result = pose.PostureDetector().detect_pose_batch(crops)
+    assert calls == [2]
+    assert result[0][0]['x'] == 7 and result[1] == [] and result[2][0]['x'] == 9
+
+
 # ─── angle_between_vectors ──────────────────────────────────────────────────────
 
 def test_angle_between_vectors():

@@ -1,15 +1,19 @@
 """
 Authentication utilities: password hashing + JWT tokens.
+Supports both Bearer header and HttpOnly cookie session.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.config import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_HOURS
+from app.config import (
+    JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_HOURS,
+    COOKIE_NAME, COOKIE_SECURE, COOKIE_SAMESITE,
+)
 
 
 def hash_password(password: str) -> str:
@@ -39,10 +43,10 @@ def create_access_token(username: str, role: str, homeroom_class: str | None = N
 def decode_access_token(token: str) -> dict:
     """
     Decode and validate a JWT token.
-    
+
     Returns:
         dict with 'sub' and 'role'
-        
+
     Raises:
         jwt.ExpiredSignatureError: if token is expired
         jwt.InvalidTokenError: if token is invalid
@@ -55,11 +59,26 @@ def decode_access_token(token: str) -> dict:
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+def _extract_token(request: Request) -> str | None:
+    """Try Bearer header first, then cookie. Returns the token value or None."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return request.cookies.get(COOKIE_NAME)
+
+
+def get_current_user(request: Request) -> dict:
     """
-    FastAPI dependency: decode JWT and return current user.
+    FastAPI dependency: decode JWT from Bearer header or cookie.
     Raises HTTPException 401 if token is missing, invalid, or expired.
     """
+    token = _extract_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = decode_access_token(token)
         user = {"username": payload["sub"], "role": payload["role"]}
@@ -91,5 +110,7 @@ def require_role(*allowed_roles: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {allowed_roles}",
             )
+        if current_user.get("role") == "teacher" and not (current_user.get("homeroom_class") or "").strip():
+            raise HTTPException(status_code=403, detail="Teacher has no assigned class")
         return current_user
     return dependency

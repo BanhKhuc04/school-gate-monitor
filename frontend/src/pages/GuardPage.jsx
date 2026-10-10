@@ -1,23 +1,37 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import AlertBanner from '../components/AlertBanner';
+import RecognitionLogPanel from '../components/RecognitionLogPanel';
+import PlateReviewPanel from '../components/PlateReviewPanel';
+import DebugOverlayControl from '../components/DebugOverlayControl';
 import client, { API_BASE_URL } from '../api/client';
-import { VIOLATION_LABELS } from '../utils/violationLabels';
+import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
+import { useAudioLease } from '../utils/useAudioLease';
+import { getVietnameseVoiceStatus } from '../utils/speak';
 
 const MAX_LOG_ITEMS = 12;
 
 export default function GuardPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [health, setHealth] = useState(null);
   const [alertLog, setAlertLog] = useState([]);
+  const [logTab, setLogTab] = useState('recognition');
   const [activeGate, setActiveGate] = useState('main');
   const [viewMode, setViewMode] = useState('single'); // 'single' | 'split'
+  const [voiceStatus, setVoiceStatus] = useState({ supported: false, local: false, voice: null });
+  // Nút "Chạy video test": 2 cổng cùng phát 2 video quay sẵn (chỉ admin bấm được).
+  const [demo, setDemo] = useState(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoError, setDemoError] = useState('');
   const idCounter = useRef(0);
+  const lease = useAudioLease(activeGate);
+  const isAdmin = user?.role === 'admin';
 
   // gates from API; null = chưa load (hoặc health = null); array = đã load
   const gates = health?.gates ?? null;
   const showGateSelector = gates !== null && gates.length > 1;
   const activeGateName = gates?.find(g => g.id === activeGate)?.name ?? 'Cổng Chính';
+  const activePipeline = gates?.find(g => g.id === activeGate)?.pipeline;
   const isSplit = showGateSelector && viewMode === 'split';
 
   // Độ trễ khung hình hiển thị trên video panel — cùng API health mà trang admin dùng.
@@ -30,25 +44,85 @@ export default function GuardPage() {
       } catch {
         if (!cancelled) setHealth(null);
       }
+      try {
+        const res = await client.get('/api/demo');
+        if (!cancelled) setDemo(res.data);
+      } catch {
+        if (!cancelled) setDemo(null);
+      }
     }
     poll();
     const id = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  // Voice readiness probe — surfaces "offline Vietnamese voice" state in the
+  // banner area so the operator knows whether the speaker will talk even when
+  // WAN is off.
+  useEffect(() => {
+    const probe = () => setVoiceStatus(getVietnameseVoiceStatus());
+    probe();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = probe;
+    }
+    return () => {
+      if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  // Trong lúc chạy video test: cập nhật vị trí 2 video mỗi giây (xem độ lệch).
+  const demoLive = Boolean(demo?.active || demo?.switching);
+  useEffect(() => {
+    if (!demoLive) return undefined;
+    let cancelled = false;
+    const id = setInterval(async () => {
+      try {
+        const res = await client.get('/api/demo');
+        if (!cancelled) setDemo(res.data);
+      } catch { /* the 5 s poll reports a lost backend */ }
+    }, 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [demoLive]);
+
   const handleAlert = useCallback((data) => {
     idCounter.current += 1;
     setAlertLog((prev) => [{ ...data, _id: idCounter.current }, ...prev].slice(0, MAX_LOG_ITEMS));
   }, []);
 
+  async function toggleDemo() {
+    setDemoBusy(true);
+    setDemoError('');
+    try {
+      const res = await client.post(demo?.active ? '/api/demo/stop' : '/api/demo/start');
+      setDemo(res.data);
+      if (res.data.active) setViewMode('split'); // xem cả 2 video cùng lúc
+    } catch (err) {
+      setDemoError(err.response?.data?.detail || 'Không đổi được chế độ video test.');
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  const clock = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  // Nhãn góc trái mỗi khung: LIVE, hoặc VIDEO TEST + vị trí đang phát của video đó.
+  const badgeFor = (gateId) => {
+    const g = demo?.gates?.[gateId];
+    if (g?.playing) {
+      return { label: g.position != null ? `VIDEO TEST · ${clock(g.position)}` : 'VIDEO TEST', className: 'bg-warning text-on-warning' };
+    }
+    if (demo?.active) return { label: 'ĐANG CHUYỂN…', className: 'bg-warning/70 text-on-warning' };
+    return { label: 'LIVE', className: 'bg-error/90' };
+  };
+
   return (
     <div className="min-h-screen bg-primary text-inverse-on-surface flex flex-col">
-      <AlertBanner token={token} onAlert={handleAlert} gate={activeGate} />
+      <AlertBanner token={token} onAlert={handleAlert} gate={activeGate}
+        audioEnabled={lease.enabled} audioClientId={lease.clientId} />
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 p-4">
         {/* Video panel */}
         <div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
             {showGateSelector && !isSplit ? (
               <select
                 value={activeGate}
@@ -64,8 +138,64 @@ export default function GuardPage() {
             )}
             {!isSplit && (
               <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
-                CAM_01
+                {`CAM_${String(Math.max(0, gates?.findIndex(g => g.id === activeGate) ?? 0) + 1).padStart(2, '0')}`}
               </span>
+            )}
+            <button
+              type="button"
+              onClick={lease.toggle}
+              disabled={lease.busy}
+              data-testid="audio-toggle"
+              className={`font-mono text-[11px] px-2.5 py-1 rounded border ${
+                lease.enabled
+                  ? 'bg-success/90 border-success text-on-success'
+                  : 'bg-transparent border-white/30 text-inverse-on-surface/80 hover:bg-white/10'
+              }`}
+              title={lease.enabled ? 'Bấm để nhường quyền loa' : 'Bấm để xin quyền phát loa (cần thao tác của người dùng)'}
+            >
+              {lease.busy ? '…' : lease.enabled ? '🔊 Loa: BẬT' : '🔈 Loa: TẮT'}
+            </button>
+            <span
+              className={`font-mono text-[11px] px-2 py-0.5 rounded ${
+                voiceStatus.local
+                  ? 'bg-success/80 text-on-success'
+                  : voiceStatus.supported
+                    ? 'bg-warning/90 text-on-warning'
+                    : 'bg-error/90 text-on-error'
+              }`}
+              title={voiceStatus.voice
+                ? `Giọng: ${voiceStatus.voice}${voiceStatus.local ? ' (local, chạy offline)' : ' (remote — cần Internet)'}`
+                : 'Trình duyệt không hỗ trợ Web Speech API'}
+            >
+              {voiceStatus.local
+                ? '🇻🇳 VI-local'
+                : voiceStatus.supported
+                  ? 'VI-remote'
+                  : 'VI-n/a'}
+            </span>
+            {lease.error && (
+              <span className="text-[11px] text-error ml-1">{lease.error}</span>
+            )}
+            {isAdmin && demo && (
+              <button
+                type="button"
+                onClick={toggleDemo}
+                disabled={demoBusy || (!demo.active && !demo.available)}
+                data-testid="demo-toggle"
+                className={`font-mono text-[11px] font-bold px-2.5 py-1 rounded border disabled:opacity-50 ${
+                  demo.active
+                    ? 'bg-warning border-warning text-on-warning'
+                    : 'bg-transparent border-white/30 text-inverse-on-surface hover:bg-white/10'
+                }`}
+                title={demo.available || demo.active
+                  ? 'Hai cổng cùng phát 2 video quay sẵn (camera trước + camera sau) để kiểm tra hệ thống'
+                  : `Thiếu video test: ${(demo.missing || []).join(', ')} (chép vào data/demo_videos/)`}
+              >
+                {demoBusy ? '…' : demo.active ? '■ Dừng video test' : '▶ Chạy video test'}
+              </button>
+            )}
+            {demoError && (
+              <span className="text-[11px] text-error ml-1">{demoError}</span>
             )}
             {showGateSelector && (
               <div className="ml-auto flex items-center rounded-lg border border-white/30 overflow-hidden text-[11px] font-mono">
@@ -86,14 +216,34 @@ export default function GuardPage() {
               </div>
             )}
           </div>
+          {demo?.active && (
+            <div data-testid="demo-banner" className="mb-2 rounded-lg bg-warning text-on-warning px-3 py-2 text-sm font-bold">
+              ĐANG CHẠY VIDEO TEST — hình là video quay sẵn, không phải camera thật. Vi phạm ghi nhận lúc này có nhãn TEST.
+              <span data-testid="demo-sync" className="block font-mono text-[12px] font-semibold mt-0.5">
+                {demo.switching
+                  ? 'Đang chuyển 2 camera sang video test…'
+                  : demo.offset_sec != null
+                    ? `2 video đồng bộ: camera trước ${clock(demo.gates.main?.position ?? 0)} · camera sau ${clock(demo.gates.secondary?.position ?? 0)} · lệch ${demo.offset_sec.toFixed(2)} giây`
+                    : 'Cả 2 camera đang phát video test.'}
+              </span>
+            </div>
+          )}
+          {!demo?.active && demo?.switching && (
+            <div className="mb-2 rounded-lg bg-primary-container text-on-primary-container px-3 py-2 text-sm">
+              Đang chuyển 2 cổng về camera thật…
+            </div>
+          )}
+          {!isSplit && <DebugOverlayControl key={activeGate} gate={activeGate} name={activeGateName} />}
 
           {isSplit ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {gates.map(g => (
-                <div key={g.id} className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-                  <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[10px] font-bold">
+                <div key={g.id}>
+                  <DebugOverlayControl gate={g.id} name={g.name} />
+                  <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
+                  <div className={`absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[10px] font-bold ${badgeFor(g.id).className}`}>
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    LIVE
+                    {badgeFor(g.id).label}
                   </div>
                   <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[10px]">
                     {g.name}
@@ -105,18 +255,19 @@ export default function GuardPage() {
                     className="w-full h-auto block"
                     style={{ maxHeight: 'calc(100vh - 260px)', objectFit: 'contain' }}
                   />
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
             <div className="relative rounded-xl overflow-hidden bg-primary-container border border-white/10">
-              <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded bg-error/90 font-mono text-[11px] font-bold">
+              <div className={`absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[11px] font-bold ${badgeFor(activeGate).className}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                LIVE
+                {badgeFor(activeGate).label}
               </div>
-              {health?.pipeline?.last_frame_age_sec != null && (
+              {activePipeline?.last_frame_age_sec != null && (
                 <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">
-                  Độ trễ khung hình: {health.pipeline.last_frame_age_sec.toFixed(1)}s
+                  Độ trễ khung hình: {activePipeline.last_frame_age_sec.toFixed(1)}s
                 </div>
               )}
               <img
@@ -131,6 +282,14 @@ export default function GuardPage() {
 
         {/* Alert log panel */}
         <div className="flex flex-col min-h-0">
+          <div role="tablist" aria-label="Nhật ký trực tiếp" className="flex flex-wrap gap-2 mb-3">
+            <button role="tab" aria-selected={logTab==='recognition'} onClick={()=>setLogTab('recognition')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Nhận diện trực tiếp</button>
+            <button role="tab" aria-selected={logTab==='plate-review'} onClick={()=>setLogTab('plate-review')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Duyệt biển</button>
+            <button role="tab" aria-selected={logTab==='alerts'} onClick={()=>setLogTab('alerts')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Cảnh báo</button>
+          </div>
+          <div hidden={logTab!=='recognition'}><RecognitionLogPanel key={activeGate} gate={activeGate}/></div>
+          {logTab==='plate-review' && <PlateReviewPanel key={activeGate} gate={activeGate} role={user?.role}/>}
+          <div hidden={logTab!=='alerts'}>
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-sm font-bold uppercase tracking-wider text-on-primary-container">
               Cảnh báo gần đây
@@ -147,11 +306,14 @@ export default function GuardPage() {
                 Chưa có cảnh báo nào trong phiên này.
               </div>
             ) : (
-              alertLog.map((a) => (
+              alertLog.map((a) => {
+                const shown = describeAlert(a);
+                return (
                 <div key={a._id} className="bg-primary-container rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-error text-on-error">
-                      {VIOLATION_LABELS[a.violation_type] || a.violation_type}
+                    <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded text-white"
+                      style={{ backgroundColor: TONE_COLORS[shown.tone] }}>
+                      {shown.title}
                     </span>
                     <span className="font-mono text-[10px] text-on-primary-container">
                       {new Date(a.timestamp).toLocaleTimeString('vi-VN', { hour12: false })}
@@ -165,11 +327,13 @@ export default function GuardPage() {
                     />
                   )}
                   <span className="font-mono text-xs">
-                    {a.plate_matched || a.plate_read || 'Không đọc được biển số'}
+                    {shown.detail}
                   </span>
                 </div>
-              ))
+                );
+              })
             )}
+          </div>
           </div>
         </div>
       </div>

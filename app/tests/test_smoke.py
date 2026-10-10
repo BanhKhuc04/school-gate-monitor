@@ -18,7 +18,8 @@ def test_pytest_available():
 
 def test_auth_login_ok(client):
     """Admin can login with correct credentials."""
-    resp = client.post("/api/auth/login", json={"username": "admin", "password": "test123"})
+    from app.tests.conftest import ROLE_PASSWORD
+    resp = client.post("/api/auth/login", json={"username": "admin", "password": ROLE_PASSWORD})
     assert resp.status_code == 200
     data = resp.json()
     assert "access_token" in data

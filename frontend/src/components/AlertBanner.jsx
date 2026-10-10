@@ -1,65 +1,30 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
-import { speakVietnamese, warmUpVoices } from '../utils/speak';
-import { getAlertPriority } from '../utils/alertPriority';
+import { warmUpVoices, speakVietnamese, stopSpeech, getVietnameseVoiceStatus } from '../utils/speak';
+import { clipsForMessage, playClips } from '../utils/offlineVoice';
+import { createAlertAudio, buildAlertMessage } from '../utils/alertAudio';
+import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
 
 /**
- * AlertBanner — connects to /guard/ws WebSocket and shows a red banner
- * with a distinct beep pattern + Vietnamese TTS per violation type, plus
- * a snapshot thumbnail if one is available.
+ * AlertBanner — connects to /guard/ws WebSocket and renders a banner with
+ * a short beep + Vietnamese TTS per confirmed violation. The audio pipeline
+ * runs through `createAlertAudio` so filtering, deduplication, lease gating,
+ * TTL and queueing all live in one tested helper instead of legacy branches.
  *
- * ponytail: còi/loa vật lý qua GPIO chưa được xây dựng — chưa có phần cứng
- * (không có speaker/relay/GPIO nào để lái). Khi có phần cứng thật, thêm một
- * lệnh gọi API riêng ở đây (hoặc side-effect ở backend khi push alert) để
- * kích còi vật lý; audio hiện tại chỉ chạy trong trình duyệt của bảo vệ.
+ * Audio only when the user has acquired a speaker lease via useAudioLease().
+ * Other viewers stay silent on the same gate (split-view rule).
  */
 
-// Mỗi loại vi phạm có tần số + số nhịp beep riêng để phân biệt bằng tai
-// trước khi nghe rõ nội dung TTS.
-const ALERT_SOUNDS = {
-  NO_HELMET: { freq: 600, beeps: 1, beepDuration: 0.3, gap: 0.1 },
-  PLATE_NOT_REGISTERED: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
-  NO_PLATE: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },       // medium priority
-  PLATE_OBSCURED: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },  // medium priority
-  PLATE_UNREADABLE: { freq: 1000, beeps: 2, beepDuration: 0.15, gap: 0.1 },
-  RIDING_THROUGH_GATE: { freq: 500, beeps: 3, beepDuration: 0.15, gap: 0.1 },
-  TOO_MANY_RIDERS: { freq: 450, beeps: 4, beepDuration: 0.12, gap: 0.08 },
-  MULTIPLE: { freq: 700, beeps: 2, beepDuration: 0.2, gap: 0.1 },
-  default: { freq: 800, beeps: 1, beepDuration: 0.2, gap: 0.1 },
-};
-
-function buildSpeechText(data) {
-  const plate = data.plate_matched || data.plate_read;
-  const plateText = plate ? `xe biển số ${plate}` : 'xe không đọc được biển số';
-  switch (data.violation_type) {
-    case 'NO_HELMET':
-      return `Cảnh báo: ${plateText} chưa đội mũ bảo hiểm`;
-    case 'PLATE_NOT_REGISTERED':
-      return `Cảnh báo: ${plateText} chưa đăng ký`;
-    case 'NO_PLATE':
-      return `Cảnh báo: phát hiện xe không có biển số`;
-    case 'PLATE_OBSCURED':
-      return `Cảnh báo: biển số xe bị che hoặc mờ, không đọc được`;
-    case 'PLATE_UNREADABLE':
-      return 'Cảnh báo: không đọc được biển số xe';
-    case 'RIDING_THROUGH_GATE':
-      return `Cảnh báo: ${plateText} đang chạy xe qua cổng, vui lòng dắt xe`;
-    case 'TOO_MANY_RIDERS':
-      return `Cảnh báo: ${plateText} chở quá số người quy định`;
-    case 'MULTIPLE':
-      return `Cảnh báo: ${plateText} vi phạm nhiều lỗi`;
-    default:
-      return `Cảnh báo vi phạm: ${plateText}`;
-  }
-}
-
-export default function AlertBanner({ token, onAlert, gate = 'main' }) {
+export default function AlertBanner({ token, onAlert, gate = 'main',
+  audioEnabled = false, audioClientId = null }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [snapshotUrl, setSnapshotUrl] = useState(null);
   const [bannerBg, setBannerBg] = useState('#c92035');
   const timeoutRef = useRef(null);
   const wsRef = useRef(null);
+  const audioRef = useRef(null);
+  const clipPlayback = useRef(null);
   const onAlertRef = useRef(onAlert);
   onAlertRef.current = onAlert;
 
@@ -67,63 +32,99 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
     warmUpVoices();
   }, []);
 
+  // (Re)build the audio helper whenever the lease state changes so disposed
+  // AudioContexts and dedup Sets are released when this tab loses the lease.
   useEffect(() => {
-    if (!token) return;
-
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
-    const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?token=${token}&gate=${gate}`;
-
-    // Phát chuỗi beep phân biệt theo loại vi phạm, trả về tổng thời lượng
-    // (ms) để lên lịch TTS phát ngay sau khi beep kết thúc.
-    function playAlertSound(key) {
-      const sound = ALERT_SOUNDS[key] || ALERT_SOUNDS.default;
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioCtx();
-        for (let i = 0; i < sound.beeps; i++) {
-          const startAt = ctx.currentTime + i * (sound.beepDuration + sound.gap);
+    audioRef.current?.dispose?.();
+    audioRef.current = null;
+    if (!audioEnabled || !audioClientId) return;
+    audioRef.current = createAlertAudio({
+      beep: (code) => {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           osc.type = 'sine';
-          osc.frequency.value = sound.freq;
-          gain.gain.value = 0.3;
+          osc.frequency.value = code === 'RIDING_THROUGH_GATE' ? 520
+            : code === 'TOO_MANY_RIDERS' ? 460
+            : code === 'NO_HELMET' ? 600 : 800;
+          gain.gain.value = 0.7;
           osc.connect(gain);
           gain.connect(ctx.destination);
-          osc.start(startAt);
-          osc.stop(startAt + sound.beepDuration);
+          osc.start();
+          osc.onended = () => ctx.close().catch(() => {});
+          setTimeout(() => osc.stop(), 180);
+        } catch (e) {
+          console.warn('[AlertBanner] beep blocked:', e.message);
         }
-      } catch (e) {
-        console.warn('[AlertBanner] Audio blocked:', e.message);
-      }
-      return Math.round((sound.beeps * (sound.beepDuration + sound.gap)) * 1000);
+        return 220;
+      },
+      // Recorded clips unless this machine has a LOCAL Vietnamese voice: the
+      // browsers' Vietnamese voices are online-only, and a LAN without
+      // internet still reports navigator.onLine === true.
+      speak: (text, opts) => {
+        const clips = getVietnameseVoiceStatus().local ? null : clipsForMessage(text);
+        if (!clips) { speakVietnamese(text, opts); return; }
+        clipPlayback.current?.stop();
+        clipPlayback.current = playClips(clips, { rate: opts?.rate ?? 1, volume: opts?.volume ?? 1 });
+        clipPlayback.current.then(ok => { if (!ok) speakVietnamese(text, opts); });
+      },
+      cancel: () => { clipPlayback.current?.stop(); stopSpeech(); },
+      config: { rate: 1.45, volume: 1, debug: false },
+    });
+    return () => {
+      audioRef.current?.dispose?.();
+      audioRef.current = null;
+    };
+  }, [audioEnabled, audioClientId]);
+
+  useEffect(() => {
+    if (!token) return;
+    // Cleanup helper — đóng WS + clear reconnect timer khi unmount/đổi gate.
+    let stopped = false;
+    let reconnectTimer = null;
+    let currentWs = null;
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = new URL(API_BASE_URL || window.location.origin).host;
+    // QUAN TRỌNG (review F2): phải gửi client_id=audioClientId để backend
+    // nhận diện speaker owner từ lease. Thiếu client_id → owns_audio()
+    // luôn false → mọi alert có audio_authorized=false → helper bị dedup,
+    // audio im lặng dù lease HTTP 200.
+    const params = new URLSearchParams();
+    params.set('token', token);
+    params.set('gate', gate);
+    if (audioClientId) {
+      params.set('client_id', audioClientId);
     }
+    const wsUrl = `${wsProtocol}//${wsHost}/guard/ws?${params.toString()}`;
 
     function handleAlert(data) {
-      const priority = getAlertPriority(data.violation_type);
-      setMessage('⚠️ CẢNH BÁO: ' + (data.violation_type || data.type));
+      if (data?.type === 'gate_crossed') return;
+      const { tone, title, detail } = describeAlert(data);
+      setMessage(`${tone === 'info' ? '✅' : '⚠️'} ${title} — ${detail}`);
       setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
-      // Feature 3: banner color based on priority
-      setBannerBg(priority === 'high' ? '#c92035' : '#f59e0b');
+      setBannerBg(TONE_COLORS[tone]);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => setVisible(false), 3000);
 
-      // Beep trước để bảo vệ chú ý ngay, TTS đọc nội dung ngay sau đó.
-      const beepDurationMs = playAlertSound(data.violation_type || 'default');
-      // Feature 3: priority-based TTS rate/pitch
-      const ttsOptions = priority === 'high'
-        ? { rate: 1.15, pitch: 1.1 }
-        : {};
-      setTimeout(() => speakVietnamese(buildSpeechText(data), ttsOptions), beepDurationMs + 50);
+      // Route through the tested helper when this tab owns the speaker
+      // lease. Older tabs without the lease stay silent so the second
+      // viewer never doubles an announcement on a single physical speaker.
+      if (audioRef.current && audioEnabled) {
+        try { audioRef.current.accept(data); }
+        catch (e) { console.warn('[AlertBanner] audio.accept failed:', e.message); }
+      }
 
       onAlertRef.current?.(data);
     }
 
     function connect() {
-      let reconnectTimer = null;
+      if (stopped) return;
       try {
         const ws = new WebSocket(wsUrl);
+        currentWs = ws;
         wsRef.current = ws;
 
         ws.onopen = () => console.log('[AlertBanner] WS connected');
@@ -132,7 +133,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
             const data = JSON.parse(event.data);
             handleAlert(data);
           } catch (e) {
-            // Malformed message
+            // Malformed message — ignored on purpose
           }
         };
         ws.onerror = () => {
@@ -140,24 +141,34 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
         };
         ws.onclose = () => {
           if (wsRef.current === ws) wsRef.current = null;
-          reconnectTimer = setTimeout(connect, 3000);
+          if (stopped) return;
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 3000);
         };
       } catch (e) {
-        reconnectTimer = setTimeout(connect, 5000);
+        if (stopped) return;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, 5000);
       }
     }
 
     connect();
 
     return () => {
+      stopped = true;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-        wsRef.current = null;
+      if (currentWs) {
+        currentWs.onclose = null;
+        currentWs.close();
       }
+      if (wsRef.current === currentWs) wsRef.current = null;
     };
-  }, [token, gate]);
+  }, [token, gate, audioEnabled, audioClientId]);
 
   return (
     <div
@@ -188,3 +199,6 @@ export default function AlertBanner({ token, onAlert, gate = 'main' }) {
     </div>
   );
 }
+
+// Re-export for tests/UI showing the warning text without rebuilding it.
+export { buildAlertMessage };

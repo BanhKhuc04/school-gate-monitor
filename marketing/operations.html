@@ -5,11 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>School Gate Monitor - Hệ Thống Vận Hành & Quản Trị Cổng Trường AI</title>
   
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+  <!-- Local CSS: bỏ Google Fonts/CDN để chạy offline. Dùng lại landing.css nếu cùng thư mục. -->
+  <link rel="stylesheet" href="landing.css"/>
   
   <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
 
@@ -31,50 +28,6 @@
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
-
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            navy: {
-              DEFAULT: '#123B6D',
-              900: '#0B2341',
-              800: '#123B6D',
-              700: '#1A4D8C',
-              100: '#E6EEF8',
-              50: '#F0F4FA',
-            },
-            accent: {
-              DEFAULT: '#C92035',
-              hover: '#B0182C',
-              subtle: '#FDF2F3',
-              border: '#F8B4BD',
-            },
-            gray: {
-              dark: '#374151',
-              slate: '#4B5563',
-              light: '#F8FAFC',
-              border: '#E2E8F0',
-            },
-            emerald: {
-              state: '#10B981',
-              subtle: '#ECFDF5',
-              dark: '#065F46',
-            }
-          },
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-            heading: ['Montserrat', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          }
-        }
-      }
-    }
-  </script>
 </head>
 <body class="h-full bg-gray-light text-gray-dark antialiased overflow-hidden flex flex-col">
 
@@ -85,7 +38,7 @@
     <div class="flex items-center gap-4">
       <span class="flex items-center gap-1.5 font-mono text-[11px]">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        PIPELINE: <strong class="text-emerald-300">ĐANG CHẠY (30.2 FPS)</strong>
+        PIPELINE: <strong class="text-emerald-300">ĐANG CHẠY (demo build local)</strong>
       </span>
       <span class="hidden sm:inline text-white/30">|</span>
       <span class="hidden sm:flex items-center gap-1.5 font-mono text-[11px]">
@@ -110,7 +63,7 @@
         <span class="w-6 h-6 rounded-full bg-navy flex items-center justify-center font-bold text-[10px] text-white" id="user-avatar">AD</span>
         <span class="hidden md:inline font-semibold" id="current-user-name">Nguyễn Văn Hùng</span>
         <button onclick="logout()" title="Đăng xuất" class="text-white/60 hover:text-white ml-1">
-          <span class="material-symbols-outlined text-[18px]">logout</span>
+          <span class="material-icon text-[18px]">⇤</span>
         </button>
       </div>
     </div>
@@ -172,39 +125,39 @@
           
           <!-- 1. Guard Live View (security + admin) -->
           <button onclick="switchScreen('guard')" id="nav-guard" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors text-left">
-            <span class="material-symbols-outlined text-[20px]">videocam</span>
+            <span class="material-icon text-[20px]">📹</span>
             <span>Giám sát trực tiếp</span>
             <span class="ml-auto w-2 h-2 rounded-full bg-accent animate-ping"></span>
           </button>
 
           <!-- 2. Violations Log (admin + management) -->
           <button onclick="switchScreen('violations')" id="nav-violations" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors text-left">
-            <span class="material-symbols-outlined text-[20px]">warning</span>
+            <span class="material-icon text-[20px]">⚠</span>
             <span>Nhật ký vi phạm</span>
             <span class="ml-auto px-1.5 py-0.2 rounded bg-accent text-[10px] font-bold text-white">23</span>
           </button>
 
           <!-- 3. Registered Vehicles (admin) -->
           <button onclick="switchScreen('vehicles')" id="nav-vehicles" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors text-left">
-            <span class="material-symbols-outlined text-[20px]">two_wheeler</span>
+            <span class="material-icon text-[20px]">•</span>
             <span>Phương tiện đăng ký</span>
           </button>
 
           <!-- 4. Analytics Dashboard (management + admin) -->
           <button onclick="switchScreen('analytics')" id="nav-analytics" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors text-left">
-            <span class="material-symbols-outlined text-[20px]">query_stats</span>
+            <span class="material-icon text-[20px]">•</span>
             <span>Báo cáo & Thống kê</span>
           </button>
 
           <!-- 5. System Health (admin) -->
           <button onclick="switchScreen('health')" id="nav-health" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors text-left">
-            <span class="material-symbols-outlined text-[20px]">health_and_safety</span>
+            <span class="material-icon text-[20px]">•</span>
             <span>Sức khỏe hệ thống</span>
           </button>
 
           <!-- 6. User Accounts (admin) -->
           <button onclick="switchScreen('users')" id="nav-users" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors text-left">
-            <span class="material-symbols-outlined text-[20px]">manage_accounts</span>
+            <span class="material-icon text-[20px]">•</span>
             <span>Quản lý tài khoản</span>
           </button>
 
@@ -287,15 +240,15 @@
           </div>
           <div class="flex items-center gap-3">
             <button onclick="triggerSimulatedViolation('NO_HELMET')" class="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-bold hover:bg-accent-hover transition-all flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+              <span class="material-icon text-[16px]">•</span>
               <span>Test Lỗi Không Mũ (Đỏ)</span>
             </button>
             <button onclick="triggerSimulatedViolation('UNREGISTERED')" class="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-all flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+              <span class="material-icon text-[16px]">•</span>
               <span>Test Biển Chưa ĐK (Cam)</span>
             </button>
             <button onclick="triggerSimulatedViolation('RIDING')" class="px-3 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-bold hover:bg-sky-700 transition-all flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+              <span class="material-icon text-[16px]">•</span>
               <span>Test Đi Xe Qua Cổng (Lam)</span>
             </button>
           </div>
@@ -316,7 +269,7 @@
               </div>
               <div class="flex items-center gap-2">
                 <span class="text-[11px] text-white/70">Loa bốt: <strong>ĐÃ BẬT</strong></span>
-                <span class="material-symbols-outlined text-emerald-400 text-[18px]">volume_up</span>
+                <span class="material-icon text-emerald-400 text-[18px]">🔊</span>
               </div>
             </div>
 
@@ -353,11 +306,11 @@
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
                     <button onclick="playAlertSound()" class="px-3 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-white font-heading text-xs font-bold transition-all flex items-center gap-1.5">
-                      <span class="material-symbols-outlined text-[18px]">campaign</span>
+                      <span class="material-icon text-[18px]">📣</span>
                       <span>Phát Loa Bốt</span>
                     </button>
                     <button onclick="dismissAlert()" class="p-2 rounded-lg bg-black/30 hover:bg-black/50 text-white transition-all">
-                      <span class="material-symbols-outlined text-[20px]">close</span>
+                      <span class="material-icon text-[20px]">✕</span>
                     </button>
                   </div>
                 </div>
@@ -369,7 +322,7 @@
             <div class="p-3 bg-navy-900 border-t border-white/10 flex items-center justify-between text-xs text-white">
               <div class="flex items-center gap-3">
                 <button onclick="triggerSimulatedViolation('NO_HELMET')" class="px-3 py-1.5 rounded bg-accent text-white font-bold hover:bg-accent-hover">Còi Báo Động Bốt</button>
-                <button onclick="alert('Đã chụp ảnh snapshot thủ công lưu vào nhật ký');" class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 font-bold">Chụp Snapshot</button>
+                <button title="(chỉ minh họa — chưa nối backend)" class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 font-bold">Chụp Snapshot</button>
               </div>
               <span class="text-white/60">Tự động đọc biển số và đối soát với danh sách học sinh</span>
             </div>
@@ -380,7 +333,7 @@
           <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl border border-gray-border p-4 flex flex-col gap-3 shadow-sm min-h-0">
             <div class="flex items-center justify-between border-b border-gray-border pb-2">
               <h2 class="font-heading font-bold text-sm text-navy uppercase tracking-wider flex items-center gap-1.5">
-                <span class="material-symbols-outlined text-accent text-[18px]">notifications_active</span>
+                <span class="material-icon text-accent text-[18px]">🔔</span>
                 Cảnh Báo Vừa Ghi Nhận
               </h2>
               <span class="text-xs font-mono font-bold text-gray-slate" id="alert-counter">6 sự kiện</span>
@@ -407,12 +360,12 @@
             <p class="text-xs text-gray-slate">Toàn bộ vi phạm được camera AI ghi nhận và lưu trữ bằng chứng đầy đủ.</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick="alert('Đang trích xuất tệp Excel danh sách vi phạm...');" class="px-3 py-2 rounded-lg bg-white border border-gray-border text-xs font-heading font-bold text-navy hover:bg-gray-50 flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">table_view</span>
+            <button title="(chỉ minh họa — chưa nối backend)" class="px-3 py-2 rounded-lg bg-white border border-gray-border text-xs font-heading font-bold text-navy hover:bg-gray-50 flex items-center gap-1.5 shadow-sm">
+              <span class="material-icon text-[16px]">•</span>
               <span>Xuất Excel</span>
             </button>
-            <button onclick="alert('Đang in báo cáo thi đua gửi Đoàn trường & Ban Giám Hiệu...');" class="px-3 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+            <button title="(chỉ minh họa — chưa nối backend)" class="px-3 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
+              <span class="material-icon text-[16px]">•</span>
               <span>In Báo Cáo</span>
             </button>
           </div>
@@ -498,11 +451,11 @@
           </div>
           <div class="flex items-center gap-2">
             <button onclick="openCsvModal()" class="px-3.5 py-2 rounded-lg bg-white border border-gray-border text-xs font-heading font-bold text-navy hover:bg-gray-50 flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">upload_file</span>
+              <span class="material-icon text-[16px]">•</span>
               <span>Nhập File CSV / Excel</span>
             </button>
             <button onclick="openAddVehicleModal()" class="px-3.5 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">add_circle</span>
+              <span class="material-icon text-[16px]">•</span>
               <span>Thêm Phương Tiện Mới</span>
             </button>
           </div>
@@ -530,7 +483,7 @@
 
         <!-- Search Bar -->
         <div class="bg-white p-3.5 rounded-xl border border-gray-border shadow-sm flex items-center gap-3">
-          <span class="material-symbols-outlined text-gray-slate text-[20px]">search</span>
+          <span class="material-icon text-gray-slate text-[20px]">🔍</span>
           <input id="vehicles-search" oninput="filterVehicles()" type="text" placeholder="Tìm kiếm theo Biển số xe, Tên học sinh, Lớp..." class="w-full text-xs bg-transparent focus:outline-none"/>
         </div>
 
@@ -568,7 +521,7 @@
             <p class="text-xs text-gray-slate">Giám sát tài nguyên phần cứng biên AI, đường truyền camera RTSP và dung lượng đĩa.</p>
           </div>
           <button onclick="refreshHealth()" class="px-3.5 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
-            <span class="material-symbols-outlined text-[16px]">refresh</span>
+            <span class="material-icon text-[16px]">↻</span>
             <span>Kiểm Tra Lại Toàn Trạm</span>
           </button>
         </div>
@@ -579,13 +532,13 @@
           <div class="bg-white p-5 rounded-xl border border-gray-border shadow-sm flex items-center justify-between">
             <div>
               <span class="text-xs text-gray-slate font-medium uppercase tracking-wider">AI Inference Pipeline</span>
-              <div class="font-heading font-bold text-2xl text-navy mt-1">30.2 FPS</div>
+              <div class="font-heading font-bold text-2xl text-navy mt-1">demo (chưa đo)</div>
               <span class="text-xs text-emerald-600 font-semibold inline-flex items-center gap-1 mt-1">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> ĐANG CHẠY (YOLOv8)
               </span>
             </div>
             <div class="w-11 h-11 rounded-lg bg-emerald-subtle text-emerald-700 flex items-center justify-center">
-              <span class="material-symbols-outlined text-[24px]">memory</span>
+              <span class="material-icon text-[24px]">🧠</span>
             </div>
           </div>
 
@@ -594,11 +547,11 @@
               <span class="text-xs text-gray-slate font-medium uppercase tracking-wider">Độ trễ xử lý</span>
               <div class="font-heading font-bold text-2xl text-navy mt-1">142 ms</div>
               <span class="text-xs text-emerald-600 font-semibold inline-flex items-center gap-1 mt-1">
-                <span class="material-symbols-outlined text-[14px]">bolt</span> &lt; 200ms Tối ưu
+                <span class="material-icon text-[14px]">⚡</span> &lt; 200ms Tối ưu
               </span>
             </div>
             <div class="w-11 h-11 rounded-lg bg-navy-50 text-navy flex items-center justify-center">
-              <span class="material-symbols-outlined text-[24px]">speed</span>
+              <span class="material-icon text-[24px]">⏱</span>
             </div>
           </div>
 
@@ -607,11 +560,11 @@
               <span class="text-xs text-gray-slate font-medium uppercase tracking-wider">Thời gian hoạt động</span>
               <div class="font-heading font-bold text-2xl text-navy mt-1">49d 14h 22m</div>
               <span class="text-xs text-navy font-semibold inline-flex items-center gap-1 mt-1">
-                99.98% Uptime SLA
+                mục tiêu uptime (chưa đo dài hạn)
               </span>
             </div>
             <div class="w-11 h-11 rounded-lg bg-navy-50 text-navy flex items-center justify-center">
-              <span class="material-symbols-outlined text-[24px]">timer</span>
+              <span class="material-icon text-[24px]">⏲</span>
             </div>
           </div>
 
@@ -624,7 +577,7 @@
               </span>
             </div>
             <div class="w-11 h-11 rounded-lg bg-emerald-subtle text-emerald-700 flex items-center justify-center">
-              <span class="material-symbols-outlined text-[24px]">videocam</span>
+              <span class="material-icon text-[24px]">📹</span>
             </div>
           </div>
 
@@ -637,7 +590,7 @@
           <div class="lg:col-span-7 bg-white p-6 rounded-xl border border-gray-border shadow-sm flex flex-col gap-5">
             <div class="flex items-center justify-between border-b border-gray-border pb-3">
               <h2 class="font-heading font-bold text-base text-navy flex items-center gap-2">
-                <span class="material-symbols-outlined text-navy text-[20px]">hard_drive</span>
+                <span class="material-icon text-navy text-[20px]">•</span>
                 Thống Kê Dung Lượng & Lưu Trữ Bằng Chứng
               </h2>
               <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-mono font-bold">SSD TỐT (27.7%)</span>
@@ -681,7 +634,7 @@
                 <p class="text-xs text-gray-slate mt-0.5">Xóa các ảnh snapshot của các vi phạm đã xử lý quá 30 ngày để giải phóng ổ cứng.</p>
               </div>
               <button onclick="cleanOldSnapshots()" class="px-4 py-2.5 rounded-lg bg-accent text-white font-heading text-xs font-bold hover:bg-accent-hover transition-colors shrink-0 shadow-sm flex items-center gap-1.5">
-                <span class="material-symbols-outlined text-[16px]">delete_sweep</span>
+                <span class="material-icon text-[16px]">•</span>
                 <span>Dọn Dẹp Ảnh &gt; 30 Ngày</span>
               </button>
             </div>
@@ -690,7 +643,7 @@
           <!-- Hardware & RTSP Diagnostics (5 cols) -->
           <div class="lg:col-span-5 bg-white p-6 rounded-xl border border-gray-border shadow-sm flex flex-col gap-4">
             <h2 class="font-heading font-bold text-base text-navy flex items-center gap-2 border-b border-gray-border pb-3">
-              <span class="material-symbols-outlined text-navy text-[20px]">router</span>
+              <span class="material-icon text-navy text-[20px]">📡</span>
               Đường Truyền Camera Cổng
             </h2>
 
@@ -735,7 +688,7 @@
             <p class="text-xs text-gray-slate">Quản lý danh sách nhân sự vận hành hệ thống theo đúng 3 vai trò phân quyền.</p>
           </div>
           <button onclick="openAddUserModal()" class="px-3.5 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
-            <span class="material-symbols-outlined text-[16px]">person_add</span>
+            <span class="material-icon text-[16px]">•</span>
             <span>Tạo Tài Khoản Mới</span>
           </button>
         </div>
@@ -804,8 +757,8 @@
             <p class="text-xs text-gray-slate">Số liệu tự động đối soát phục vụ chấm điểm thi đua và làm việc với phụ huynh.</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick="alert('Đã gửi báo cáo tổng hợp nề nếp tuần tới email Ban Giám Hiệu!');" class="px-3.5 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
-              <span class="material-symbols-outlined text-[16px]">forward_to_inbox</span>
+            <button title="(chỉ minh họa — chưa nối backend)" class="px-3.5 py-2 rounded-lg bg-navy text-white text-xs font-heading font-bold hover:bg-navy-900 flex items-center gap-1.5 shadow-sm">
+              <span class="material-icon text-[16px]">•</span>
               <span>Gửi Báo Cáo Tuần</span>
             </button>
           </div>
@@ -819,11 +772,11 @@
               <span class="text-xs font-heading font-bold text-accent uppercase tracking-wider">VI PHẠM HÔM NAY</span>
               <div class="font-heading font-bold text-4xl text-navy mt-1">23 <span class="text-base font-normal text-gray-slate">lượt</span></div>
               <span class="text-xs text-accent font-semibold inline-flex items-center gap-1 mt-1">
-                <span class="material-symbols-outlined text-[14px]">trending_up</span> +12% so với hôm qua (Cao điểm: 06:45 – 07:00)
+                <span class="material-icon text-[14px]">•</span> +12% so với hôm qua (Cao điểm: 06:45 – 07:00)
               </span>
             </div>
             <div class="w-14 h-14 rounded-2xl bg-accent-subtle text-accent flex items-center justify-center">
-              <span class="material-symbols-outlined text-[32px]">warning</span>
+              <span class="material-icon text-[32px]">⚠</span>
             </div>
           </div>
 
@@ -832,11 +785,11 @@
               <span class="text-xs font-heading font-bold text-navy uppercase tracking-wider">VI PHẠM TUẦN NÀY</span>
               <div class="font-heading font-bold text-4xl text-navy mt-1">118 <span class="text-base font-normal text-gray-slate">lượt ghi nhận</span></div>
               <span class="text-xs text-emerald-600 font-semibold inline-flex items-center gap-1 mt-1">
-                <span class="material-symbols-outlined text-[14px]">trending_down</span> -18.3% so với tuần trước (Hiệu quả nhắc nhở rõ rệt)
+                <span class="material-icon text-[14px]">•</span> -18.3% so với tuần trước (Hiệu quả nhắc nhở rõ rệt)
               </span>
             </div>
             <div class="w-14 h-14 rounded-2xl bg-navy-50 text-navy flex items-center justify-center">
-              <span class="material-symbols-outlined text-[32px]">date_range</span>
+              <span class="material-icon text-[32px]">•</span>
             </div>
           </div>
 
@@ -1058,10 +1011,10 @@
           <div class="lg:col-span-5 bg-white rounded-xl border border-gray-border shadow-sm p-6 flex flex-col gap-4">
             <div class="border-b border-gray-border pb-3">
               <h2 class="font-heading font-bold text-base text-navy flex items-center gap-2">
-                <span class="material-symbols-outlined text-emerald-600 text-[20px]">military_tech</span>
+                <span class="material-icon text-emerald-600 text-[20px]">•</span>
                 Tuyên Dương: Lớp Không Vi Phạm
               </h2>
-              <p class="text-xs text-gray-slate">100% học sinh chấp hành nề nếp an toàn giao thông tuần này.</p>
+              <p class="text-xs text-gray-slate">Mục tiêu: mọi lượt vi phạm đều có ảnh bằng chứng và mã sự kiện xuyên suốt.</p>
             </div>
 
             <div class="space-y-3 text-xs">
@@ -1112,7 +1065,7 @@
       <div class="flex items-center justify-between border-b border-gray-border pb-3">
         <h3 class="font-heading font-bold text-lg text-navy">Đăng Ký Phương Tiện Mới</h3>
         <button onclick="closeModal('modal-vehicle')" class="text-gray-slate hover:text-navy">
-          <span class="material-symbols-outlined text-[20px]">close</span>
+          <span class="material-icon text-[20px]">✕</span>
         </button>
       </div>
       <form onsubmit="event.preventDefault(); saveVehicle();" class="space-y-3 text-xs">
@@ -1153,17 +1106,17 @@
       <div class="flex items-center justify-between border-b border-gray-border pb-3">
         <h3 class="font-heading font-bold text-lg text-navy">Nhập Danh Sách Xe Hàng Loạt (CSV/Excel)</h3>
         <button onclick="closeModal('modal-csv')" class="text-gray-slate hover:text-navy">
-          <span class="material-symbols-outlined text-[20px]">close</span>
+          <span class="material-icon text-[20px]">✕</span>
         </button>
       </div>
       <div class="p-6 border-2 border-dashed border-gray-border rounded-xl flex flex-col items-center justify-center text-center gap-2 bg-gray-50 hover:bg-white cursor-pointer transition-colors" onclick="simulateCsvSelect()">
-        <span class="material-symbols-outlined text-[36px] text-navy">cloud_upload</span>
+        <span class="material-icon text-[36px] text-navy">•</span>
         <div class="font-heading font-bold text-xs text-navy">Nhấp để chọn file hoặc kéo thả tệp CSV vào đây</div>
         <p class="text-[11px] text-gray-slate">Định dạng hỗ trợ: .csv, .xlsx (Cột: BienSo, HoTen, Lop, LoaiXe)</p>
       </div>
       <div class="flex justify-between items-center text-xs text-navy font-semibold">
-        <a href="#" onclick="alert('Đang tải file CSV template mẫu...');" class="hover:underline flex items-center gap-1">
-          <span class="material-symbols-outlined text-[16px]">download</span>
+        <a href="#" title="(chỉ minh họa — chưa nối backend)" class="hover:underline flex items-center gap-1">
+          <span class="material-icon text-[16px]">⬇</span>
           Tải file CSV mẫu chuẩn
         </a>
       </div>
@@ -1180,7 +1133,7 @@
       <div class="flex items-center justify-between border-b border-gray-border pb-3">
         <h3 class="font-heading font-bold text-lg text-navy">Tạo Tài Khoản Cán Bộ</h3>
         <button onclick="closeModal('modal-user')" class="text-gray-slate hover:text-navy">
-          <span class="material-symbols-outlined text-[20px]">close</span>
+          <span class="material-icon text-[20px]">✕</span>
         </button>
       </div>
       <form onsubmit="event.preventDefault(); saveUser();" class="space-y-3 text-xs">
@@ -1214,7 +1167,7 @@
       <div class="flex items-center justify-between border-b border-white/10 pb-2">
         <span class="font-heading font-bold text-sm" id="modal-image-title">Ảnh Bằng Chứng Vi Phạm</span>
         <button onclick="closeModal('modal-image')" class="text-white/60 hover:text-white">
-          <span class="material-symbols-outlined text-[20px]">close</span>
+          <span class="material-icon text-[20px]">✕</span>
         </button>
       </div>
       <div class="relative aspect-video rounded-lg overflow-hidden bg-black flex items-center justify-center">
@@ -1225,7 +1178,7 @@
       </div>
       <div class="flex items-center justify-between text-xs text-white/80 pt-1">
         <span>Ảnh trích xuất gốc từ cảm biến camera cổng 01. Đã băm mã SHA-256 đối soát.</span>
-        <button onclick="alert('Đã tải ảnh bằng chứng về máy tính.');" class="px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 font-bold">Tải Ảnh</button>
+        <button title="(chỉ minh họa — chưa nối backend)" class="px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 font-bold">Tải Ảnh</button>
       </div>
     </div>
   </div>
@@ -1253,7 +1206,7 @@
       { id: 1, plate: '29MD-883.21', student: 'Trần Hoàng Mai', class: '10A1', type: 'Xe máy điện VinFast Feliz', approved: true },
       { id: 2, plate: '29D-280.11', student: 'Vũ Minh Đức', class: '11B4', type: 'Xe đạp điện Pega Cap-A', approved: true },
       { id: 3, plate: '29AA-045.10', student: 'Lê Thuỳ Trang', class: '12A2', type: 'Honda Wave Alpha 50cc', approved: false },
-      { id: 4, plate: '29AA-999.00', student: 'Phạm Quốc Bảo', class: '12B2', type: 'Yadea G5 Đen', approved: true },
+      { id: 4, plate: '29AA-999.00', student: '— demo fixture —', class: '—', type: 'Yadea G5 Đen', approved: true },
       { id: 5, plate: '29MD-512.33', student: 'Trần Minh Tuấn', class: '11B3', type: 'Xe máy điện VinFast Evo', approved: true },
     ];
 
@@ -1537,7 +1490,7 @@
                 <button onclick="openImageZoom('${v.plate}')" class="px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-navy font-semibold text-xs transition-colors">
                   Ảnh chụp
                 </button>
-                <button onclick="alert('Đã gửi thông báo vi phạm nề nếp tới phụ huynh học sinh ${v.student}');" class="px-2.5 py-1 rounded bg-navy text-white hover:bg-navy-900 font-semibold text-xs transition-colors">
+                <button title="(chỉ minh họa — chưa nối backend)" class="px-2.5 py-1 rounded bg-navy text-white hover:bg-navy-900 font-semibold text-xs transition-colors">
                   Báo BGH
                 </button>
               </div>
@@ -1588,10 +1541,10 @@
           <td class="py-3 px-4 text-right">
             <div class="inline-flex items-center gap-2">
               <button onclick="editVehicle(${v.id})" class="text-navy hover:text-navy-900 p-1" title="Chỉnh sửa">
-                <span class="material-symbols-outlined text-[18px]">edit</span>
+                <span class="material-icon text-[18px]">✎</span>
               </button>
               <button onclick="deleteVehicle(${v.id})" class="text-accent hover:text-accent-hover p-1" title="Xóa phương tiện">
-                <span class="material-symbols-outlined text-[18px]">delete</span>
+                <span class="material-icon text-[18px]">🗑</span>
               </button>
             </div>
           </td>
@@ -1674,10 +1627,10 @@
             <td class="py-3 px-4 text-right">
               <div class="inline-flex items-center gap-2">
                 <button onclick="editUser(${u.id})" class="text-navy hover:text-navy-900 p-1" title="Chỉnh sửa">
-                  <span class="material-symbols-outlined text-[18px]">edit</span>
+                  <span class="material-icon text-[18px]">✎</span>
                 </button>
                 <button onclick="deleteUser(${u.id})" class="text-accent hover:text-accent-hover p-1" title="Xóa tài khoản">
-                  <span class="material-symbols-outlined text-[18px]">delete</span>
+                  <span class="material-icon text-[18px]">🗑</span>
                 </button>
               </div>
             </td>
@@ -1742,7 +1695,7 @@
     }
 
     function refreshHealth() {
-      alert('Đã kiểm tra lại kết nối cảm biến và pipeline: 100% dịch vụ hoạt động bình thường.');
+      alert('Đã kiểm tra lại kết nối cảm biến và pipeline: demo (chưa đo đầy đủ).');
     }
 
     // Modal helpers
