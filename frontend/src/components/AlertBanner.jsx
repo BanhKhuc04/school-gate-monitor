@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../api/client';
-import { warmUpVoices, speakVietnamese, stopSpeech, getVietnameseVoiceStatus } from '../utils/speak';
+import { warmUpVoices, speakVietnamese, speakEnglish, stopSpeech, getVietnameseVoiceStatus } from '../utils/speak';
 import { clipsForMessage, playClips } from '../utils/offlineVoice';
 import { createAlertAudio, buildAlertMessage } from '../utils/alertAudio';
 import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
+import { useLang } from '../i18n/LanguageContext';
 
 /**
  * AlertBanner — connects to /guard/ws WebSocket and renders a banner with
@@ -17,6 +18,9 @@ import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
 
 export default function AlertBanner({ token, onAlert, gate = 'main',
   audioEnabled = false, audioClientId = null }) {
+  const { lang, t } = useLang();
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [snapshotUrl, setSnapshotUrl] = useState(null);
@@ -63,6 +67,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
       // browsers' Vietnamese voices are online-only, and a LAN without
       // internet still reports navigator.onLine === true.
       speak: (text, opts) => {
+        if (lang === 'en') { speakEnglish(text, opts); return; }
         const clips = getVietnameseVoiceStatus().local ? null : clipsForMessage(text);
         if (!clips) { speakVietnamese(text, opts); return; }
         clipPlayback.current?.stop();
@@ -70,13 +75,14 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
         clipPlayback.current.then(ok => { if (!ok) speakVietnamese(text, opts); });
       },
       cancel: () => { clipPlayback.current?.stop(); stopSpeech(); },
-      config: { rate: 1.45, volume: 1, debug: false },
+      config: { rate: lang === 'en' ? 1.1 : 1.45, volume: 1, debug: false },
+      lang,
     });
     return () => {
       audioRef.current?.dispose?.();
       audioRef.current = null;
     };
-  }, [audioEnabled, audioClientId]);
+  }, [audioEnabled, audioClientId, lang]);
 
   useEffect(() => {
     if (!token) return;
@@ -101,7 +107,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
 
     function handleAlert(data) {
       if (data?.type === 'gate_crossed') return;
-      const { tone, title, detail } = describeAlert(data);
+      const { tone, title, detail } = describeAlert(data, langRef.current);
       setMessage(`${tone === 'info' ? '✅' : '⚠️'} ${title} — ${detail}`);
       setSnapshotUrl(data.snapshot_url || null);
       setVisible(true);
@@ -192,7 +198,7 @@ export default function AlertBanner({ token, onAlert, gate = 'main',
       {snapshotUrl && (
         <img
           src={`${API_BASE_URL}${snapshotUrl}`}
-          alt="Ảnh chụp bằng chứng"
+          alt={t('Ảnh chụp bằng chứng', 'Evidence snapshot')}
           style={{ height: '84px', borderRadius: '4px', border: '2px solid white' }}
         />
       )}

@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
 import StudentAutocomplete from '../components/StudentAutocomplete';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/LanguageContext';
 
 export default function AdminVehiclesPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { t } = useLang();
   const isAdmin = user?.role === 'admin';
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,7 @@ export default function AdminVehiclesPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      setError('Không xuất được file');
+      setError(t('Không xuất được file', 'Could not export the file'));
     } finally {
       setExporting(false);
     }
@@ -44,7 +46,7 @@ export default function AdminVehiclesPage() {
       const res = await client.get('/api/vehicles');
       setVehicles(res.data);
     } catch {
-      setError('Không tải được danh sách xe');
+      setError(t('Không tải được danh sách xe', 'Could not load the bike list'));
     } finally {
       setLoading(false);
     }
@@ -88,7 +90,7 @@ export default function AdminVehiclesPage() {
       resetForm();
       loadVehicles();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Lỗi khi lưu');
+      setError(err.response?.data?.detail || t('Lỗi khi lưu', 'Save failed'));
     }
   }
 
@@ -101,12 +103,12 @@ export default function AdminVehiclesPage() {
   }
 
   async function handleDelete(id) {
-    if (!confirm('Xóa xe này?')) return;
+    if (!confirm(t('Xóa xe này?', 'Delete this bike?'))) return;
     try {
       await client.delete(`/api/vehicles/${id}`);
       loadVehicles();
     } catch {
-      setError('Xóa thất bại');
+      setError(t('Xóa thất bại', 'Delete failed'));
     }
   }
 
@@ -118,7 +120,7 @@ export default function AdminVehiclesPage() {
         <div className="flex items-center justify-between gap-2 mb-6">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] animate-pulse" />
-            <h1 className="text-xl font-bold text-[#374151]">Phương tiện Đăng ký</h1>
+            <h1 className="text-xl font-bold text-[#374151]">{t('Phương tiện Đăng ký', 'Registered Vehicles')}</h1>
           </div>
           <button
             type="button"
@@ -129,7 +131,7 @@ export default function AdminVehiclesPage() {
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
               <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            {exporting ? 'Đang xuất...' : 'Xuất Excel'}
+            {exporting ? t('Đang xuất...', 'Exporting...') : t('Xuất Excel', 'Export to Excel')}
           </button>
         </div>
 
@@ -137,7 +139,7 @@ export default function AdminVehiclesPage() {
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-[#d1d5db]">
             <div>
-              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">Tổng xe đăng ký</p>
+              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">{t('Tổng xe đăng ký', 'Total registered bikes')}</p>
               <p className="text-3xl font-bold font-mono text-[#374151] mt-1">{vehicles.length}</p>
             </div>
             <div className="w-11 h-11 rounded-lg bg-[#e8f5e9] flex items-center justify-center">
@@ -149,7 +151,7 @@ export default function AdminVehiclesPage() {
           </div>
           <div className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-[#d1d5db]">
             <div>
-              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">Đang chỉnh sửa</p>
+              <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">{t('Đang chỉnh sửa', 'Editing')}</p>
               <p className="text-3xl font-bold font-mono text-[#c92035] mt-1">{editingId ? '1' : '0'}</p>
             </div>
             <div className="w-11 h-11 rounded-lg bg-[#f8d7dc] flex items-center justify-center">
@@ -169,7 +171,7 @@ export default function AdminVehiclesPage() {
             <svg className="w-5 h-5 text-[#10b981]" viewBox="0 0 24 24" fill="none">
               <path d="M12 4v16m8-8H4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
             </svg>
-            {editingId ? 'Chỉnh sửa xe' : 'Thêm xe mới'}
+            {editingId ? t('Chỉnh sửa xe', 'Edit bike') : t('Thêm xe mới', 'Add new bike')}
           </h2>
 
           {error && (
@@ -182,7 +184,7 @@ export default function AdminVehiclesPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
-                  Biển số
+                  {t('Biển số', 'Plate')}
                 </label>
                 <input
                   type="text"
@@ -195,7 +197,7 @@ export default function AdminVehiclesPage() {
               </div>
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
-                  Tên học sinh
+                  {t('Tên học sinh', 'Student name')}
                 </label>
                 <StudentAutocomplete
                   value={studentName}
@@ -205,12 +207,12 @@ export default function AdminVehiclesPage() {
                     setPlate(v.plate_number || '');
                     setStudentClass(v.student_class || '');
                   }}
-                  placeholder="Nguyễn Văn A"
+                  placeholder={t('Nguyễn Văn A', 'Nguyen Van A')}
                 />
               </div>
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
-                  Lớp
+                  {t('Lớp', 'Class')}
                 </label>
                 <input
                   type="text"
@@ -230,7 +232,7 @@ export default function AdminVehiclesPage() {
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
                   <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                {editingId ? 'Lưu' : 'Thêm xe'}
+                {editingId ? t('Lưu', 'Save') : t('Thêm xe', 'Add bike')}
               </button>
               {editingId && (
                 <button
@@ -241,7 +243,7 @@ export default function AdminVehiclesPage() {
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
                     <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
-                  Hủy
+                  {t('Hủy', 'Cancel')}
                 </button>
               )}
             </div>
@@ -254,14 +256,14 @@ export default function AdminVehiclesPage() {
             <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
               <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12M16 16l-4 4m0 0l4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            Nhập danh sách từ CSV
+            {t('Nhập danh sách từ CSV', 'Import list from CSV')}
           </h2>
           <div className="flex flex-wrap gap-3 items-center">
             <label className="flex items-center gap-2 bg-[#f4f6f9] hover:bg-[#eceff3] text-[#374151] text-[12px] font-medium py-2 px-4 rounded-lg cursor-pointer transition-colors">
               <svg className="w-4 h-4 text-[#c92035]" viewBox="0 0 24 24" fill="none">
                 <path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
               </svg>
-              Chọn file CSV
+              {t('Chọn file CSV', 'Choose CSV file')}
               <input
                 type="file"
                 accept=".csv"
@@ -279,12 +281,12 @@ export default function AdminVehiclesPage() {
                     );
                     if (dryRes.data.errors?.length === 0 && dryRes.data.created === 0) {
                       // Empty file or only invalid rows
-                      alert('File CSV không có dòng hợp lệ nào để nhập.');
+                      alert(t('File CSV không có dòng hợp lệ nào để nhập.', 'The CSV file has no valid rows to import.'));
                       return;
                     }
                     setCsvPreview({ dry_run_results: dryRes.data, filename: file.name, file });
                   } catch (err) {
-                    setError(err.response?.data?.detail || 'Lỗi khi đọc file CSV');
+                    setError(err.response?.data?.detail || t('Lỗi khi đọc file CSV', 'Error reading the CSV file'));
                   }
                   e.target.value = '';
                 }}
@@ -307,7 +309,7 @@ export default function AdminVehiclesPage() {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
                 <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
               </svg>
-              Tải file mẫu CSV
+              {t('Tải file mẫu CSV', 'Download sample CSV')}
             </button>
           </div>
         </div>
@@ -318,7 +320,7 @@ export default function AdminVehiclesPage() {
         {loading ? (
           <div className="text-center text-[#6b7280] py-12">
             <div className="w-8 h-8 border-2 border-[#c92035] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            Đang tải...
+            {t('Đang tải...', 'Loading...')}
           </div>
         ) : vehicles.length === 0 ? (
           <div className="bg-white rounded-xl p-12 text-center border border-[#d1d5db]">
@@ -328,8 +330,8 @@ export default function AdminVehiclesPage() {
                 <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
               </svg>
             </div>
-            <p className="text-[#6b7280] font-medium">Chưa có xe nào được đăng ký</p>
-            <p className="text-[10px] font-mono text-[#9ca3af] mt-1">Thêm xe mới hoặc nhập danh sách từ file CSV</p>
+            <p className="text-[#6b7280] font-medium">{t('Chưa có xe nào được đăng ký', 'No bikes registered yet')}</p>
+            <p className="text-[10px] font-mono text-[#9ca3af] mt-1">{t('Thêm xe mới hoặc nhập danh sách từ file CSV', 'Add a new bike or import a list from a CSV file')}</p>
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm border border-[#d1d5db] overflow-hidden">
@@ -337,11 +339,11 @@ export default function AdminVehiclesPage() {
               <table className="w-full text-left min-w-[600px]">
                 <thead>
                   <tr className="bg-[#f4f6f9] text-[#6b7280] font-mono text-[11px] uppercase tracking-wider">
-                    <th className="py-3 px-4 font-semibold">Biển số</th>
-                    <th className="py-3 px-3 font-semibold">Học sinh</th>
-                    <th className="py-3 px-3 font-semibold">Lớp</th>
-                    <th className="py-3 px-3 font-semibold">Vi phạm 30 ngày</th>
-                    <th className="py-3 px-4 text-right font-semibold">Thao tác</th>
+                    <th className="py-3 px-4 font-semibold">{t('Biển số', 'Plate')}</th>
+                    <th className="py-3 px-3 font-semibold">{t('Học sinh', 'Student')}</th>
+                    <th className="py-3 px-3 font-semibold">{t('Lớp', 'Class')}</th>
+                    <th className="py-3 px-3 font-semibold">{t('Vi phạm 30 ngày', 'Violations (30 days)')}</th>
+                    <th className="py-3 px-4 text-right font-semibold">{t('Thao tác', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f4f6f9] text-[12px] text-[#374151]">
@@ -365,7 +367,7 @@ export default function AdminVehiclesPage() {
                             </span>
                             {isRepeat && (
                               <span className="px-1.5 py-0.5 bg-[#fee2e2] text-[#991b1b] rounded text-[10px] font-semibold font-mono border border-[#fca5a5]">
-                                TÁI PHẠM
+                                {t('TÁI PHẠM', 'REPEAT OFFENDER')}
                               </span>
                             )}
                           </div>
@@ -376,7 +378,7 @@ export default function AdminVehiclesPage() {
                               onClick={() => navigate(`/admin/students/${v.id}/violations`)}
                               className="px-3 py-1 rounded text-[11px] font-semibold text-[#3b82f6] hover:bg-[#dbeafe] transition-colors"
                             >
-                              Lịch sử
+                              {t('Lịch sử', 'History')}
                             </button>
                             {isAdmin && (
                               <>
@@ -384,13 +386,13 @@ export default function AdminVehiclesPage() {
                                   onClick={() => startEdit(v)}
                                   className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
                                 >
-                                  Sửa
+                                  {t('Sửa', 'Edit')}
                                 </button>
                                 <button
                                   onClick={() => handleDelete(v.id)}
                                   className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
                                 >
-                                  Xóa
+                                  {t('Xóa', 'Delete')}
                                 </button>
                               </>
                             )}
@@ -404,7 +406,7 @@ export default function AdminVehiclesPage() {
             </div>
             <div className="px-4 py-3 bg-[#f4f6f9] border-t border-[#d1d5db]">
               <span className="font-mono text-[11px] text-[#6b7280]">
-                Tổng: <span className="font-bold text-[#374151]">{vehicles.length}</span> xe
+                {t('Tổng', 'Total')}: <span className="font-bold text-[#374151]">{vehicles.length}</span> {t('xe', 'bikes')}
               </span>
             </div>
           </div>
@@ -422,7 +424,7 @@ export default function AdminVehiclesPage() {
             >
               <div className="flex items-center justify-between p-4 border-b border-[#d1d5db]">
                 <h2 className="text-base font-bold text-[#374151]">
-                  Xem trước CSV — {csvPreview.filename}
+                  {t('Xem trước CSV', 'CSV preview')} — {csvPreview.filename}
                 </h2>
                 <button
                   onClick={() => setCsvPreview(null)}
@@ -437,31 +439,31 @@ export default function AdminVehiclesPage() {
                     <p className="text-2xl font-bold font-mono text-[#065f46]">
                       {csvPreview.dry_run_results.created}
                     </p>
-                    <p className="text-[11px] font-mono text-[#065f46]">Sẽ thêm mới</p>
+                    <p className="text-[11px] font-mono text-[#065f46]">{t('Sẽ thêm mới', 'Will be added')}</p>
                   </div>
                   <div className="bg-[#fef3c7] rounded-lg p-3 text-center border border-[#fcd34d]">
                     <p className="text-2xl font-bold font-mono text-[#92400e]">
                       {csvPreview.dry_run_results.skipped}
                     </p>
-                    <p className="text-[11px] font-mono text-[#92400e]">Bị bỏ qua (trùng)</p>
+                    <p className="text-[11px] font-mono text-[#92400e]">{t('Bị bỏ qua (trùng)', 'Skipped (duplicate)')}</p>
                   </div>
                   <div className="bg-[#fee2e2] rounded-lg p-3 text-center border border-[#fca5a5]">
                     <p className="text-2xl font-bold font-mono text-[#991b1b]">
                       {csvPreview.dry_run_results.errors?.length || 0}
                     </p>
-                    <p className="text-[11px] font-mono text-[#991b1b]">Lỗi</p>
+                    <p className="text-[11px] font-mono text-[#991b1b]">{t('Lỗi', 'Errors')}</p>
                   </div>
                 </div>
 
                 {csvPreview.dry_run_results.errors?.length > 0 && (
                   <div className="mb-4">
                     <p className="text-[11px] font-mono font-semibold text-[#991b1b] uppercase mb-2">
-                      Lỗi ({csvPreview.dry_run_results.errors.length})
+                      {t('Lỗi', 'Errors')} ({csvPreview.dry_run_results.errors.length})
                     </p>
                     <div className="bg-[#fef2f2] border border-[#fca5a5] rounded-lg p-3 max-h-32 overflow-y-auto">
                       {csvPreview.dry_run_results.errors.map((err, i) => (
                         <p key={i} className="text-[11px] font-mono text-[#991b1b]">
-                          Dòng {err.row}: {err.message}
+                          {t('Dòng', 'Row')} {err.row}: {err.message}
                         </p>
                       ))}
                     </div>
@@ -474,7 +476,7 @@ export default function AdminVehiclesPage() {
                     onClick={() => setCsvPreview(null)}
                     className="flex-1 bg-[#6b7280] hover:bg-[#4b5563] text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
                   >
-                    Hủy bỏ
+                    {t('Hủy bỏ', 'Cancel')}
                   </button>
                   <button
                     type="button"
@@ -487,20 +489,20 @@ export default function AdminVehiclesPage() {
                           headers: { 'Content-Type': 'multipart/form-data' },
                         });
                         const d = res.data;
-                        alert(`Đã nhập: ${d.created} mới, ${d.skipped} trùng, ${d.errors?.length || 0} lỗi`);
+                        alert(t(`Đã nhập: ${d.created} mới, ${d.skipped} trùng, ${d.errors?.length || 0} lỗi`, `Imported: ${d.created} new, ${d.skipped} duplicates, ${d.errors?.length || 0} errors`));
                         if (d.errors?.length) {
-                          alert('Lỗi: ' + d.errors.slice(0, 5).map(e => `Dòng ${e.row}: ${e.message}`).join('\n'));
+                          alert(t('Lỗi: ', 'Errors: ') + d.errors.slice(0, 5).map(e => t(`Dòng ${e.row}: ${e.message}`, `Row ${e.row}: ${e.message}`)).join('\n'));
                         }
                         setCsvPreview(null);
                         loadVehicles();
                         loadSummary();
                       } catch (err) {
-                        alert('Lỗi khi nhập: ' + (err.response?.data?.detail || err.message));
+                        alert(t('Lỗi khi nhập: ', 'Import failed: ') + (err.response?.data?.detail || err.message));
                       }
                     }}
                     className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white text-[12px] font-semibold py-2 px-4 rounded-lg transition-colors"
                   >
-                    Xác nhận nhập ({csvPreview.dry_run_results.created} mới)
+                    {t('Xác nhận nhập', 'Confirm import')} ({csvPreview.dry_run_results.created} {t('mới', 'new')})
                   </button>
                 </div>
               </div>

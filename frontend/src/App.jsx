@@ -6,6 +6,7 @@ import SettingsLayout from './components/SettingsLayout';
 import ViolationsLayout from './components/ViolationsLayout';
 import RequireRole from './auth/RequireRole';
 import Layout from './components/Layout';
+import PageLoading from './components/PageLoading';
 
 const GuardPage = lazy(() => import('./pages/GuardPage'));
 const AdminVehiclesPage = lazy(() => import('./pages/AdminVehiclesPage'));
@@ -75,5 +76,5 @@ function AppRoutes() {
 }
 
 export default function App() {
-  return <BrowserRouter><Suspense fallback={<p role="status" className="p-6 text-sm">Đang tải trang…</p>}><AppRoutes /></Suspense></BrowserRouter>;
+  return <BrowserRouter><Suspense fallback={<PageLoading />}><AppRoutes /></Suspense></BrowserRouter>;
 }

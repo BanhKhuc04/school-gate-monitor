@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import client from '../api/client';
+import { useLang } from '../i18n/LanguageContext';
 
 // UUID an toàn cho cả origin HTTP LAN (crypto.randomUUID chỉ có ở secure
 // context). Fallback dùng crypto.getRandomValues để tạo UUID v4 format
@@ -28,6 +29,10 @@ function safeUUID() {
 }
 
 export function useAudioLease(gate) {
+  // Ref, không đưa `t` vào deps: chạy lại effect heartbeat sẽ trả lease loa.
+  const { t } = useLang();
+  const tRef = useRef(t);
+  tRef.current = t;
   // State khởi tạo bằng lazy initializer — chỉ chạy 1 lần khi mount,
   // đảm bảo mỗi tab/instance có UUID khác nhau (không bị reset khi re-render).
   const [clientId] = useState(() => safeUUID());
@@ -51,7 +56,7 @@ export function useAudioLease(gate) {
     const heartbeat = setInterval(async () => {
       try { await client.post('/guard/audio/lease', data); }
       catch {
-        if (!stopped) { setLeaseGate(null); setError('Mất quyền phát loa; vui lòng bật lại.'); }
+        if (!stopped) { setLeaseGate(null); setError(tRef.current('Mất quyền phát loa; vui lòng bật lại.', 'Lost the speaker; please turn it on again.')); }
       }
     }, 5000);
     return () => {
@@ -70,7 +75,7 @@ export function useAudioLease(gate) {
       if (mounted.current && currentGate.current === gate) setLeaseGate(gate);
       else client.delete('/guard/audio/lease', {data}).catch(() => {});
     } catch (err) {
-      if (mounted.current) setError(err.response?.data?.detail || 'Không bật được loa trên máy này.');
+      if (mounted.current) setError(err.response?.data?.detail || t('Không bật được loa trên máy này.', 'Could not turn on the speaker on this machine.'));
     } finally { if (mounted.current) setBusy(false); }
   }
   return {enabled:leaseGate === gate, clientId, busy, error, toggle};

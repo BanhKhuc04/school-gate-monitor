@@ -8,11 +8,13 @@ import client, { API_BASE_URL } from '../api/client';
 import { describeAlert, TONE_COLORS } from '../utils/alertDisplay';
 import { useAudioLease } from '../utils/useAudioLease';
 import { getVietnameseVoiceStatus } from '../utils/speak';
+import { useLang, localeOf } from '../i18n/LanguageContext';
 
 const MAX_LOG_ITEMS = 12;
 
 export default function GuardPage() {
   const { token, user } = useAuth();
+  const { lang, t } = useLang();
   const [health, setHealth] = useState(null);
   const [alertLog, setAlertLog] = useState([]);
   const [logTab, setLogTab] = useState('recognition');
@@ -30,7 +32,7 @@ export default function GuardPage() {
   // gates from API; null = chưa load (hoặc health = null); array = đã load
   const gates = health?.gates ?? null;
   const showGateSelector = gates !== null && gates.length > 1;
-  const activeGateName = gates?.find(g => g.id === activeGate)?.name ?? 'Cổng Chính';
+  const activeGateName = gates?.find(g => g.id === activeGate)?.name ?? t('Cổng Chính', 'Main gate');
   const activePipeline = gates?.find(g => g.id === activeGate)?.pipeline;
   const isSplit = showGateSelector && viewMode === 'split';
 
@@ -97,7 +99,7 @@ export default function GuardPage() {
       setDemo(res.data);
       if (res.data.active) setViewMode('split'); // xem cả 2 video cùng lúc
     } catch (err) {
-      setDemoError(err.response?.data?.detail || 'Không đổi được chế độ video test.');
+      setDemoError(err.response?.data?.detail || t('Không đổi được chế độ video test.', 'Could not switch test-video mode.'));
     } finally {
       setDemoBusy(false);
     }
@@ -110,7 +112,7 @@ export default function GuardPage() {
     if (g?.playing) {
       return { label: g.position != null ? `VIDEO TEST · ${clock(g.position)}` : 'VIDEO TEST', className: 'bg-warning text-on-warning' };
     }
-    if (demo?.active) return { label: 'ĐANG CHUYỂN…', className: 'bg-warning/70 text-on-warning' };
+    if (demo?.active) return { label: t('ĐANG CHUYỂN…', 'SWITCHING…'), className: 'bg-warning/70 text-on-warning' };
     return { label: 'LIVE', className: 'bg-error/90' };
   };
 
@@ -134,7 +136,7 @@ export default function GuardPage() {
                 ))}
               </select>
             ) : (
-              <h1 className="text-lg font-bold">{isSplit ? 'Tất cả camera' : activeGateName}</h1>
+              <h1 className="text-lg font-bold">{isSplit ? t('Tất cả camera', 'All cameras') : activeGateName}</h1>
             )}
             {!isSplit && (
               <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
@@ -151,9 +153,9 @@ export default function GuardPage() {
                   ? 'bg-success/90 border-success text-on-success'
                   : 'bg-transparent border-white/30 text-inverse-on-surface/80 hover:bg-white/10'
               }`}
-              title={lease.enabled ? 'Bấm để nhường quyền loa' : 'Bấm để xin quyền phát loa (cần thao tác của người dùng)'}
+              title={lease.enabled ? t('Bấm để nhường quyền loa', 'Click to release the speaker') : t('Bấm để xin quyền phát loa (cần thao tác của người dùng)', 'Click to take over the speaker (needs a user click)')}
             >
-              {lease.busy ? '…' : lease.enabled ? '🔊 Loa: BẬT' : '🔈 Loa: TẮT'}
+              {lease.busy ? '…' : lease.enabled ? t('🔊 Loa: BẬT', '🔊 Speaker: ON') : t('🔈 Loa: TẮT', '🔈 Speaker: OFF')}
             </button>
             <span
               className={`font-mono text-[11px] px-2 py-0.5 rounded ${
@@ -164,8 +166,8 @@ export default function GuardPage() {
                     : 'bg-error/90 text-on-error'
               }`}
               title={voiceStatus.voice
-                ? `Giọng: ${voiceStatus.voice}${voiceStatus.local ? ' (local, chạy offline)' : ' (remote — cần Internet)'}`
-                : 'Trình duyệt không hỗ trợ Web Speech API'}
+                ? `${t('Giọng', 'Voice')}: ${voiceStatus.voice}${voiceStatus.local ? t(' (local, chạy offline)', ' (local, works offline)') : t(' (remote — cần Internet)', ' (remote — needs Internet)')}`
+                : t('Trình duyệt không hỗ trợ Web Speech API', 'This browser does not support the Web Speech API')}
             >
               {voiceStatus.local
                 ? '🇻🇳 VI-local'
@@ -188,10 +190,10 @@ export default function GuardPage() {
                     : 'bg-transparent border-white/30 text-inverse-on-surface hover:bg-white/10'
                 }`}
                 title={demo.available || demo.active
-                  ? 'Hai cổng cùng phát 2 video quay sẵn (camera trước + camera sau) để kiểm tra hệ thống'
-                  : `Thiếu video test: ${(demo.missing || []).join(', ')} (chép vào data/demo_videos/)`}
+                  ? t('Hai cổng cùng phát 2 video quay sẵn (camera trước + camera sau) để kiểm tra hệ thống', 'Both gates play 2 pre-recorded videos (front + rear camera) to test the system')
+                  : t(`Thiếu video test: ${(demo.missing || []).join(', ')} (chép vào data/demo_videos/)`, `Missing test videos: ${(demo.missing || []).join(', ')} (copy them into data/demo_videos/)`)}
               >
-                {demoBusy ? '…' : demo.active ? '■ Dừng video test' : '▶ Chạy video test'}
+                {demoBusy ? '…' : demo.active ? t('■ Dừng video test', '■ Stop test video') : t('▶ Chạy video test', '▶ Run test video')}
               </button>
             )}
             {demoError && (
@@ -204,33 +206,34 @@ export default function GuardPage() {
                   onClick={() => setViewMode('single')}
                   className={`px-2.5 py-1 ${viewMode === 'single' ? 'bg-primary-container text-on-primary-container' : 'text-inverse-on-surface/70'}`}
                 >
-                  1 cổng
+                  {t('1 cổng', '1 gate')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode('split')}
                   className={`px-2.5 py-1 ${viewMode === 'split' ? 'bg-primary-container text-on-primary-container' : 'text-inverse-on-surface/70'}`}
                 >
-                  Song song
+                  {t('Song song', 'Side by side')}
                 </button>
               </div>
             )}
           </div>
           {demo?.active && (
             <div data-testid="demo-banner" className="mb-2 rounded-lg bg-warning text-on-warning px-3 py-2 text-sm font-bold">
-              ĐANG CHẠY VIDEO TEST — hình là video quay sẵn, không phải camera thật. Vi phạm ghi nhận lúc này có nhãn TEST.
+              {t('ĐANG CHẠY VIDEO TEST — hình là video quay sẵn, không phải camera thật. Vi phạm ghi nhận lúc này có nhãn TEST.', 'TEST VIDEO RUNNING — the picture is pre-recorded video, not a real camera. Violations logged now are tagged TEST.')}
               <span data-testid="demo-sync" className="block font-mono text-[12px] font-semibold mt-0.5">
                 {demo.switching
-                  ? 'Đang chuyển 2 camera sang video test…'
+                  ? t('Đang chuyển 2 camera sang video test…', 'Switching both cameras to test video…')
                   : demo.offset_sec != null
-                    ? `2 video đồng bộ: camera trước ${clock(demo.gates.main?.position ?? 0)} · camera sau ${clock(demo.gates.secondary?.position ?? 0)} · lệch ${demo.offset_sec.toFixed(2)} giây`
-                    : 'Cả 2 camera đang phát video test.'}
+                    ? t(`2 video đồng bộ: camera trước ${clock(demo.gates.main?.position ?? 0)} · camera sau ${clock(demo.gates.secondary?.position ?? 0)} · lệch ${demo.offset_sec.toFixed(2)} giây`,
+                      `2 videos in sync: front camera ${clock(demo.gates.main?.position ?? 0)} · rear camera ${clock(demo.gates.secondary?.position ?? 0)} · offset ${demo.offset_sec.toFixed(2)} s`)
+                    : t('Cả 2 camera đang phát video test.', 'Both cameras are playing test video.')}
               </span>
             </div>
           )}
           {!demo?.active && demo?.switching && (
             <div className="mb-2 rounded-lg bg-primary-container text-on-primary-container px-3 py-2 text-sm">
-              Đang chuyển 2 cổng về camera thật…
+              {t('Đang chuyển 2 cổng về camera thật…', 'Switching both gates back to the real cameras…')}
             </div>
           )}
           {!isSplit && <DebugOverlayControl key={activeGate} gate={activeGate} name={activeGateName} />}
@@ -251,7 +254,7 @@ export default function GuardPage() {
                   </div>
                   <img
                     src={`${API_BASE_URL}/guard/video_feed?token=${token}&gate=${g.id}`}
-                    alt={`Live camera feed — ${g.name}`}
+                    alt={t(`Camera trực tiếp — ${g.name}`, `Live camera feed — ${g.name}`)}
                     className="w-full h-auto block"
                     style={{ maxHeight: 'calc(100vh - 260px)', objectFit: 'contain' }}
                   />
@@ -267,12 +270,12 @@ export default function GuardPage() {
               </div>
               {activePipeline?.last_frame_age_sec != null && (
                 <div className="absolute top-3 right-3 z-10 px-2 py-1 rounded bg-black/50 font-mono text-[11px]">
-                  Độ trễ khung hình: {activePipeline.last_frame_age_sec.toFixed(1)}s
+                  {t('Độ trễ khung hình', 'Frame delay')}: {activePipeline.last_frame_age_sec.toFixed(1)}s
                 </div>
               )}
               <img
                 src={`${API_BASE_URL}/guard/video_feed?token=${token}&gate=${activeGate}`}
-                alt="Live camera feed"
+                alt={t('Camera trực tiếp', 'Live camera feed')}
                 className="w-full h-auto block"
                 style={{ maxHeight: 'calc(100vh - 220px)', objectFit: 'contain' }}
               />
@@ -282,17 +285,17 @@ export default function GuardPage() {
 
         {/* Alert log panel */}
         <div className="flex flex-col min-h-0">
-          <div role="tablist" aria-label="Nhật ký trực tiếp" className="flex flex-wrap gap-2 mb-3">
-            <button role="tab" aria-selected={logTab==='recognition'} onClick={()=>setLogTab('recognition')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Nhận diện trực tiếp</button>
-            <button role="tab" aria-selected={logTab==='plate-review'} onClick={()=>setLogTab('plate-review')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Duyệt biển</button>
-            <button role="tab" aria-selected={logTab==='alerts'} onClick={()=>setLogTab('alerts')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">Cảnh báo</button>
+          <div role="tablist" aria-label={t('Nhật ký trực tiếp', 'Live log')} className="flex flex-wrap gap-2 mb-3">
+            <button role="tab" aria-selected={logTab==='recognition'} onClick={()=>setLogTab('recognition')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">{t('Nhận diện trực tiếp', 'Live recognition')}</button>
+            <button role="tab" aria-selected={logTab==='plate-review'} onClick={()=>setLogTab('plate-review')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">{t('Duyệt biển', 'Plate review')}</button>
+            <button role="tab" aria-selected={logTab==='alerts'} onClick={()=>setLogTab('alerts')} className="rounded bg-primary-container text-on-primary-container px-3 py-2 text-sm">{t('Cảnh báo', 'Alerts')}</button>
           </div>
           <div hidden={logTab!=='recognition'}><RecognitionLogPanel key={activeGate} gate={activeGate}/></div>
           {logTab==='plate-review' && <PlateReviewPanel key={activeGate} gate={activeGate} role={user?.role}/>}
           <div hidden={logTab!=='alerts'}>
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-sm font-bold uppercase tracking-wider text-on-primary-container">
-              Cảnh báo gần đây
+              {t('Cảnh báo gần đây', 'Recent alerts')}
             </h2>
             {alertLog.length > 0 && (
               <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-error text-on-error">
@@ -303,11 +306,11 @@ export default function GuardPage() {
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {alertLog.length === 0 ? (
               <div className="text-sm text-on-primary-container bg-primary-container rounded-lg p-4">
-                Chưa có cảnh báo nào trong phiên này.
+                {t('Chưa có cảnh báo nào trong phiên này.', 'No alerts in this session yet.')}
               </div>
             ) : (
               alertLog.map((a) => {
-                const shown = describeAlert(a);
+                const shown = describeAlert(a, lang);
                 return (
                 <div key={a._id} className="bg-primary-container rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
@@ -316,13 +319,13 @@ export default function GuardPage() {
                       {shown.title}
                     </span>
                     <span className="font-mono text-[10px] text-on-primary-container">
-                      {new Date(a.timestamp).toLocaleTimeString('vi-VN', { hour12: false })}
+                      {new Date(a.timestamp).toLocaleTimeString(localeOf(lang), { hour12: false })}
                     </span>
                   </div>
                   {a.snapshot_url && (
                     <img
                       src={`${API_BASE_URL}${a.snapshot_url}`}
-                      alt="Ảnh chụp bằng chứng"
+                      alt={t('Ảnh chụp bằng chứng', 'Evidence snapshot')}
                       className="w-full h-auto max-h-48 object-contain rounded border border-white/10 bg-black/20 mb-2"
                     />
                   )}

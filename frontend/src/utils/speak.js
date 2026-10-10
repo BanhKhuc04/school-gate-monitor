@@ -108,3 +108,36 @@ export function warmUpVoices() {
     if (!cachedVoice) cachedVoice = pickVietnameseFemaleVoice();
   };
 }
+
+// English UI: Windows/Chrome/Edge all ship a LOCAL en-US voice, so no clip
+// fallback is needed. Chốt 1 giọng như tiếng Việt để 2 lần đọc không đổi giọng.
+let cachedEnglishVoice = null;
+
+function pickEnglishVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('en'));
+  return voices.find((v) => v.localService === true) || voices[0] || null;
+}
+
+export function speakEnglish(text, options = {}) {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    if (!cachedEnglishVoice) cachedEnglishVoice = pickEnglishVoice();
+    if (cachedEnglishVoice) utterance.voice = cachedEnglishVoice;
+    if (options.rate != null) utterance.rate = options.rate;
+    if (options.pitch != null) utterance.pitch = options.pitch;
+    if (options.volume != null) utterance.volume = options.volume;
+    window.speechSynthesis.speak(utterance);
+  } catch (e) {
+    console.warn('[speak] TTS blocked:', e.message);
+  }
+}
+
+/** Speak in the UI language. */
+export function speak(text, lang = 'vi', options = {}) {
+  if (lang === 'en') speakEnglish(text, options);
+  else speakVietnamese(text, options);
+}

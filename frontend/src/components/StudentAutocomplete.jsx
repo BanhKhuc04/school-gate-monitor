@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useLang } from '../i18n/LanguageContext';
 
 /**
  * Feature 5: Student/vehicle autocomplete search.
@@ -11,9 +12,10 @@ import { useState, useRef, useEffect } from 'react';
 export default function StudentAutocomplete({
   vehicles = [],
   onSelect,
-  placeholder = 'Tìm biển số, tên học sinh, lớp...',
+  placeholder,
   className = '',
 }) {
+  const { t } = useLang();
   const [query, setQuery] = useState('');
   const [show, setShow] = useState(false);
   const ref = useRef(null);
@@ -51,7 +53,7 @@ export default function StudentAutocomplete({
         </svg>
         <input
           type="text"
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('Tìm biển số, tên học sinh, lớp...', 'Search plate, student name, class...')}
           className="bg-transparent border-0 outline-none w-full font-mono text-[12px] text-[#374151] placeholder:text-[#9ca3af]"
           value={query}
           onChange={e => { setQuery(e.target.value); setShow(true); }}
@@ -91,7 +93,7 @@ export default function StudentAutocomplete({
 
       {show && q.length >= 1 && results.length === 0 && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#d1d5db] rounded-lg shadow-lg z-50 px-3 py-2 text-[12px] text-[#9ca3af]">
-          Không tìm thấy
+          {t('Không tìm thấy', 'No results')}
         </div>
       )}
     </div>

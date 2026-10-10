@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import client from '../api/client';
+import { useLang, localeOf } from '../i18n/LanguageContext';
+import LanguageToggle from './LanguageToggle';
 
 function useClock() {
   const [now, setNow] = useState(new Date());
@@ -40,19 +42,20 @@ function useHealthGates(enabled) {
 
 export default function TopStatusBar({ activeGate = 'main' }) {
   const { user } = useAuth();
+  const { lang, t } = useLang();
   const now = useClock();
   // Teacher role can't call /api/system/health (403) — skip polling entirely for them.
   const { gatesHealth, gatesList } = useHealthGates(user?.role !== 'teacher');
   const pipeline = gatesHealth[activeGate] || {};
 
-  const timeStr = now.toLocaleTimeString('vi-VN', { hour12: false });
+  const timeStr = now.toLocaleTimeString(localeOf(lang), { hour12: false });
 
   return (
     <header className="min-h-14 bg-surface border-b border-outline-variant flex flex-wrap md:flex-nowrap items-center justify-between px-4 md:px-6 py-3 gap-3 text-sm">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`w-2 h-2 rounded-full ${pipeline?.running ? 'bg-emerald-500' : 'bg-outline'}`} />
         <span className="font-mono text-xs text-on-surface-variant">
-          PIPELINE: {pipeline === null ? 'KHÔNG XÁC ĐỊNH' : pipeline.running ? 'ĐANG CHẠY' : 'DỪNG'}
+          PIPELINE: {pipeline === null ? t('KHÔNG XÁC ĐỊNH', 'UNKNOWN') : pipeline.running ? t('ĐANG CHẠY', 'RUNNING') : t('DỪNG', 'STOPPED')}
         </span>
         {gatesList.map(gate => {
           const gp = gatesHealth[gate.id] || {};
@@ -68,6 +71,7 @@ export default function TopStatusBar({ activeGate = 'main' }) {
         })}
       </div>
       <div className="flex items-center gap-4">
+        <LanguageToggle />
         <span className="font-mono text-xs text-on-surface-variant">{timeStr} GMT+7</span>
         <span className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center text-xs font-bold">
           {user?.username?.[0]?.toUpperCase() || '?'}

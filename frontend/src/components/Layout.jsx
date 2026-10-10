@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopStatusBar from './TopStatusBar';
+import PageLoading from './PageLoading';
 
 /**
  * Wraps authenticated pages with the left Sidebar nav + top status bar
@@ -14,7 +15,7 @@ export default function Layout() {
       <Sidebar />
       <div className="md:ml-64 min-w-0 flex flex-col min-h-screen">
         <TopStatusBar />
-        <main className="flex-1 min-w-0"><Suspense fallback={<p role="status" className="p-6 text-sm">Đang tải trang…</p>}><Outlet /></Suspense></main>
+        <main className="flex-1 min-w-0"><Suspense fallback={<PageLoading />}><Outlet /></Suspense></main>
       </div>
     </div>
   );

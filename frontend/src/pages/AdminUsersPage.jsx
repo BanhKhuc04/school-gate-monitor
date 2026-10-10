@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
 import client from '../api/client';
+import { useLang, localeOf } from '../i18n/LanguageContext';
 
 const ROLES = ['admin', 'security', 'management', 'teacher'];
 const ROLE_LABELS = {
-  admin: 'Admin',
-  security: 'Bảo vệ',
-  management: 'Quản lý',
-  teacher: 'Giáo viên',
+  admin: { vi: 'Admin', en: 'Admin' },
+  security: { vi: 'Bảo vệ', en: 'Guard' },
+  management: { vi: 'Quản lý', en: 'Management' },
+  teacher: { vi: 'Giáo viên', en: 'Teacher' },
 };
 
 export default function AdminUsersPage() {
+  const { lang, t } = useLang();
+  const roleLabel = (r) => ROLE_LABELS[r]?.[lang];
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +30,7 @@ export default function AdminUsersPage() {
       const res = await client.get('/api/users');
       setUsers(res.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Không tải được danh sách user');
+      setError(err.response?.data?.detail || t('Không tải được danh sách user', 'Could not load the user list'));
     } finally {
       setLoading(false);
     }
@@ -71,7 +74,7 @@ export default function AdminUsersPage() {
       resetForm();
       loadUsers();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Lỗi khi lưu');
+      setError(err.response?.data?.detail || t('Lỗi khi lưu', 'Error while saving'));
     }
   }
 
@@ -86,13 +89,13 @@ export default function AdminUsersPage() {
 
   async function handleDelete(userId) {
     const user = users.find(u => u.id === userId);
-    if (!confirm(`Xóa user "${user?.username}"?`)) return;
+    if (!confirm(t(`Xóa user "${user?.username}"?`, `Delete user "${user?.username}"?`))) return;
     setError('');
     try {
       await client.delete(`/api/users/${userId}`);
       loadUsers();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Xóa thất bại');
+      setError(err.response?.data?.detail || t('Xóa thất bại', 'Delete failed'));
     }
   }
 
@@ -108,21 +111,21 @@ export default function AdminUsersPage() {
       <div className="max-w-4xl mx-auto">
 
         {/* Header */}
-        <p className="font-mono text-xs uppercase tracking-wider text-[#c92035] mb-1">Bảo mật &amp; cấp quyền</p>
+        <p className="font-mono text-xs uppercase tracking-wider text-[#c92035] mb-1">{t('Bảo mật & cấp quyền', 'Security & access')}</p>
         <div className="flex items-center gap-2 mb-1">
-          <h1 className="text-2xl font-bold text-[#374151]">Quản lý Tài khoản Hệ thống</h1>
+          <h1 className="text-2xl font-bold text-[#374151]">{t('Quản lý Tài khoản Hệ thống', 'System Account Management')}</h1>
           <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#eceff3] text-[#6b7280]">
-            {users.length} tài khoản
+            {users.length} {t('tài khoản', 'accounts')}
           </span>
         </div>
-        <p className="text-sm text-[#6b7280] mb-6">Phân quyền truy cập hệ thống camera AI theo 3 vai trò.</p>
+        <p className="text-sm text-[#6b7280] mb-6">{t('Phân quyền truy cập hệ thống camera AI theo 3 vai trò.', 'Access control for the AI camera system by 3 roles.')}</p>
 
         {/* Role count cards — số thật từ danh sách user, không bịa lịch sử đăng nhập/thiết bị */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
           {ROLES.map((r) => (
             <div key={r} className="bg-white rounded-xl p-4 shadow-sm border border-[#d1d5db]">
               <p className="text-[10px] font-mono font-semibold uppercase text-[#6b7280] tracking-wider">
-                {ROLE_LABELS[r]}
+                {roleLabel(r)}
               </p>
               <p className="text-3xl font-bold font-mono text-[#123b6d] mt-1">
                 {users.filter((u) => u.role === r).length}
@@ -137,7 +140,7 @@ export default function AdminUsersPage() {
             <svg className="w-5 h-5 text-[#c92035]" viewBox="0 0 24 24" fill="none">
               <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            {editingId ? `Sửa tài khoản` : 'Thêm tài khoản mới'}
+            {editingId ? t(`Sửa tài khoản`, 'Edit account') : t('Thêm tài khoản mới', 'Add new account')}
           </h2>
 
           {error && (
@@ -157,14 +160,14 @@ export default function AdminUsersPage() {
                   className="w-full bg-[#f4f6f9] rounded-lg px-3 py-2 text-[12px] font-mono text-[#374151] border-0 outline-none focus:ring-2 focus:ring-[#c92035]"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  placeholder={editingId ? '(không đổi)' : 'Username'}
+                  placeholder={editingId ? t('(không đổi)', '(unchanged)') : 'Username'}
                   required={!editingId}
                   disabled={!!editingId}
                 />
               </div>
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
-                  {editingId ? 'Mật khẩu mới' : 'Mật khẩu'}
+                  {editingId ? t('Mật khẩu mới', 'New password') : t('Mật khẩu', 'Password')}
                 </label>
                 <input
                   type="password"
@@ -177,7 +180,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
-                  Vai trò
+                  {t('Vai trò', 'Role')}
                 </label>
                 <div className="relative">
                   <select
@@ -189,7 +192,7 @@ export default function AdminUsersPage() {
                     }}
                   >
                     {ROLES.map(r => (
-                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                      <option key={r} value={r}>{roleLabel(r)}</option>
                     ))}
                   </select>
                   <svg className="absolute right-2.5 top-2.5 w-4 h-4 text-[#6b7280] pointer-events-none" viewBox="0 0 24 24" fill="none">
@@ -201,7 +204,7 @@ export default function AdminUsersPage() {
               {role === 'teacher' && (
               <div>
                 <label className="block text-[11px] font-mono font-semibold text-[#6b7280] uppercase tracking-wider mb-1">
-                  Lớp chủ nhiệm
+                  {t('Lớp chủ nhiệm', 'Homeroom class')}
                 </label>
                 <input
                   type="text"
@@ -212,7 +215,7 @@ export default function AdminUsersPage() {
                   maxLength={10}
                 />
                 {!homeroomClass && (
-                  <p className="text-[10px] font-mono text-[#c92035] mt-0.5">Bắt buộc cho giáo viên</p>
+                  <p className="text-[10px] font-mono text-[#c92035] mt-0.5">{t('Bắt buộc cho giáo viên', 'Required for teachers')}</p>
                 )}
               </div>
               )}
@@ -225,7 +228,7 @@ export default function AdminUsersPage() {
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
                   <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                {editingId ? 'Lưu' : 'Thêm'}
+                {editingId ? t('Lưu', 'Save') : t('Thêm', 'Add')}
               </button>
               {editingId && (
                 <button
@@ -236,7 +239,7 @@ export default function AdminUsersPage() {
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
                     <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
-                  Hủy
+                  {t('Hủy', 'Cancel')}
                 </button>
               )}
             </div>
@@ -247,11 +250,11 @@ export default function AdminUsersPage() {
         {loading ? (
           <div className="text-center text-[#6b7280] py-12">
             <div className="w-8 h-8 border-2 border-[#c92035] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            Đang tải...
+            {t('Đang tải...', 'Loading...')}
           </div>
         ) : users.length === 0 ? (
           <div className="bg-white rounded-xl p-12 text-center border border-[#d1d5db]">
-            <p className="text-[#6b7280]">Chưa có tài khoản nào.</p>
+            <p className="text-[#6b7280]">{t('Chưa có tài khoản nào.', 'No accounts yet.')}</p>
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm border border-[#d1d5db] overflow-hidden">
@@ -260,10 +263,10 @@ export default function AdminUsersPage() {
                 <thead>
                   <tr className="bg-[#f4f6f9] text-[#6b7280] font-mono text-[11px] uppercase tracking-wider">
                     <th className="py-3 px-4 font-semibold">Username</th>
-                    <th className="py-3 px-3 font-semibold">Vai trò</th>
-                    <th className="py-3 px-3 font-semibold">Lớp chủ nhiệm</th>
-                    <th className="py-3 px-3 font-semibold">Ngày tạo</th>
-                    <th className="py-3 px-4 text-right font-semibold">Thao tác</th>
+                    <th className="py-3 px-3 font-semibold">{t('Vai trò', 'Role')}</th>
+                    <th className="py-3 px-3 font-semibold">{t('Lớp chủ nhiệm', 'Homeroom class')}</th>
+                    <th className="py-3 px-3 font-semibold">{t('Ngày tạo', 'Created')}</th>
+                    <th className="py-3 px-4 text-right font-semibold">{t('Thao tác', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f4f6f9] text-[12px] text-[#374151]">
@@ -275,10 +278,10 @@ export default function AdminUsersPage() {
                         <td className="py-3 px-3">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[10px] font-semibold ${colors.bg} ${colors.text}`}>
                             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
-                            {ROLE_LABELS[u.role] || u.role}
+                            {roleLabel(u.role) || u.role}
                           </span>
                           {currentUser?.username === u.username && (
-                            <span className="ml-1.5 font-mono text-[10px] text-[#9ca3af]">(bạn)</span>
+                            <span className="ml-1.5 font-mono text-[10px] text-[#9ca3af]">{t('(bạn)', '(you)')}</span>
                           )}
                         </td>
                         {/* Feature 9: show homeroom_class */}
@@ -292,7 +295,7 @@ export default function AdminUsersPage() {
                           )}
                         </td>
                         <td className="py-3 px-3 font-mono text-[11px] text-[#6b7280] whitespace-nowrap">
-                          {new Date(u.created_at).toLocaleDateString('vi-VN')}
+                          {new Date(u.created_at).toLocaleDateString(localeOf(lang))}
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -300,14 +303,14 @@ export default function AdminUsersPage() {
                               onClick={() => startEdit(u)}
                               className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f4f6f9] transition-colors"
                             >
-                              Sửa
+                              {t('Sửa', 'Edit')}
                             </button>
                             {currentUser?.username !== u.username && (
                               <button
                                 onClick={() => handleDelete(u.id)}
                                 className="px-3 py-1 rounded text-[11px] font-semibold text-[#c92035] hover:bg-[#f8d7dc] transition-colors"
                               >
-                                Xóa
+                                {t('Xóa', 'Delete')}
                               </button>
                             )}
                           </div>
@@ -320,7 +323,7 @@ export default function AdminUsersPage() {
             </div>
             <div className="px-4 py-3 bg-[#f4f6f9] border-t border-[#d1d5db]">
               <span className="font-mono text-[11px] text-[#6b7280]">
-                Tổng: <span className="font-bold text-[#374151]">{users.length}</span> tài khoản
+                {t('Tổng:', 'Total:')} <span className="font-bold text-[#374151]">{users.length}</span> {t('tài khoản', 'accounts')}
               </span>
             </div>
           </div>
