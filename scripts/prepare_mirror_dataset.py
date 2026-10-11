@@ -44,6 +44,31 @@ SKIP_TAGS = {'too_small'}
 VAL_PERCENT = 15
 
 
+class Source:
+    """Một zip HOẶC một thư mục (Kaggle tự giải nén zip khi upload dataset),
+    tra file theo TÊN (bỏ đường dẫn con)."""
+
+    def __init__(self, path: str):
+        self.path = Path(path)
+        if self.path.is_dir():
+            self._zip = None
+            files = [p for p in self.path.rglob('*') if p.is_file()]
+            self._names = {p.name: p for p in files}
+        else:
+            self._zip = zipfile.ZipFile(self.path)
+            self._names = {Path(n).name: n for n in self._zip.namelist() if not n.endswith('/')}
+
+    def names(self) -> list[str]:
+        return list(self._names)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._names
+
+    def read(self, name: str) -> bytes:
+        target = self._names[name]
+        return self._zip.read(target) if self._zip is not None else target.read_bytes()
+
+
 def _load_meta(labels_path: str) -> dict:
     return {row['file_name']: row for row in json.loads(Path(labels_path).read_text(encoding='utf-8'))}
 
@@ -96,39 +121,60 @@ def _split(group_key: str) -> str:
     return 'val' if digest % 100 < VAL_PERCENT else 'train'
 
 
-def cvat_to_yolo(cvat_zip: str, labels_path: str, out_dir: str) -> dict:
+def split_of(name: str, meta: dict) -> str:
+    """'train' / 'val'. Theo ẢNH GỐC: 2 crop cùng khung hình luôn cùng phía.
+    Tập 'val' cũng là ĐỀ THI: phải gán tay 100%, không bao giờ gán nháp."""
+    return _split(meta.get(name, {}).get('source_original_image', name))
+
+
+def held_out(labels_path: str) -> list[str]:
+    """Ảnh thuộc đề thi (val), trừ ảnh xe quá nhỏ — cần gán tay trước tiên."""
+    meta = _load_meta(labels_path)
+    out = []
+    for name, row in sorted(meta.items()):
+        x1, _, x2, _ = row.get('motorbike_bbox_xyxy', (0, 0, 1e9, 0))
+        if split_of(name, meta) == 'val' and x2 - x1 >= MIN_BIKE_WIDTH_PX:
+            out.append(name)
+    return out
+
+
+def cvat_to_yolo(cvat_zip: str, labels_path: str, out_dir: str, images: str | None = None) -> dict:
+    """images: zip/thư mục ảnh khi export CVAT KHÔNG kèm ảnh (mặc định lấy
+    ảnh trong chính file export)."""
     meta = _load_meta(labels_path)
     out = Path(out_dir)
     stats = {'train': 0, 'val': 0, 'skipped': 0, 'mirror_boxes': 0, 'unlabeled': 0}
-    with zipfile.ZipFile(cvat_zip) as zin:
-        names = {Path(n).name: n for n in zin.namelist() if not n.endswith('/')}
-        root = ET.fromstring(zin.read('annotations.xml'))
-        for image in root.iter('image'):
-            name = Path(image.get('name')).name
-            tags = {t.get('label') for t in image.findall('tag')}
-            if tags & SKIP_TAGS:
-                stats['skipped'] += 1
+    export = Source(cvat_zip)
+    pictures = Source(images) if images else export
+    root = ET.fromstring(export.read('annotations.xml'))
+    for image in root.iter('image'):
+        name = Path(image.get('name')).name
+        tags = {t.get('label') for t in image.findall('tag')}
+        if tags & SKIP_TAGS:
+            stats['skipped'] += 1
+            continue
+        if not tags & set(STATE_TAGS):
+            # Chưa gán trạng thái = chưa duyệt -> không đưa vào train
+            # (ảnh không box sẽ bị hiểu nhầm là "chắc chắn không có gương").
+            stats['unlabeled'] += 1
+            continue
+        w, h = float(image.get('width')), float(image.get('height'))
+        lines = []
+        for box in image.findall('box'):
+            if box.get('label') != 'mirror':
                 continue
-            if not tags & set(STATE_TAGS):
-                # Chưa gán trạng thái = chưa duyệt -> không đưa vào train
-                # (ảnh không box sẽ bị hiểu nhầm là "chắc chắn không có gương").
-                stats['unlabeled'] += 1
-                continue
-            w, h = float(image.get('width')), float(image.get('height'))
-            lines = []
-            for box in image.findall('box'):
-                if box.get('label') != 'mirror':
-                    continue
-                x1, y1, x2, y2 = (float(box.get(k)) for k in ('xtl', 'ytl', 'xbr', 'ybr'))
-                lines.append(f'0 {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} '
-                             f'{(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}')
-            split = _split(meta.get(name, {}).get('source_original_image', name))
-            (out / 'images' / split).mkdir(parents=True, exist_ok=True)
-            (out / 'labels' / split).mkdir(parents=True, exist_ok=True)
-            (out / 'images' / split / name).write_bytes(zin.read(names[name]))
-            (out / 'labels' / split / (Path(name).stem + '.txt')).write_text('\n'.join(lines))
-            stats[split] += 1
-            stats['mirror_boxes'] += len(lines)
+            x1, y1, x2, y2 = (float(box.get(k)) for k in ('xtl', 'ytl', 'xbr', 'ybr'))
+            lines.append(f'0 {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} '
+                         f'{(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}')
+        if name not in pictures:
+            raise FileNotFoundError(f'Không thấy ảnh {name} — truyền --images 1_anh_xe_may.zip')
+        split = split_of(name, meta)
+        (out / 'images' / split).mkdir(parents=True, exist_ok=True)
+        (out / 'labels' / split).mkdir(parents=True, exist_ok=True)
+        (out / 'images' / split / name).write_bytes(pictures.read(name))
+        (out / 'labels' / split / (Path(name).stem + '.txt')).write_text('\n'.join(lines))
+        stats[split] += 1
+        stats['mirror_boxes'] += len(lines)
     (out / 'data.yaml').write_text(
         f'path: {out.resolve().as_posix()}\ntrain: images/train\nval: images/val\nnames:\n  0: mirror\n',
         encoding='utf-8')
@@ -146,11 +192,16 @@ def main() -> None:
     yolo.add_argument('--cvat', required=True)
     yolo.add_argument('--labels', required=True)
     yolo.add_argument('--out', default='datasets/vn_mirror')
+    yolo.add_argument('--images', help='zip/thư mục ảnh nếu export CVAT không kèm ảnh')
+    test = sub.add_parser('test-set', help='in danh sách ảnh đề thi (gán tay trước)')
+    test.add_argument('--labels', required=True)
     args = parser.parse_args()
     if args.cmd == 'cvat-task':
         print(build_cvat_task(args.zip, args.labels, args.out))
+    elif args.cmd == 'test-set':
+        print('\n'.join(held_out(args.labels)))
     else:
-        print(cvat_to_yolo(args.cvat, args.labels, args.out))
+        print(cvat_to_yolo(args.cvat, args.labels, args.out, args.images))
 
 
 if __name__ == '__main__':

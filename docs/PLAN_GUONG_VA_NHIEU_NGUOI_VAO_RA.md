@@ -260,6 +260,11 @@ auto-match (`GATE_MATCHER_ENABLED`) cho đến khi có cặp lượt kiểm ch�
       xe < 60 px tự gắn `too_small`), chuyển nhãn CVAT → YOLO, chia train/val
       theo ảnh gốc.
 - [x] `scripts/train_mirror.py`: YOLO11n 1 lớp `mirror`, imgsz 320.
-- [ ] Gán nhãn gương trong CVAT (cần người làm).
+- [x] Vòng lặp gán nhãn có model hỗ trợ: `notebooks/kaggle_mirror_train.ipynb`
+      (chuyển nhãn → train → chấm điểm trên đề thi → gán nháp) và
+      `scripts/prelabel_mirror.py` (chỉ gán nháp ảnh chưa duyệt, không bao giờ
+      đụng đề thi; giữ nguyên mọi nhãn đã có vì CVAT upload ghi đè cả task).
+      Đề thi = tập val (39 ảnh): `prepare_mirror_dataset.py test-set`.
+- [ ] Gán nhãn gương trong CVAT (cần người làm): vòng 1 = 39 ảnh đề thi + ~40 ảnh khác.
 - [ ] Quay dữ liệu tại cổng, train, đo precision.
 - [ ] Nối `MirrorVote` vào pipeline ở chế độ shadow (sau khi có `models/mirror_best.pt`).
